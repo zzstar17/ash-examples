@@ -1,4 +1,5 @@
 use ash::vk::{self};
+use ash_destructor::{DeviceDestroyable, SelfDestroyable};
 use std::{
   marker::PhantomData,
   ops::Deref,
@@ -6,15 +7,21 @@ use std::{
   ptr::{self},
 };
 
-use crate::device_destroyable::ManuallyDestroyed;
-
 use super::{EnabledDeviceExtensions, PhysicalDevice, Queues};
 
+#[derive(DeviceDestroyable)]
 pub struct Device {
   pub inner: ash::Device,
+  #[destroy_ignore_remaining]
   pub enabled_extensions: EnabledDeviceExtensions,
   // contains ash's extension loader if pageable_device_local_memory is enabled
   pub pageable_device_local_memory_loader: Option<ash::ext::pageable_device_local_memory::Device>,
+}
+
+impl SelfDestroyable for Device {
+  unsafe fn destroy_self_alloc(&self, allocation_callbacks: Option<&vk::AllocationCallbacks>) {
+    SelfDestroyable::destroy_self_alloc(&self.inner, allocation_callbacks);
+  }
 }
 
 impl Deref for Device {
@@ -92,11 +99,5 @@ impl Device {
       },
       queues,
     ))
-  }
-}
-
-impl ManuallyDestroyed for Device {
-  unsafe fn destroy_self(&self) {
-    self.destroy_device(None);
   }
 }

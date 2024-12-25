@@ -16,6 +16,7 @@ mod utility;
 mod validation_layers;
 
 use ash::vk;
+use env_logger::Env;
 use std::ffi::CStr;
 
 use crate::renderer::Renderer;
@@ -79,7 +80,7 @@ fn initialize_and_run() -> Result<(), String> {
 }
 
 fn main() {
-  env_logger::init();
+  env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
   if let Err(s) = initialize_and_run() {
     eprintln!(

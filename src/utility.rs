@@ -19,6 +19,7 @@ pub unsafe fn i8_array_as_cstr(arr: &[i8]) -> Result<&CStr, FromBytesUntilNulErr
 
 // power is the actual power of 2 (1, 2, 4, 8, 16...)
 #[inline]
+#[allow(dead_code)]
 pub fn round_down_to_power_of_2_u64(n: u64, power: u64) -> u64 {
   // strip right-most <less than power> bits from n
   let rem_error = n & (power - 1);

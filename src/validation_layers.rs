@@ -1,8 +1,9 @@
 use ash::vk::{self};
+use ash_destructor::{DeviceDestroyable, SelfDestroyable};
 
 use std::{ffi::CStr, os::raw::c_void, ptr};
 
-use crate::{device_destroyable::ManuallyDestroyed, errors::OutOfMemoryError, VALIDATION_LAYERS};
+use crate::{errors::OutOfMemoryError, VALIDATION_LAYERS};
 
 // returns a list of supported and unsupported instance layers
 fn filter_supported(
@@ -93,16 +94,24 @@ impl DebugUtils {
       ..Default::default()
     }
   }
+}
 
-  pub unsafe fn destroy_self(&self) {
+impl DeviceDestroyable for DebugUtils {
+  unsafe fn destroy_self_alloc(
+    &self,
+    _device: &ash::Device,
+    allocation_callbacks: Option<&vk::AllocationCallbacks>,
+  ) {
     self
       .loader
-      .destroy_debug_utils_messenger(self.messenger, None);
+      .destroy_debug_utils_messenger(self.messenger, allocation_callbacks);
   }
 }
 
-impl ManuallyDestroyed for DebugUtils {
-  unsafe fn destroy_self(&self) {
-    self.destroy_self();
+impl SelfDestroyable for DebugUtils {
+  unsafe fn destroy_self_alloc(&self, allocation_callbacks: Option<&vk::AllocationCallbacks>) {
+    self
+      .loader
+      .destroy_debug_utils_messenger(self.messenger, allocation_callbacks);
   }
 }

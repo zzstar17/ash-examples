@@ -1,4 +1,5 @@
 use ash::vk;
+use ash_destructor::{DeviceDestroyable, SelfDestroyable};
 use std::{marker::PhantomData, ops::BitOr, ptr};
 
 use crate::{
@@ -6,32 +7,59 @@ use crate::{
   command_pools::CommandPools,
   create_objs::{create_buffer, create_fence, create_image, create_semaphore},
   device::{Device, PhysicalDevice, Queues},
-  device_destroyable::{destroy, DeviceManuallyDestroyed, ManuallyDestroyed},
+  device_destroyable::destroy,
   entry,
   errors::{InitializationError, OutOfMemoryError},
   instance::create_instance,
   utility::OnErr,
 };
 
+#[derive(DeviceDestroyable)]
 pub struct Renderer {
+  #[destroy_ignore]
   _entry: ash::Entry,
   instance: ash::Instance,
   #[cfg(feature = "vl")]
   debug_utils: crate::validation_layers::DebugUtils,
+  #[destroy_ignore]
   physical_device: PhysicalDevice,
   device: Device,
+  #[destroy_ignore]
   queues: Queues,
   command_pools: CommandPools,
   gpu_data: GPUData,
 }
 
+#[derive(DeviceDestroyable)]
 struct GPUData {
-  clear_image: vk::Image,
   clear_image_memory: vk::DeviceMemory,
+  clear_image: vk::Image,
 
-  final_buffer: vk::Buffer,
-  final_buffer_size: u64,
   final_buffer_memory: MemoryWithType,
+  final_buffer: vk::Buffer,
+  #[destroy_ignore]
+  final_buffer_size: u64,
+}
+
+impl SelfDestroyable for Renderer {
+  unsafe fn destroy_self_alloc(&self, allocation_callbacks: Option<&vk::AllocationCallbacks>) {
+    DeviceDestroyable::destroy_self_alloc(&self, &self.device, allocation_callbacks);
+  }
+}
+
+impl Drop for Renderer {
+  fn drop(&mut self) {
+    log::debug!("Destroying renderer objects...");
+    unsafe {
+      // wait until all operations have finished and the device is safe to destroy
+      self
+        .device
+        .device_wait_idle()
+        .expect("Failed to wait for the device to become idle during drop");
+
+      SelfDestroyable::destroy_self(self);
+    }
+  }
 }
 
 impl Renderer {
@@ -180,29 +208,6 @@ impl Renderer {
   }
 }
 
-impl Drop for Renderer {
-  fn drop(&mut self) {
-    log::debug!("Destroying renderer objects...");
-    unsafe {
-      // wait until all operations have finished and the device is safe to destroy
-      self
-        .device
-        .device_wait_idle()
-        .expect("Failed to wait for the device to become idle during drop");
-
-      destroy!(&self.device => &self.command_pools, &self.gpu_data);
-
-      ManuallyDestroyed::destroy_self(&self.device);
-
-      #[cfg(feature = "vl")]
-      {
-        ManuallyDestroyed::destroy_self(&self.debug_utils);
-      }
-      ManuallyDestroyed::destroy_self(&self.instance);
-    }
-  }
-}
-
 impl GPUData {
   pub fn new(
     device: &Device,
@@ -305,14 +310,5 @@ impl GPUData {
       ptr,
       self.final_buffer_size as usize,
     ))
-  }
-}
-
-impl DeviceManuallyDestroyed for GPUData {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.clear_image.destroy_self(device);
-    self.clear_image_memory.destroy_self(device);
-    self.final_buffer.destroy_self(device);
-    self.final_buffer_memory.destroy_self(device);
   }
 }

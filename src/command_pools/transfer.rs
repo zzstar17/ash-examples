@@ -1,16 +1,16 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use ash_destructor::DeviceDestroyable;
 
-use crate::{
-  device::QueueFamilies, device_destroyable::DeviceManuallyDestroyed, errors::OutOfMemoryError,
-  IMAGE_HEIGHT, IMAGE_WIDTH,
-};
+use crate::{device::QueueFamilies, errors::OutOfMemoryError, IMAGE_HEIGHT, IMAGE_WIDTH};
 
 use super::dependency_info;
 
+#[derive(DeviceDestroyable)]
 pub struct TransferCommandBufferPool {
   pool: vk::CommandPool,
+  #[destroy_ignore]
   pub copy_image_to_buffer: vk::CommandBuffer,
 }
 
@@ -120,11 +120,5 @@ impl TransferCommandBufferPool {
     device.end_command_buffer(cb)?;
 
     Ok(())
-  }
-}
-
-impl DeviceManuallyDestroyed for TransferCommandBufferPool {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    device.destroy_command_pool(self.pool, None);
   }
 }

@@ -1,6 +1,7 @@
 use std::{ffi::c_void, marker::PhantomData, ops::Deref, ptr};
 
 use ash::vk;
+use ash_destructor::DeviceDestroyable;
 use mem_type_assignment::{
   assign_memory_type_indexes_to_objects_for_allocation, MemoryAssignmentError,
   UnassignedToMemoryObjectsData,
@@ -8,7 +9,6 @@ use mem_type_assignment::{
 
 use crate::{
   device::{Device, PhysicalDevice},
-  device_destroyable::DeviceManuallyDestroyed,
   errors::OutOfMemoryError,
   utility::{self, OnErr},
 };
@@ -24,9 +24,10 @@ pub use memory_bound::MemoryBound;
 #[cfg(feature = "log_alloc")]
 pub use logging::{debug_print_device_memory_info, debug_print_possible_memory_type_assignment};
 
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, DeviceDestroyable)]
 pub struct MemoryWithType {
   pub memory: vk::DeviceMemory,
+  #[destroy_ignore]
   pub type_index: usize,
 }
 
@@ -35,12 +36,6 @@ impl Deref for MemoryWithType {
 
   fn deref(&self) -> &Self::Target {
     &self.memory
-  }
-}
-
-impl DeviceManuallyDestroyed for MemoryWithType {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.memory.destroy_self(device);
   }
 }
 
@@ -58,9 +53,15 @@ impl<const S: usize> AllocationSuccess<S> {
   }
 }
 
-impl<const S: usize> DeviceManuallyDestroyed for AllocationSuccess<S> {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.get_memories().destroy_self(device);
+impl<const S: usize> DeviceDestroyable for AllocationSuccess<S> {
+  unsafe fn destroy_self_alloc(
+    &self,
+    device: &ash::Device,
+    allocation_callbacks: Option<&vk::AllocationCallbacks>,
+  ) {
+    self
+      .get_memories()
+      .destroy_self_alloc(device, allocation_callbacks);
   }
 }
 

@@ -5,10 +5,11 @@ use ash::vk;
 mod compute;
 mod transfer;
 
+use ash_destructor::DeviceDestroyable;
 pub use compute::ComputeCommandBufferPool;
 pub use transfer::TransferCommandBufferPool;
 
-use crate::{device::PhysicalDevice, device_destroyable::DeviceManuallyDestroyed};
+use crate::device::PhysicalDevice;
 
 pub fn create_command_pool(
   device: &ash::Device,
@@ -63,6 +64,7 @@ fn dependency_info<'a>(
   }
 }
 
+#[derive(DeviceDestroyable)]
 pub struct CommandPools {
   pub compute_pool: ComputeCommandBufferPool,
   pub transfer_pool: TransferCommandBufferPool,
@@ -85,12 +87,5 @@ impl CommandPools {
       compute_pool,
       transfer_pool,
     })
-  }
-}
-
-impl DeviceManuallyDestroyed for CommandPools {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.compute_pool.destroy_self(device);
-    self.transfer_pool.destroy_self(device);
   }
 }

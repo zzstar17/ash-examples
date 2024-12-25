@@ -1,16 +1,16 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use ash_destructor::DeviceDestroyable;
 
-use crate::{
-  device::QueueFamilies, device_destroyable::DeviceManuallyDestroyed, errors::OutOfMemoryError,
-  IMAGE_COLOR,
-};
+use crate::{device::QueueFamilies, errors::OutOfMemoryError, IMAGE_COLOR};
 
 use super::dependency_info;
 
+#[derive(DeviceDestroyable)]
 pub struct ComputeCommandBufferPool {
   pool: vk::CommandPool,
+  #[destroy_ignore]
   pub clear_img: vk::CommandBuffer,
 }
 
@@ -117,11 +117,5 @@ impl ComputeCommandBufferPool {
     device.end_command_buffer(self.clear_img)?;
 
     Ok(())
-  }
-}
-
-impl DeviceManuallyDestroyed for ComputeCommandBufferPool {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    device.destroy_command_pool(self.pool, None);
   }
 }
