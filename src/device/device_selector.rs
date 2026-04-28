@@ -31,7 +31,7 @@ fn log_device_properties(properties: &vk::PhysicalDeviceProperties) {
   let driver_version = vendor.parse_driver_version(properties.driver_version);
 
   log::info!(
-    "\nFound physical device \"{:?}\":
+    "\nFound physical device {:?}:
         API Version: {},
         Vendor: {},
         Driver Version: {},
@@ -57,8 +57,8 @@ pub unsafe fn select_physical_device(
 ) -> Result<
   Option<(
     vk::PhysicalDevice,
-    PhysicalDeviceProperties,
-    PhysicalDeviceFeatures,
+    PhysicalDeviceProperties<'_>,
+    PhysicalDeviceFeatures<'_>,
     QueueFamilies,
   )>,
   DeviceSelectionError,

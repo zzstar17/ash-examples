@@ -94,7 +94,7 @@ struct PhysicalDeviceProperties<'a> {
 fn get_extended_properties(
   instance: &ash::Instance,
   physical_device: vk::PhysicalDevice,
-) -> PhysicalDeviceProperties {
+) -> PhysicalDeviceProperties<'_> {
   // see https://doc.rust-lang.org/std/mem/union.MaybeUninit.html
   let mut props10: MaybeUninit<vk::PhysicalDeviceProperties2> = MaybeUninit::uninit();
   let mut props11: MaybeUninit<vk::PhysicalDeviceVulkan11Properties> = MaybeUninit::uninit();
@@ -141,7 +141,7 @@ struct PhysicalDeviceFeatures<'a> {
 fn get_extended_features(
   instance: &ash::Instance,
   physical_device: vk::PhysicalDevice,
-) -> PhysicalDeviceFeatures {
+) -> PhysicalDeviceFeatures<'_> {
   let mut features10: MaybeUninit<vk::PhysicalDeviceFeatures2> = MaybeUninit::uninit();
   let mut features11: MaybeUninit<vk::PhysicalDeviceVulkan11Features> = MaybeUninit::uninit();
   let mut features12: MaybeUninit<vk::PhysicalDeviceVulkan12Features> = MaybeUninit::uninit();
