@@ -70,7 +70,6 @@ impl Device {
     };
 
     features12.p_next = &mut features13 as *mut vk::PhysicalDeviceVulkan13Features as *mut c_void;
-    features13.p_next = ptr::null_mut();
 
     #[allow(deprecated)]
     let create_info = vk::DeviceCreateInfo {

@@ -77,7 +77,7 @@ static SINGLE_QUEUE_PRIORITIES: [f32; QueueFamilies::FAMILY_COUNT] =
 pub fn get_single_queue_create_infos(
   queue_families: &QueueFamilies,
 ) -> (
-  [vk::DeviceQueueCreateInfo; QueueFamilies::FAMILY_COUNT],
+  [vk::DeviceQueueCreateInfo<'_>; QueueFamilies::FAMILY_COUNT],
   usize,
 ) {
   let mut total_unique_queues = 1;
@@ -124,7 +124,7 @@ pub fn get_single_queue_create_infos(
 pub fn get_single_queue_create_infos(
   queue_families: &QueueFamilies,
 ) -> (
-  [vk::DeviceQueueCreateInfo; QueueFamilies::FAMILY_COUNT],
+  [vk::DeviceQueueCreateInfo<'_>; QueueFamilies::FAMILY_COUNT],
   usize,
 ) {
   let mut total_unique_queues = 1;
