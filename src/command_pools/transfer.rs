@@ -155,6 +155,6 @@ impl TransferCommandBufferPool {
 
 impl DeviceManuallyDestroyed for TransferCommandBufferPool {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    device.destroy_command_pool(self.pool, None);
+    self.pool.destroy_self(device);
   }
 }

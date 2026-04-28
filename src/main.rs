@@ -1,4 +1,3 @@
-#![feature(vec_into_raw_parts)]
 #[allow(clippy::too_many_arguments)]
 mod allocator;
 mod command_pools;
