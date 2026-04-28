@@ -1,5 +1,3 @@
-#![feature(vec_into_raw_parts)]
-#![feature(array_chunks)]
 
 mod ferris;
 mod render;

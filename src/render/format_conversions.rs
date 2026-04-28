@@ -8,7 +8,9 @@ pub const KNOWN_FORMATS: [vk::Format; 4] = [
 ];
 
 fn convert_rgba_to_bgra(bytes: &mut [u8]) {
-  for pixel in bytes.array_chunks_mut::<4>() {
+  let (chunks, remainder) = bytes.as_chunks_mut::<4>();
+  assert!(remainder.is_empty());
+  for pixel in chunks {
     pixel.swap(0, 2); // swap B and R
   }
 }
