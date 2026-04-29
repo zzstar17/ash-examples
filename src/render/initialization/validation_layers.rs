@@ -1,9 +1,10 @@
 use ash::vk::{self};
 
-use std::{ffi::CStr, os::raw::c_void, ptr};
+use std::{ffi::CStr, marker::PhantomData, os::raw::c_void, ptr};
 
 use crate::render::{
-  device_destroyable::ManuallyDestroyed, errors::OutOfMemoryError, VALIDATION_LAYERS,
+  device_destroyable::ManuallyDestroyed, errors::OutOfMemoryError,
+  initialization::device::SingleQueues, VALIDATION_LAYERS,
 };
 
 // returns a list of supported and unsupported instance layers
@@ -44,13 +45,13 @@ unsafe extern "system" fn vulkan_debug_utils_callback(
   _p_user_data: *mut c_void,
 ) -> vk::Bool32 {
   let types = match message_type {
-    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
-    vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
-    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
-    _ => "[Unknown]",
+    vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General] ",
+    vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]\n",
+    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]\n",
+    _ => "[Unknown] ",
   };
   let message = CStr::from_ptr((*p_callback_data).p_message);
-  let message = format!("{} {}", types, message.to_str().unwrap());
+  let message = format!("{}{}", types, message.to_str().unwrap());
   match message_severity {
     vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => log::debug!("{message}"),
     vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => log::warn!("{message}"),
@@ -106,5 +107,56 @@ impl DebugUtils {
 impl ManuallyDestroyed for DebugUtils {
   unsafe fn destroy_self(&self) {
     self.destroy_self();
+  }
+}
+
+pub struct DebugUtilsMarker {
+  loader: ash::ext::debug_utils::Device,
+}
+
+impl DebugUtilsMarker {
+  pub fn new(instance: &ash::Instance, device: &ash::Device) -> Self {
+    Self {
+      loader: ash::ext::debug_utils::Device::new(instance, device),
+    }
+  }
+
+  pub unsafe fn set_queue_labels(&self, queues: SingleQueues) {
+    {
+      let label_info = vk::DebugUtilsLabelEXT::default()
+        .label_name(crate::render::initialization::device::GRAPHICS_QUEUE_LABEL)
+        .color([1.0, 0.0, 0.0, 1.0]);
+      self
+        .loader
+        .queue_insert_debug_utils_label(*queues.graphics, &label_info);
+    }
+    {
+      let label_info = vk::DebugUtilsLabelEXT::default()
+        .label_name(crate::render::initialization::device::TRANSFER_QUEUE_LABEL)
+        .color([0.0, 0.0, 1.0, 1.0]);
+      self
+        .loader
+        .queue_insert_debug_utils_label(*queues.transfer, &label_info);
+    }
+  }
+
+  pub unsafe fn set_obj_name(
+    &self,
+    object_type: vk::ObjectType,
+    object_handle: u64,
+    name: &CStr,
+  ) -> Result<(), OutOfMemoryError> {
+    let info = vk::DebugUtilsObjectNameInfoEXT {
+      s_type: vk::StructureType::DEBUG_UTILS_OBJECT_NAME_INFO_EXT,
+      p_next: ptr::null(),
+      object_type,
+      object_handle,
+      p_object_name: name.as_ptr(),
+      _marker: PhantomData,
+    };
+    self
+      .loader
+      .set_debug_utils_object_name(&info)
+      .map_err(|err| err.into())
   }
 }

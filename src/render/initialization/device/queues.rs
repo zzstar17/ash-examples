@@ -1,4 +1,4 @@
-use std::{cmp::min, marker::PhantomData, ptr};
+use std::{marker::PhantomData, ops::Deref, ptr};
 
 use ash::vk;
 
@@ -10,100 +10,46 @@ pub struct QueueFamily {
   pub queue_count: u32,
 }
 
+impl PartialEq for QueueFamily {
+  fn eq(&self, other: &Self) -> bool {
+    self.index == other.index
+  }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Queue {
+  pub handle: vk::Queue,
+  pub family_index: u32,
+  pub index_in_family: u32,
+}
+
+impl Deref for Queue {
+  type Target = vk::Queue;
+
+  fn deref(&self) -> &Self::Target {
+    &self.handle
+  }
+}
+
 #[derive(Debug)]
 pub struct QueueFamilies {
   pub graphics: QueueFamily,
-  pub presentation: QueueFamily,
   pub transfer: Option<QueueFamily>,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum QueueFamilyError {
   #[error("Surface error")]
-  SurfaceError(#[source] SurfaceError),
+  SurfaceError(#[from] SurfaceError),
   #[error("Device does not support required queue families or surface capabilities")]
   DoesNotSupportRequiredQueueFamilies,
 }
 
-impl From<SurfaceError> for QueueFamilyError {
-  fn from(value: SurfaceError) -> Self {
-    QueueFamilyError::SurfaceError(value)
-  }
-}
-
-impl QueueFamilies {
-  pub const FAMILY_COUNT: usize = 3;
-
-  pub fn get_from_physical_device(
-    instance: &ash::Instance,
-    physical_device: vk::PhysicalDevice,
-    surface: &Surface,
-  ) -> Result<Self, QueueFamilyError> {
-    let properties =
-      unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
-
-    let mut presentation = None; // will try to be equal to graphics
-    let mut graphics = None;
-    let mut transfer = None; // non graphics
-    for (i, props) in properties.into_iter().enumerate() {
-      let family = Some(QueueFamily {
-        index: i as u32,
-        queue_count: props.queue_count,
-      });
-
-      // set presentation to the first supported family
-      if presentation.is_none() && unsafe { surface.supports_queue_family(physical_device, i)? } {
-        presentation = family;
-      }
-
-      if props.queue_flags.contains(vk::QueueFlags::GRAPHICS) {
-        // set graphics to the first supported family
-        if graphics.is_none() {
-          graphics = family;
-        }
-
-        // set presentation and graphics to the first family that supports both
-        if let Some(presentation_family) = presentation.as_ref() {
-          if presentation_family.index != family.as_ref().unwrap().index
-            && unsafe { surface.supports_queue_family(physical_device, i) }?
-          {
-            graphics = family;
-            presentation = family;
-          }
-        }
-      } else if props.queue_flags.contains(vk::QueueFlags::TRANSFER) {
-        #[allow(clippy::collapsible_if)]
-        if transfer.is_none() {
-          transfer = family;
-        }
-      }
-    }
-
-    if presentation.is_none() || graphics.is_none() {
-      return Err(QueueFamilyError::DoesNotSupportRequiredQueueFamilies);
-    }
-
-    Ok(QueueFamilies {
-      graphics: graphics.unwrap(),
-      presentation: presentation.unwrap(),
-      transfer,
-    })
-  }
-
-  pub fn get_graphics_index(&self) -> u32 {
-    self.graphics.index
-  }
-
-  pub fn get_transfer_index(&self) -> u32 {
-    match self.transfer.as_ref() {
-      Some(family) => family.index,
-      None => self.graphics.index,
-    }
-  }
-
-  pub fn get_presentation_index(&self) -> u32 {
-    self.presentation.index
-  }
+// unsupported specialized queues get substituted by a more general supported counterpart
+#[derive(Debug, Clone, Copy)]
+pub struct SingleQueues {
+  pub graphics: Queue,
+  pub transfer: Queue,
 }
 
 fn queue_create_info<'a>(
@@ -122,80 +68,118 @@ fn queue_create_info<'a>(
   }
 }
 
-#[derive(Debug)]
-pub struct Queues {
-  pub graphics: vk::Queue,
-  pub presentation: vk::Queue,
-  pub transfer: vk::Queue,
-}
+static SINGLE_QUEUE_PRIORITIES: [f32; QueueFamilies::FAMILY_COUNT] =
+  [0.5; QueueFamilies::FAMILY_COUNT];
 
-impl Queues {
-  // mid priorities for all queues
-  const QUEUE_PRIORITIES: [f32; QueueFamilies::FAMILY_COUNT] = [0.5; QueueFamilies::FAMILY_COUNT];
+pub fn get_single_queue_create_infos(
+  queue_families: &QueueFamilies,
+) -> (
+  [vk::DeviceQueueCreateInfo<'_>; QueueFamilies::FAMILY_COUNT],
+  usize,
+) {
+  let mut total_unique_queues = 1;
+  let mut c_infos = [vk::DeviceQueueCreateInfo::default(); QueueFamilies::FAMILY_COUNT];
 
-  pub fn get_queue_create_infos(queue_families: &QueueFamilies) -> Vec<vk::DeviceQueueCreateInfo> {
-    let mut create_infos = Vec::with_capacity(QueueFamilies::FAMILY_COUNT);
+  c_infos[0] = queue_create_info(
+    queue_families.graphics.index,
+    1,
+    SINGLE_QUEUE_PRIORITIES.as_ptr(),
+  );
 
-    if let Some(family) = queue_families.transfer.as_ref() {
-      create_infos.push(queue_create_info(
-        family.index,
-        1,
-        Self::QUEUE_PRIORITIES.as_ptr(),
-      ));
+  match queue_families.transfer {
+    Some(f) => {
+      c_infos[total_unique_queues] =
+        queue_create_info(f.index, 1, SINGLE_QUEUE_PRIORITIES.as_ptr());
+      total_unique_queues += 1;
     }
-
-    if queue_families.presentation.index != queue_families.graphics.index {
-      create_infos.push(queue_create_info(
-        queue_families.get_presentation_index(),
-        1,
-        Self::QUEUE_PRIORITIES.as_ptr(),
-      ));
+    None => {
+      if c_infos[0].queue_count + 1 < queue_families.graphics.queue_count {
+        c_infos[0].queue_count += 1;
+      }
     }
-
-    // add graphics queues, these substitute for missing families
-    // (presentation will try to be equal to graphics)
-    create_infos.push(queue_create_info(
-      queue_families.get_graphics_index(),
-      min(
-        queue_families.graphics.queue_count,
-        1 + if queue_families.transfer.is_none() {
-          1
-        } else {
-          0
-        },
-      ),
-      Self::QUEUE_PRIORITIES.as_ptr(),
-    ));
-
-    create_infos
   }
 
-  pub unsafe fn retrieve(device: &ash::Device, queue_families: &QueueFamilies) -> Queues {
-    let mut graphics_i = 0;
-    let mut get_next_graphics_queue = || {
-      let queue = device.get_device_queue(queue_families.graphics.index, graphics_i);
-      if graphics_i + 1 < queue_families.graphics.queue_count {
-        graphics_i += 1;
-      }
-      queue
-    };
+  (c_infos, total_unique_queues)
+}
 
-    let graphics = get_next_graphics_queue();
-    let presentation = if queue_families.presentation.index == queue_families.graphics.index {
-      graphics
+pub unsafe fn retrieve_single_queues(
+  device: &ash::Device,
+  queue_families: &QueueFamilies,
+  c_infos: &[vk::DeviceQueueCreateInfo],
+) -> SingleQueues {
+  let graphics = Queue {
+    handle: device.get_device_queue(queue_families.graphics.index, 0),
+    family_index: queue_families.graphics.index,
+    index_in_family: 0,
+  };
+
+  // #[cfg(all(not(feature = "graphics_family"), feature = "compute_family"))]
+  let mut non_specialized_i = 1;
+  let mut next_non_specialized_queue = || {
+    if non_specialized_i < c_infos[0].queue_count {
+      let r = Some(Queue {
+        handle: device.get_device_queue(c_infos[0].queue_family_index, non_specialized_i),
+        family_index: c_infos[0].queue_family_index,
+        index_in_family: non_specialized_i,
+      });
+      non_specialized_i += 1;
+      r
     } else {
-      device.get_device_queue(queue_families.presentation.index, 0)
-    };
-
-    let transfer = match &queue_families.transfer {
-      Some(family) => device.get_device_queue(family.index, 0),
-      None => get_next_graphics_queue(),
-    };
-
-    Queues {
-      graphics,
-      presentation,
-      transfer,
+      None
     }
+  };
+
+  let transfer = if let Some(transfer_f) = queue_families.transfer {
+    Queue {
+      handle: device.get_device_queue(transfer_f.index, 0),
+      family_index: transfer_f.index,
+      index_in_family: 0,
+    }
+  } else {
+    let default = graphics;
+    next_non_specialized_queue().unwrap_or(default)
+  };
+
+  SingleQueues { graphics, transfer }
+}
+
+impl QueueFamilies {
+  pub const FAMILY_COUNT: usize = 2;
+
+  pub fn get_from_physical_device(
+    instance: &ash::Instance,
+    physical_device: vk::PhysicalDevice,
+    surface: &Surface,
+  ) -> Result<Self, QueueFamilyError> {
+    let properties =
+      unsafe { instance.get_physical_device_queue_family_properties(physical_device) };
+
+    let mut graphics = None;
+    let mut transfer = None; // non graphics
+    for (i, props) in properties.into_iter().enumerate() {
+      let family = Some(QueueFamily {
+        index: i as u32,
+        queue_count: props.queue_count,
+      });
+      if props.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+        && graphics.is_none()
+        && unsafe { surface.supports_queue_family(physical_device, i)? }
+      {
+        graphics = family;
+        continue;
+      }
+      if props.queue_flags.contains(vk::QueueFlags::TRANSFER) && transfer.is_none() {
+        transfer = family;
+        continue;
+      }
+    }
+
+    if graphics.is_none() {
+      return Err(QueueFamilyError::DoesNotSupportRequiredQueueFamilies);
+    }
+    Ok(QueueFamilies {
+      graphics: graphics.unwrap(),
+      transfer,
+    })
   }
 }

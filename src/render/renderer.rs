@@ -9,8 +9,8 @@ use winit::{
 };
 
 use crate::{
-  ferris::Ferris, utility::OnErr, INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION,
-  SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
+  ferris::Ferris, render::initialization::device::SingleQueues, utility::OnErr,
+  INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
 use super::{
@@ -24,7 +24,7 @@ use super::{
   gpu_data::GPUData,
   initialization::{
     self,
-    device::{self, Device, PhysicalDevice, Queues},
+    device::{self, Device, PhysicalDevice},
     Surface,
   },
   pipelines::{self, GraphicsPipeline},
@@ -55,9 +55,11 @@ pub struct Renderer {
   instance: ash::Instance,
   #[cfg(feature = "vl")]
   debug_utils: initialization::DebugUtils,
+  #[cfg(feature = "vl")]
+  pub debug_utils_marker: initialization::DebugUtilsMarker,
   physical_device: PhysicalDevice,
   pub device: Device,
-  pub queues: Queues,
+  pub queues: SingleQueues,
 
   pub window: Window,
   surface: Surface,
@@ -164,6 +166,14 @@ impl Renderer {
       Device::create(&instance, &physical_device).on_err(|_| destroy_instance())?;
     destructor.push(&device);
 
+    #[cfg(feature = "vl")]
+    let debug_utils_marker =
+      crate::render::initialization::DebugUtilsMarker::new(&instance, &device);
+    #[cfg(feature = "vl")]
+    unsafe {
+      debug_utils_marker.set_queue_labels(queues);
+    }
+
     let swapchains = Swapchains::new(
       &instance,
       &physical_device,
@@ -197,6 +207,8 @@ impl Renderer {
       texture_format,
       texture_data,
       &queues,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&gpu_data);
@@ -209,8 +221,15 @@ impl Renderer {
       create_render_pass(&device, render_format).on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&render_pass);
 
-    let render_targets = RenderTargets::new(&device, &physical_device, render_pass, render_format)
-      .on_err(|_| unsafe { destructor.fire(&device) })?;
+    let render_targets = RenderTargets::new(
+      &device,
+      &physical_device,
+      render_pass,
+      render_format,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
+    )
+    .on_err(|_| unsafe { destructor.fire(&device) })?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
 
@@ -242,7 +261,11 @@ impl Renderer {
 
     let command_pools = fill_destroyable_array_with_expression!(
       &device,
-      GraphicsCommandBufferPool::create(&device, &physical_device.queue_families),
+      GraphicsCommandBufferPool::create(
+        &device,
+        &physical_device.queue_families,
+        &debug_utils_marker
+      ),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
@@ -253,8 +276,13 @@ impl Renderer {
         .wait_and_self_destroy(&device)
         .on_err(|_| destructor.fire(&device))?;
     }
-    let screenshot_buffer = ScreenshotBuffer::new(&device, &physical_device)
-      .on_err(|_| unsafe { destructor.fire(&device) })?;
+    let screenshot_buffer = ScreenshotBuffer::new(
+      &device,
+      &physical_device,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
+    )
+    .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&screenshot_buffer);
 
     Ok(Self {
@@ -264,6 +292,8 @@ impl Renderer {
       instance,
       #[cfg(feature = "vl")]
       debug_utils,
+      #[cfg(feature = "vl")]
+      debug_utils_marker,
       physical_device,
       device,
       queues,
@@ -356,6 +386,8 @@ impl Renderer {
           &self.physical_device,
           new_render_pass.unwrap(),
           new_format,
+          #[cfg(feature = "vl")]
+          &self.debug_utils_marker,
         )
         .on_err(|_| {
           new_render_pass.unwrap().destroy_self(&self.device);

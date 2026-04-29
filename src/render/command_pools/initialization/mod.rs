@@ -3,7 +3,9 @@ use std::{marker::PhantomData, ptr};
 use ash::{vk, Device};
 
 use crate::render::{
-  create_objs::create_fence, device_destroyable::DeviceManuallyDestroyed, errors::QueueSubmitError,
+  create_objs::create_fence,
+  device_destroyable::DeviceManuallyDestroyed,
+  errors::{OutOfMemoryError, QueueSubmitError},
 };
 
 use super::{
@@ -34,11 +36,31 @@ impl PendingInitialization {
 }
 
 impl InitCommandBufferPool {
-  pub fn new(device: &ash::Device, queue_family_index: u32) -> Result<Self, vk::Result> {
+  pub fn new(
+    device: &ash::Device,
+    queue_family_index: u32,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+  ) -> Result<Self, OutOfMemoryError> {
     let flags = vk::CommandPoolCreateFlags::TRANSIENT;
-    let pool = super::create_command_pool(device, flags, queue_family_index)?;
+    let pool = super::create_command_pool(
+      device,
+      flags,
+      queue_family_index,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"initialization",
+    )?;
 
-    let command_buffers = super::allocate_primary_command_buffers(device, pool, 1)?;
+    let command_buffers = super::allocate_primary_command_buffers(
+      device,
+      pool,
+      1,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      &[c"initialization"],
+    )?;
     let cb = command_buffers[0];
     let begin_info =
       vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
@@ -134,13 +156,21 @@ impl InitCommandBufferPool {
     self,
     device: &Device,
     queue: vk::Queue,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<PendingInitialization, (Self, QueueSubmitError)> {
     let cb: vk::CommandBuffer = self.cb;
     if let Err(err) = device.end_command_buffer(cb) {
       return Err((self, err.into()));
     }
 
-    let fence = match create_fence(device, vk::FenceCreateFlags::empty()) {
+    let fence = match create_fence(
+      device,
+      vk::FenceCreateFlags::empty(),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"initialization",
+    ) {
       Ok(v) => v,
       Err(err) => return Err((self, err.into())),
     };

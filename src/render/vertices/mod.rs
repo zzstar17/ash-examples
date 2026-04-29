@@ -13,7 +13,7 @@ pub struct PipelineVertexInputStateCreateInfo<'a> {
 }
 
 impl<'a> PipelineVertexInputStateCreateInfo<'a> {
-  pub fn get(&self) -> &vk::PipelineVertexInputStateCreateInfo {
+  pub fn get(&self) -> &vk::PipelineVertexInputStateCreateInfo<'_> {
     &self.creation_info
   }
 

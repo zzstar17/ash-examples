@@ -25,11 +25,33 @@ pub struct GraphicsCommandBufferPool {
 }
 
 impl GraphicsCommandBufferPool {
-  pub fn create(device: &ash::Device, queue_families: &QueueFamilies) -> Result<Self, vk::Result> {
+  pub fn create(
+    device: &ash::Device,
+    queue_families: &QueueFamilies,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+  ) -> Result<Self, vk::Result> {
     let flags = vk::CommandPoolCreateFlags::TRANSIENT;
-    let pool = super::create_command_pool(device, flags, queue_families.get_graphics_index())?;
+    let pool = super::create_command_pool(
+      device,
+      flags,
+      queue_families.graphics.index,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"graphics command pool",
+    )?;
 
-    let main = super::allocate_primary_command_buffers(device, pool, 1)?[0];
+    #[cfg(feature = "vl")]
+    let command_buffer_names = [c"primary"];
+    let main = super::allocate_primary_command_buffers(
+      device,
+      pool,
+      1,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      &command_buffer_names,
+    )?[0];
 
     Ok(Self { pool, main })
   }

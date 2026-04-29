@@ -4,19 +4,27 @@ mod physical_device;
 mod queues;
 mod vendor;
 
+pub use device_selector::DeviceSelectionError;
+pub use logical_device::{Device, DeviceCreationError};
+pub use physical_device::PhysicalDevice;
+pub use queues::{QueueFamilies, SingleQueues};
+
 use std::{
-  ffi::c_void,
+  ffi::{c_void, CStr},
   mem::MaybeUninit,
   ptr::{self, addr_of_mut},
 };
 
 use ash::vk;
 use device_selector::select_physical_device;
-pub use logical_device::Device;
-pub use physical_device::PhysicalDevice;
-pub use queues::{QueueFamilies, Queues};
 
-use crate::{render::gpu_data::TEXTURE_FORMAT_FEATURES, utility};
+use crate::{
+  render::{errors::OutOfMemoryError, gpu_data::TEXTURE_FORMAT_FEATURES},
+  utility,
+};
+
+pub const GRAPHICS_QUEUE_LABEL: &CStr = c"GRAPHICS QUEUE";
+pub const TRANSFER_QUEUE_LABEL: &CStr = c"TRANSFER QUEUE";
 
 pub fn format_is_supported(
   instance: &ash::Instance,
@@ -43,7 +51,7 @@ impl EnabledDeviceExtensions {
   pub fn mark_supported_by_physical_device(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
-  ) -> Result<Self, vk::Result> {
+  ) -> Result<Self, OutOfMemoryError> {
     let properties = unsafe { instance.enumerate_device_extension_properties(physical_device)? };
 
     let mut supported = Self::default();
@@ -99,7 +107,7 @@ struct PhysicalDeviceProperties<'a> {
 fn get_extended_properties(
   instance: &ash::Instance,
   physical_device: vk::PhysicalDevice,
-) -> PhysicalDeviceProperties {
+) -> PhysicalDeviceProperties<'_> {
   // see https://doc.rust-lang.org/std/mem/union.MaybeUninit.html
   let mut props10: MaybeUninit<vk::PhysicalDeviceProperties2> = MaybeUninit::uninit();
   let mut props11: MaybeUninit<vk::PhysicalDeviceVulkan11Properties> = MaybeUninit::uninit();
@@ -146,7 +154,7 @@ struct PhysicalDeviceFeatures<'a> {
 fn get_extended_features(
   instance: &ash::Instance,
   physical_device: vk::PhysicalDevice,
-) -> PhysicalDeviceFeatures {
+) -> PhysicalDeviceFeatures<'_> {
   let mut features10: MaybeUninit<vk::PhysicalDeviceFeatures2> = MaybeUninit::uninit();
   let mut features11: MaybeUninit<vk::PhysicalDeviceVulkan11Features> = MaybeUninit::uninit();
   let mut features12: MaybeUninit<vk::PhysicalDeviceVulkan12Features> = MaybeUninit::uninit();

@@ -6,7 +6,11 @@ In relation to previous examples it introduces rendering to window surfaces with
 
 You can run this example with:
 
-`RUST_LOG=debug cargo run`
+`cargo run`
+
+By default, it runs with all validation enabled. To run without validation, take look at `run_no_validation.sh` or just execute the script.
+
+`sh run_no_validation.sh`
 
 ## Project structure
 
@@ -133,11 +137,9 @@ This example implements the following cargo features:
 - `vl`: Enable validation layers.
 - `load`: Load the system Vulkan Library at runtime.
 - `link`: Link the system Vulkan Library at compile time.
+- `log_alloc`: Log allocations in a friendly manner.
 
-`vl` and `load` are enabled by default. To disable them, pass `--no-default-features` to cargo.
-For example:
-
-`cargo run --release --no-default-features --features link`
+`vl`, `load` and `log_alloc` are enabled by default. To disable them, pass `--no-default-features` to cargo.
 
 For more information about linking and loading check
 [https://docs.rs/ash/latest/ash/struct.Entry.html](https://docs.rs/ash/latest/ash/struct.Entry.html).

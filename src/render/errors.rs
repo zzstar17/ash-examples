@@ -1,6 +1,8 @@
 use ash::vk;
 use raw_window_handle::HandleError;
 
+use crate::render::initialization::device::{DeviceCreationError, DeviceSelectionError};
+
 use super::{
   allocator::{AllocationError, DeviceMemoryInitializationError},
   initialization::InstanceCreationError,
@@ -109,11 +111,15 @@ pub enum SwapchainRecreationError {
 
 #[derive(thiserror::Error)]
 pub enum InitializationError {
-  #[error("Instance creation failed: {0}")]
+  #[error("Instance creation failed:\n    {0}")]
   InstanceCreationFailed(#[from] InstanceCreationError),
 
-  #[error("No physical device is compatible with the application requirements")]
+  #[error("An error occurred during device selection: {0}")]
+  DeviceSelectionError(#[from] DeviceSelectionError),
+  #[error("No physical device supports the application")]
   NoCompatibleDevices,
+  #[error("An error occurred during the creation of the logical device:\n    {0}")]
+  DeviceCreationError(#[from] DeviceCreationError),
 
   #[error(transparent)]
   WindowError(#[from] WindowError),
@@ -132,6 +138,8 @@ pub enum InitializationError {
 
   #[error("Failed to create pipelines:\n{0}")]
   PipelineCreationFailed(#[from] PipelineCreationError),
+  #[error("An error occurred when creating or saving the pipeline cache: {0}")]
+  PipelineCacheError(#[from] PipelineCacheError),
 
   #[error(transparent)]
   IOError(#[from] std::io::Error),
@@ -163,15 +171,6 @@ impl From<AllocationError> for InitializationError {
 impl From<HandleError> for InitializationError {
   fn from(value: HandleError) -> Self {
     InitializationError::WindowError(WindowError::HandleError(value))
-  }
-}
-
-impl From<PipelineCacheError> for InitializationError {
-  fn from(value: PipelineCacheError) -> Self {
-    match value {
-      PipelineCacheError::IOError(err) => InitializationError::IOError(err),
-      PipelineCacheError::OutOfMemoryError(err) => InitializationError::from(err),
-    }
   }
 }
 

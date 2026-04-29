@@ -39,19 +39,38 @@ impl SyncRenderer {
     let device = &renderer.device;
     let frame_fences = fill_destroyable_array_with_expression!(
       device,
-      create_fence(device, vk::FenceCreateFlags::SIGNALED),
+      create_fence(
+        device,
+        vk::FenceCreateFlags::SIGNALED,
+        #[cfg(feature = "vl")]
+        &renderer.debug_utils_marker,
+        #[cfg(feature = "vl")]
+        c"frame fence"
+      ),
       FRAMES_IN_FLIGHT
     )?;
 
     let image_available = fill_destroyable_array_with_expression!(
       &renderer.device,
-      create_semaphore(device),
+      create_semaphore(
+        device,
+        #[cfg(feature = "vl")]
+        &renderer.debug_utils_marker,
+        #[cfg(feature = "vl")]
+        c"image available"
+      ),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { frame_fences.destroy_self(device) })?;
     let presentable = fill_destroyable_array_with_expression!(
       &renderer.device,
-      create_semaphore(device),
+      create_semaphore(
+        device,
+        #[cfg(feature = "vl")]
+        &renderer.debug_utils_marker,
+        #[cfg(feature = "vl")]
+        c"image presentable"
+      ),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destroy!(device => frame_fences.as_ref(), image_available.as_ref()) })?;
@@ -234,7 +253,7 @@ impl SyncRenderer {
       .signal_semaphore_infos(&signal_semaphores);
     unsafe {
       self.renderer.device.queue_submit2(
-        self.renderer.queues.graphics,
+        self.renderer.queues.graphics.handle,
         &[submit_info],
         self.frame_fences[cur_frame_i],
       )?;
@@ -243,7 +262,7 @@ impl SyncRenderer {
     unsafe {
       if let Err(err) = self.renderer.swapchains.queue_present(
         image_index,
-        self.renderer.queues.presentation,
+        self.renderer.queues.graphics.handle,
         &[self.presentable[cur_frame_i]],
       ) {
         self.recreate_swapchain_next_frame = true;

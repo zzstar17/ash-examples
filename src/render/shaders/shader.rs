@@ -26,7 +26,7 @@ impl Shader {
 }
 
 impl Shader {
-  pub fn get_pipeline_shader_creation_info(&self) -> [vk::PipelineShaderStageCreateInfo; 2] {
+  pub fn get_pipeline_shader_creation_info(&self) -> [vk::PipelineShaderStageCreateInfo<'_>; 2] {
     [
       vk::PipelineShaderStageCreateInfo {
         // Vertex shader

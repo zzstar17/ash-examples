@@ -65,13 +65,20 @@ pub unsafe fn create_single_use_staging_buffers<const S: usize>(
   physical_device: &PhysicalDevice,
   data: [(*const u8, vk::DeviceSize); S],
   #[cfg(feature = "log_alloc")] allocation_name: &str,
+  #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
 ) -> Result<SingleUseStagingBuffers<S>, DeviceMemoryInitializationError> {
   assert!(!data.is_empty());
   let staging_buffers: [vk::Buffer; S] = fill_destroyable_array_from_iter_using_default!(
     device,
-    data
-      .iter()
-      .map(|&(_, size)| create_buffer(device, size, vk::BufferUsageFlags::TRANSFER_SRC)),
+    data.iter().map(|&(_, size)| create_buffer(
+      device,
+      size,
+      vk::BufferUsageFlags::TRANSFER_SRC,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"initialization",
+    )),
     S
   )?;
   let trait_objs = {

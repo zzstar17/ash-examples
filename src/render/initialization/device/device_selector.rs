@@ -4,6 +4,7 @@ use ash::vk;
 
 use crate::{
   render::{
+    errors::OutOfMemoryError,
     format_conversions::KNOWN_FORMATS,
     initialization::{Surface, SurfaceError},
     RenderPosition, TARGET_API_VERSION,
@@ -16,12 +17,32 @@ use super::{
   PhysicalDeviceProperties, QueueFamilies,
 };
 
+#[derive(Debug, thiserror::Error)]
+pub enum DeviceSelectionError {
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+  #[error("instance.enumerate_physical_devices() returned VK_ERROR_INITIALIZATION_FAILED")]
+  VulkanInitializationFailed,
+}
+
+impl From<vk::Result> for DeviceSelectionError {
+  fn from(value: vk::Result) -> Self {
+    match value {
+      vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+        Self::OutOfMemory(value.into())
+      }
+      vk::Result::ERROR_INITIALIZATION_FAILED => Self::VulkanInitializationFailed,
+      _ => panic!(),
+    }
+  }
+}
+
 fn log_device_properties(properties: &vk::PhysicalDeviceProperties) {
   let vendor = Vendor::from_id(properties.vendor_id);
   let driver_version = vendor.parse_driver_version(properties.driver_version);
 
   log::info!(
-    "\nFound physical device \"{:?}\":
+    "\nFound physical device {:?}:
         API Version: {},
         Vendor: {},
         Driver Version: {},
@@ -104,7 +125,7 @@ pub unsafe fn select_physical_device<'a>(
     PhysicalDeviceFeatures<'a>,
     QueueFamilies,
   )>,
-  vk::Result,
+  DeviceSelectionError,
 > {
   Ok(
     instance

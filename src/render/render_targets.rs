@@ -34,6 +34,7 @@ impl RenderTargets {
     physical_device: &PhysicalDevice,
     render_pass: vk::RenderPass,
     render_format: vk::Format,
+    #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
   ) -> Result<Self, AllocationError> {
     let images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
       device,
@@ -44,7 +45,11 @@ impl RenderTargets {
         RENDER_EXTENT.height,
         vk::ImageUsageFlags::COLOR_ATTACHMENT
           .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
-          .bitor(vk::ImageUsageFlags::TRANSFER_DST)
+          .bitor(vk::ImageUsageFlags::TRANSFER_DST),
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Frames"
       ),
       FRAMES_IN_FLIGHT
     )?;

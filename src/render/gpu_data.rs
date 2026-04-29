@@ -9,7 +9,7 @@ use crate::{
     create_objs::{create_buffer, create_image, create_image_view},
     device_destroyable::{destroy, DeviceManuallyDestroyed},
     errors::QueueSubmitError,
-    initialization::device::{Device, PhysicalDevice, Queues},
+    initialization::device::{Device, PhysicalDevice, SingleQueues},
     render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
   },
   utility::{const_flag_bitor, OnErr},
@@ -67,16 +67,19 @@ impl DeviceManuallyDestroyed for PendingDataInitialization {
 fn create_and_copy_from_staging_buffers(
   device: &Device,
   physical_device: &PhysicalDevice,
-  queues: &Queues,
+  queues: &SingleQueues,
   vertex_buffer: vk::Buffer,
   index_buffer: vk::Buffer,
   texture: vk::Image,
   texture_extent: vk::Extent2D,
   texture_data: Vec<u8>,
+  #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
 ) -> Result<PendingDataInitialization, DeviceMemoryInitializationError> {
   let graphics_pool = command_pools::initialization::InitCommandBufferPool::new(
     device,
-    physical_device.queue_families.get_graphics_index(),
+    physical_device.queue_families.graphics.index,
+    #[cfg(feature = "vl")]
+    marker,
   )?;
   unsafe {
     let staging_buffers = allocator::create_single_use_staging_buffers(
@@ -89,6 +92,8 @@ fn create_and_copy_from_staging_buffers(
       ],
       #[cfg(feature = "log_alloc")]
       "DEVICE LOCAL OBJECTS",
+      #[cfg(feature = "vl")]
+      marker,
     )
     .on_err(|_| graphics_pool.destroy_self(device))?;
 
@@ -113,7 +118,12 @@ fn create_and_copy_from_staging_buffers(
     );
 
     let submit = graphics_pool
-      .end_and_submit(device, queues.graphics)
+      .end_and_submit(
+        device,
+        queues.graphics.handle,
+        #[cfg(feature = "vl")]
+        marker,
+      )
       .on_err(|(pool, _err)| destroy!(device => &staging_buffers, pool))
       .map_err(|(_, err)| err)?;
 
@@ -131,7 +141,8 @@ impl GPUData {
     texture_extent: vk::Extent2D,
     texture_format: vk::Format,
     texture_data: Vec<u8>,
-    queues: &Queues,
+    queues: &SingleQueues,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<(Self, PendingDataInitialization), DeviceMemoryInitializationError> {
     let texture = create_image(
       device,
@@ -139,17 +150,29 @@ impl GPUData {
       texture_extent.width,
       texture_extent.height,
       TEXTURE_USAGES,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"texture",
     )?;
     let vertex_buffer = create_buffer(
       device,
       VERTICES_SIZE,
       vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"vertex buffer",
     )
     .on_err(|_| unsafe { texture.destroy_self(device) })?;
     let index_buffer = create_buffer(
       device,
       QUAD_INDICES_SIZE,
       vk::BufferUsageFlags::INDEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"index buffer",
     )
     .on_err(|_| unsafe { destroy!(device => &vertex_buffer, &texture) })?;
 
@@ -178,6 +201,8 @@ impl GPUData {
       texture,
       texture_extent,
       texture_data,
+      #[cfg(feature = "vl")]
+      marker,
     )
     .on_err(|_| unsafe {
       destroy!(device => &texture, &index_buffer, &vertex_buffer, &device_alloc)

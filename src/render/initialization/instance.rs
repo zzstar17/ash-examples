@@ -23,11 +23,14 @@ pub enum InstanceCreationError {
   #[error("Missing instance layer \"{0}\"")]
   MissingLayer(String),
 
-  #[error("")]
+  #[error(transparent)]
   OutOfMemory(#[from] OutOfMemoryError),
 
-  #[error("Failed to create an instance because of an unknown reason")]
-  Failed,
+  #[error(
+    "Vulkan returned VK_ERROR_INITIALIZATION_FAILED.\
+The instance could not be created for implementation-specific reasons."
+  )]
+  VulkanInitializationFailed,
 }
 
 // checks if entry supports the target API version
@@ -201,13 +204,10 @@ fn create_instance_checked(
   log::debug!("[Instance creation] Creating Instance");
   let instance: ash::Instance =
     unsafe { entry.create_instance(&create_info, None) }.map_err(|err| match err {
-      vk::Result::ERROR_OUT_OF_HOST_MEMORY => {
-        InstanceCreationError::OutOfMemory(OutOfMemoryError::from(err))
+      vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+        InstanceCreationError::OutOfMemory(err.into())
       }
-      vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-        InstanceCreationError::OutOfMemory(OutOfMemoryError::from(err))
-      }
-      vk::Result::ERROR_INITIALIZATION_FAILED => InstanceCreationError::Failed,
+      vk::Result::ERROR_INITIALIZATION_FAILED => InstanceCreationError::VulkanInitializationFailed,
       // other results have been checked
       _ => panic!(),
     })?;

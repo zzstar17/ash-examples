@@ -391,23 +391,6 @@ impl Swapchain {
       _marker: PhantomData,
     };
 
-    // in rare cases that presentation != graphics, set sharing mode to CONCURRENT with both
-    // families
-    let _family_indices =
-      if queue_families.get_graphics_index() != queue_families.get_presentation_index() {
-        let family_indices = [
-          queue_families.get_graphics_index(),
-          queue_families.get_presentation_index(),
-        ];
-        create_info.image_sharing_mode = vk::SharingMode::CONCURRENT;
-        create_info.p_queue_family_indices = family_indices.as_ptr();
-        create_info.queue_family_index_count = family_indices.len() as u32;
-
-        Some(family_indices)
-      } else {
-        None
-      };
-
     let swapchain = unsafe { swapchain_loader.create_swapchain(&create_info, None) }?;
 
     let images = unsafe { swapchain_loader.get_swapchain_images(swapchain) }

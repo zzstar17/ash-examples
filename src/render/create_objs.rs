@@ -1,29 +1,51 @@
+#[cfg(feature = "vl")]
+use std::ffi::CStr;
 use std::{
   marker::PhantomData,
   ptr::{self},
 };
 
-use ash::vk;
+#[cfg(feature = "vl")]
+use ash::vk::Handle;
+use ash::vk::{self};
 
 use crate::render::errors::OutOfMemoryError;
 
-pub fn create_semaphore(device: &ash::Device) -> Result<vk::Semaphore, OutOfMemoryError> {
+pub fn create_semaphore(
+  device: &ash::Device,
+  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
+) -> Result<vk::Semaphore, OutOfMemoryError> {
   let create_info = vk::SemaphoreCreateInfo::default();
-  unsafe { device.create_semaphore(&create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let semaphore = device.create_semaphore(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::SEMAPHORE, semaphore.as_raw(), name)?;
+    Ok(semaphore)
+  }
 }
 
 pub fn create_fence(
   device: &ash::Device,
   flags: vk::FenceCreateFlags,
+  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Fence, OutOfMemoryError> {
   let create_info = vk::FenceCreateInfo::default().flags(flags);
-  unsafe { device.create_fence(&create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let fence = device.create_fence(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::FENCE, fence.as_raw(), name)?;
+    Ok(fence)
+  }
 }
 
 pub fn create_buffer(
   device: &ash::Device,
   size: u64,
   usage: vk::BufferUsageFlags,
+  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Buffer, OutOfMemoryError> {
   let create_info = vk::BufferCreateInfo {
     s_type: vk::StructureType::BUFFER_CREATE_INFO,
@@ -36,7 +58,12 @@ pub fn create_buffer(
     p_queue_family_indices: ptr::null(),
     _marker: PhantomData,
   };
-  unsafe { device.create_buffer(&create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let buffer = device.create_buffer(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::BUFFER, buffer.as_raw(), name)?;
+    Ok(buffer)
+  }
 }
 
 pub fn create_image(
@@ -45,6 +72,8 @@ pub fn create_image(
   width: u32,
   height: u32,
   usage: vk::ImageUsageFlags,
+  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Image, OutOfMemoryError> {
   // 1 color layer 2d image
   let create_info = vk::ImageCreateInfo {
@@ -69,8 +98,12 @@ pub fn create_image(
     initial_layout: vk::ImageLayout::UNDEFINED,
     _marker: PhantomData,
   };
-
-  unsafe { device.create_image(&create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let image = device.create_image(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE, image.as_raw(), name)?;
+    Ok(image)
+  }
 }
 
 pub fn create_image_view(

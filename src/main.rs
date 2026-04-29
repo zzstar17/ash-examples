@@ -1,4 +1,3 @@
-
 mod ferris;
 mod render;
 mod utility;
@@ -354,7 +353,12 @@ fn main_loop(event_loop: EventLoop<()>, mut status: RenderStatus) {
 }
 
 fn main() {
-  env_logger::init();
+  // initialize env_logger with debug if validation layers are enabled, warn otherwise
+  #[cfg(feature = "vl")]
+  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+  #[cfg(not(feature = "vl"))]
+  env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
   let event_loop = EventLoop::new().expect("Failed to initialize event loop");
 
   // make the event loop run continuously even if there is no new user input

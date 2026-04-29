@@ -16,7 +16,7 @@ image = "0.25.1"
 
 log = {version = "0.4"}
 env_logger = "0.11.0"
-thiserror = "1.0.64"
+thiserror = "2.0.18"
 
 # random utilities
 take_mut = "0.2.2"

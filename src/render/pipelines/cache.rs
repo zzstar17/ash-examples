@@ -42,20 +42,10 @@ struct PipelineCacheHeader {
 
 #[derive(thiserror::Error, Debug)]
 pub enum PipelineCacheError {
-  #[error("")]
-  IOError(#[source] io::Error),
-  #[error("")]
-  OutOfMemoryError(#[source] OutOfMemoryError),
-}
-impl From<OutOfMemoryError> for PipelineCacheError {
-  fn from(value: OutOfMemoryError) -> Self {
-    Self::OutOfMemoryError(value)
-  }
-}
-impl From<io::Error> for PipelineCacheError {
-  fn from(value: io::Error) -> Self {
-    Self::IOError(value)
-  }
+  #[error(transparent)]
+  IOError(#[from] io::Error),
+  #[error(transparent)]
+  OutOfMemoryError(#[from] OutOfMemoryError),
 }
 
 impl PipelineCacheHeader {

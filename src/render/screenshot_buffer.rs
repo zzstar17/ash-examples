@@ -34,11 +34,16 @@ impl ScreenshotBuffer {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
+    #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
   ) -> Result<Self, DeviceMemoryInitializationError> {
     let buffer = create_buffer(
       &device,
       Self::BUFFER_SIZE,
       vk::BufferUsageFlags::TRANSFER_DST,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"screenshot buffer",
     )?;
 
     let alloc = allocator::allocate_and_bind_memory(
