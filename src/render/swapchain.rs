@@ -1,9 +1,9 @@
-use std::{marker::PhantomData, mem, ops::Deref, ptr};
+use std::{ffi::CString, marker::PhantomData, mem, ops::Deref, ptr};
 
 pub use ash::vk;
 use winit::dpi::PhysicalSize;
 
-use crate::{utility::OnErr, PREFERRED_PRESENTATION_METHOD};
+use crate::{render::create_objs::create_semaphore, utility::OnErr, PREFERRED_PRESENTATION_METHOD};
 
 use super::{
   create_objs::create_image_view,
@@ -124,6 +124,7 @@ impl Swapchains {
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     let loader = ash::khr::swapchain::Device::new(instance, device);
 
@@ -134,6 +135,8 @@ impl Swapchains {
       &loader,
       window_size,
       image_usages,
+      #[cfg(feature = "vl")]
+      marker,
     )?;
 
     Ok(Self {
@@ -146,11 +149,16 @@ impl Swapchains {
   pub unsafe fn acquire_next_image(
     &mut self,
     semaphore: vk::Semaphore,
-  ) -> Result<(u32, bool), AcquireNextImageError> {
-    self
+  ) -> Result<(u32, bool, vk::Semaphore), AcquireNextImageError> {
+    let (index, suboptimal) = self
       .current
       .acquire_next_image(semaphore, &self.loader)
-      .map_err(AcquireNextImageError::from)
+      .map_err(AcquireNextImageError::from)?;
+    Ok((
+      index,
+      suboptimal,
+      self.current.image_finished_presenting[index as usize],
+    ))
   }
 
   pub unsafe fn recreate(
@@ -160,6 +168,7 @@ impl Swapchains {
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<RecreationChanges, SwapchainCreationError> {
     let (old, changes) = self.current.recreate(
       physical_device,
@@ -168,6 +177,8 @@ impl Swapchains {
       &self.loader,
       window_size,
       image_usages,
+      #[cfg(feature = "vl")]
+      marker,
     )?;
 
     self.old = Some(old);
@@ -244,6 +255,9 @@ impl DeviceManuallyDestroyed for Swapchains {
 struct Swapchain {
   inner: vk::SwapchainKHR,
   images: Box<[vk::Image]>, // owned by the swapchain
+  // semaphore signaling that the image in the swapchain has finished being presented
+  // and can be used again
+  image_finished_presenting: Box<[vk::Semaphore]>,
   pub image_views: Box<[vk::ImageView]>,
   pub format: vk::Format,
   pub extent: vk::Extent2D,
@@ -270,6 +284,7 @@ impl Swapchain {
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     let capabilities = unsafe { surface.get_capabilities(**physical_device) }?;
     let image_format = select_swapchain_image_format(**physical_device, surface)?;
@@ -295,6 +310,8 @@ impl Swapchain {
       present_mode,
       extent,
       vk::SwapchainKHR::null(),
+      #[cfg(feature = "vl")]
+      marker,
     )
   }
 
@@ -306,6 +323,7 @@ impl Swapchain {
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<(Self, RecreationChanges), SwapchainCreationError> {
     let capabilities = unsafe { surface.get_capabilities(**physical_device) }?;
     let image_format = select_swapchain_image_format(**physical_device, surface)?;
@@ -336,6 +354,8 @@ impl Swapchain {
       present_mode,
       extent,
       self.inner,
+      #[cfg(feature = "vl")]
+      marker,
     )?;
 
     let old = {
@@ -348,7 +368,7 @@ impl Swapchain {
 
   fn create_with(
     device: &ash::Device,
-    queue_families: &QueueFamilies,
+    _queue_families: &QueueFamilies,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
     capabilities: vk::SurfaceCapabilitiesKHR,
@@ -357,6 +377,7 @@ impl Swapchain {
     present_mode: vk::PresentModeKHR,
     extent: vk::Extent2D,
     old_swapchain: vk::SwapchainKHR,
+    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     // it is usually recommended to use one more than the minimum number of images
     let image_count = if capabilities.max_image_count > 0 {
@@ -365,7 +386,9 @@ impl Swapchain {
       capabilities.min_image_count + 1
     };
 
-    let mut create_info = vk::SwapchainCreateInfoKHR {
+    log::debug!("Creating swapchain with {} images", image_count);
+
+    let create_info = vk::SwapchainCreateInfoKHR {
       s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
       p_next: ptr::null(),
       flags: vk::SwapchainCreateFlagsKHR::empty(),
@@ -419,10 +442,40 @@ impl Swapchain {
     };
 
     log::debug!(
-      "Created swapchain with\nimages: {:?}\nimage views: {:?}",
+      "Created swapchain {:?} with\nimages: {:?}\nimage views: {:?}",
+      swapchain,
       images,
       image_views
     );
+
+    let mut image_finished_presenting: Vec<vk::Semaphore> =
+      Vec::with_capacity(image_count as usize);
+    for i in 0..image_count {
+      let name = CString::new(format!(
+        "Swapchain {:?}: Image {} finished presenting",
+        swapchain, i
+      ))
+      .unwrap();
+      let sem = create_semaphore(
+        device,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        &name,
+      )
+      .on_err(|_err| unsafe {
+        for sem in image_finished_presenting.iter() {
+          sem.destroy_self(device);
+        }
+        for view in image_views.iter() {
+          view.destroy_self(device);
+        }
+        swapchain_loader.destroy_swapchain(swapchain, None);
+      })?;
+
+      image_finished_presenting.push(sem);
+    }
+    let image_finished_presenting = image_finished_presenting.into_boxed_slice();
 
     Ok(Self {
       inner: swapchain,
@@ -430,6 +483,7 @@ impl Swapchain {
       image_views,
       format: image_format.format,
       extent,
+      image_finished_presenting,
     })
   }
 
@@ -442,6 +496,16 @@ impl Swapchain {
   }
 
   pub unsafe fn destroy_self(&self, loader: &ash::khr::swapchain::Device, device: &ash::Device) {
+    // swapchain resources may be still in use
+    // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
+    unsafe {
+      device
+        .device_wait_idle()
+        .expect("Failed to wait for device idle during swapchain destruction");
+    }
+    for sem in self.image_finished_presenting.iter() {
+      sem.destroy_self(device);
+    }
     for view in self.image_views.iter() {
       view.destroy_self(device);
     }

@@ -181,6 +181,8 @@ impl Renderer {
       &surface,
       window.inner_size(),
       SWAPCHAIN_IMAGE_USAGES,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&swapchains);
@@ -214,8 +216,6 @@ impl Renderer {
     destructor.push(&gpu_data);
     destructor.push(&gpu_data_pending_initialization);
 
-    let render_pass = create_render_pass(&device, swapchains.get_format())
-      .on_err(|_| unsafe { destructor.fire(&device) })?;
     let render_format = swapchains.get_format(); // same as swapchain
     let render_pass =
       create_render_pass(&device, render_format).on_err(|_| unsafe { destructor.fire(&device) })?;
@@ -353,6 +353,8 @@ impl Renderer {
       &self.surface,
       self.window.inner_size(),
       SWAPCHAIN_IMAGE_USAGES,
+      #[cfg(feature = "vl")]
+      &self.debug_utils_marker,
     )?;
 
     let mut new_render_pass = None;
