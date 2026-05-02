@@ -13,7 +13,7 @@ use crate::{
 };
 
 use super::{
-  queues::QueueFamilyError, vendor::Vendor, EnabledDeviceExtensions, PhysicalDeviceFeatures,
+  queues::QueueFamilyError, vendor::Vendor, DeviceExtensions, DeviceFeatures,
   PhysicalDeviceProperties, QueueFamilies,
 };
 
@@ -75,8 +75,8 @@ fn check_physical_device_capabilities(
   surface: &Surface,
   physical_device: vk::PhysicalDevice,
   properties: &PhysicalDeviceProperties,
-  features: &PhysicalDeviceFeatures,
-  supported_extensions: &EnabledDeviceExtensions,
+  features: &DeviceFeatures,
+  supported_extensions: &DeviceExtensions,
 ) -> Result<bool, SurfaceError> {
   // Filter devices that are strictly not supported
   // Check for any features or limits required by the application
@@ -117,12 +117,13 @@ fn check_physical_device_capabilities(
 
 pub unsafe fn select_physical_device<'a>(
   instance: &'a ash::Instance,
-  surface: &'a Surface,
+  surface: &Surface,
 ) -> Result<
   Option<(
     vk::PhysicalDevice,
     PhysicalDeviceProperties<'a>,
-    PhysicalDeviceFeatures<'a>,
+    DeviceExtensions,
+    DeviceFeatures<'a>,
     QueueFamilies,
   )>,
   DeviceSelectionError,
@@ -137,29 +138,34 @@ pub unsafe fn select_physical_device<'a>(
 
         let properties = super::get_extended_properties(instance, physical_device);
         log_device_properties(&properties.p10);
-        let features = super::get_extended_features(instance, physical_device);
-        let supported_extensions = match EnabledDeviceExtensions::mark_supported_by_physical_device(
-          instance,
-          physical_device,
-        ) {
-          Ok(v) => v,
-          Err(err) => {
-            log::error!("Device selection error: {:?}", err);
-            return None;
-          }
-        };
+
+        let supported_extensions =
+          match DeviceExtensions::mark_supported_by_physical_device(instance, physical_device) {
+            Ok(v) => v,
+            Err(err) => {
+              log::error!("Device selection error: {:?}", err);
+              return None;
+            }
+          };
+        let supported_features =
+          super::get_extended_features(instance, physical_device, &supported_extensions);
 
         match check_physical_device_capabilities(
           instance,
           surface,
           physical_device,
           &properties,
-          &features,
+          &supported_features,
           &supported_extensions,
         ) {
           Ok(all_good) => {
             if all_good {
-              Some((physical_device, properties, features))
+              Some((
+                physical_device,
+                properties,
+                supported_extensions,
+                supported_features,
+              ))
             } else {
               None
             }
@@ -170,49 +176,64 @@ pub unsafe fn select_physical_device<'a>(
           }
         }
       })
-      .filter_map(|(physical_device, properties, features)| {
-        // filter devices that do not have required queue families
-        match QueueFamilies::get_from_physical_device(instance, physical_device, surface) {
-          Err(err) => {
-            match err {
-              QueueFamilyError::DoesNotSupportRequiredQueueFamilies => log::info!(
-                "Skipped physical device: Device does not contain required queue families"
-              ),
-              QueueFamilyError::SurfaceError(err) => log::error!(
-                "Device selection error during queue family retrieval: {:?}",
-                err
-              ),
+      .filter_map(
+        |(physical_device, properties, supported_extensions, supported_features)| {
+          // filter devices that do not have required queue families
+          match QueueFamilies::get_from_physical_device(instance, physical_device, surface) {
+            Err(err) => {
+              match err {
+                QueueFamilyError::DoesNotSupportRequiredQueueFamilies => log::info!(
+                  "Skipped physical device: Device does not contain required queue families"
+                ),
+                QueueFamilyError::SurfaceError(err) => log::error!(
+                  "Device selection error during queue family retrieval: {:?}",
+                  err
+                ),
+              }
+              None
             }
-            None
+            Ok(families) => Some((
+              physical_device,
+              properties,
+              supported_extensions,
+              supported_features,
+              families,
+            )),
           }
-          Ok(families) => Some((physical_device, properties, features, families)),
-        }
-      })
-      .min_by_key(|(physical_device, _properties, _features, families)| {
-        // Assign a score to each device and select the best one available
-        // A full application may use multiple metrics like limits, queue families and even the
-        // device id to rank each device that a user can have
+        },
+      )
+      .min_by_key(
+        |(physical_device, _properties, supported_extensions, _supported_features, families)| {
+          // Assign a score to each device and select the best one available
+          // A full application may use multiple metrics like limits, queue families and even the
+          // device id to rank each device that a user can have
 
-        let queue_family_importance = 3;
-        let device_score_importance = 0;
+          let extensions_importance = 1;
+          let queue_family_importance = 2;
+          let device_score_importance = 3;
 
-        // rank devices by number of specialized queue families
-        let queue_score = if families.transfer.is_some() { 0 } else { 1 };
+          // rank devices by number of specialized queue families
+          let queue_score = if families.transfer.is_some() { 0 } else { 1 };
 
-        // rank devices by commonly most powerful device type
-        let device_score = match instance
-          .get_physical_device_properties(*physical_device)
-          .device_type
-        {
-          vk::PhysicalDeviceType::DISCRETE_GPU => 0,
-          vk::PhysicalDeviceType::INTEGRATED_GPU => 1,
-          vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
-          vk::PhysicalDeviceType::CPU => 3,
-          vk::PhysicalDeviceType::OTHER => 4,
-          _ => 5,
-        };
+          // rank devices by commonly most powerful device type
+          let device_score = match instance
+            .get_physical_device_properties(*physical_device)
+            .device_type
+          {
+            vk::PhysicalDeviceType::DISCRETE_GPU => 0,
+            vk::PhysicalDeviceType::INTEGRATED_GPU => 1,
+            vk::PhysicalDeviceType::VIRTUAL_GPU => 2,
+            vk::PhysicalDeviceType::CPU => 3,
+            vk::PhysicalDeviceType::OTHER => 4,
+            _ => 5,
+          };
 
-        (queue_score << queue_family_importance) + (device_score << device_score_importance)
-      }),
+          let extensions_score = supported_extensions.count;
+
+          (queue_score << queue_family_importance)
+            + (device_score << device_score_importance)
+            + (extensions_score << extensions_importance)
+        },
+      ),
   )
 }

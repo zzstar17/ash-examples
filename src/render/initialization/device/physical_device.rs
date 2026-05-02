@@ -2,7 +2,13 @@ use std::{ffi::CStr, ops::Deref};
 
 use ash::vk;
 
-use crate::render::{allocator, initialization::Surface};
+use crate::render::{
+  allocator,
+  initialization::{
+    device::{DeviceExtensions, DeviceFeatures},
+    Surface,
+  },
+};
 
 use super::{device_selector::DeviceSelectionError, select_physical_device};
 
@@ -37,12 +43,19 @@ impl Deref for PhysicalDevice {
 }
 
 impl PhysicalDevice {
-  pub unsafe fn select(
-    instance: &ash::Instance,
+  pub unsafe fn select<'a>(
+    instance: &'a ash::Instance,
     surface: &Surface,
-  ) -> Result<Option<PhysicalDevice>, DeviceSelectionError> {
+  ) -> Result<Option<(PhysicalDevice, DeviceExtensions, DeviceFeatures<'a>)>, DeviceSelectionError>
+  {
     match select_physical_device(instance, surface)? {
-      Some((physical_device, properties, _features, queue_families)) => {
+      Some((
+        physical_device,
+        properties,
+        supported_extensions,
+        supported_features,
+        queue_families,
+      )) => {
         let mem_properties = instance.get_physical_device_memory_properties(physical_device);
         let queue_family_properties = instance
           .get_physical_device_queue_family_properties(physical_device)
@@ -56,20 +69,24 @@ impl PhysicalDevice {
         #[cfg(feature = "log_alloc")]
         allocator::debug_print_device_memory_info(&mem_properties).unwrap();
 
-        Ok(Some(PhysicalDevice {
-          inner: physical_device,
-          queue_families,
-          mem_properties,
-          properties: CustomProperties {
-            driver_version: properties.p10.driver_version,
-            vendor_id: properties.p10.vendor_id,
-            device_id: properties.p10.device_id,
-            pipeline_cache_uuid: properties.p10.pipeline_cache_uuid,
+        Ok(Some((
+          PhysicalDevice {
+            inner: physical_device,
+            queue_families,
+            mem_properties,
+            properties: CustomProperties {
+              driver_version: properties.p10.driver_version,
+              vendor_id: properties.p10.vendor_id,
+              device_id: properties.p10.device_id,
+              pipeline_cache_uuid: properties.p10.pipeline_cache_uuid,
 
-            max_memory_allocation_size: properties.p11.max_memory_allocation_size,
+              max_memory_allocation_size: properties.p11.max_memory_allocation_size,
+            },
+            queue_family_properties,
           },
-          queue_family_properties,
-        }))
+          supported_extensions,
+          supported_features,
+        )))
       }
       None => Ok(None),
     }

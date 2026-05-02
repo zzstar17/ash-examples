@@ -152,18 +152,22 @@ impl Renderer {
     .on_err(|_| destroy_instance())?;
     destructor.push(&surface);
 
-    let physical_device = match unsafe { PhysicalDevice::select(&instance, &surface) }
-      .on_err(|_| destroy_instance())?
-    {
-      Some(device) => device,
-      None => {
-        destroy_instance();
-        return Err(InitializationError::NoCompatibleDevices);
-      }
-    };
+    let (physical_device, physical_device_supported_extensions, physical_device_supported_features) =
+      match unsafe { PhysicalDevice::select(&instance, &surface) }.on_err(|_| destroy_instance())? {
+        Some(device) => device,
+        None => {
+          destroy_instance();
+          return Err(InitializationError::NoCompatibleDevices);
+        }
+      };
 
-    let (device, queues) =
-      Device::create(&instance, &physical_device).on_err(|_| destroy_instance())?;
+    let (device, queues) = Device::create(
+      &instance,
+      &physical_device,
+      physical_device_supported_extensions,
+      physical_device_supported_features,
+    )
+    .on_err(|_| destroy_instance())?;
     destructor.push(&device);
 
     #[cfg(feature = "vl")]

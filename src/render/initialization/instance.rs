@@ -8,7 +8,9 @@ use std::{
 };
 
 use crate::{
-  render::{errors::OutOfMemoryError, TARGET_API_VERSION},
+  render::{
+    errors::OutOfMemoryError, initialization::SURFACE_MAINTENANCE_EXT_NAME, TARGET_API_VERSION,
+  },
   utility, APPLICATION_NAME, APPLICATION_VERSION,
 };
 
@@ -31,6 +33,52 @@ pub enum InstanceCreationError {
 The instance could not be created for implementation-specific reasons."
   )]
   VulkanInitializationFailed,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct InstanceOptionalExtensions {
+  pub get_surface_capabilities2: bool,
+  pub surface_maintenance1: bool,
+  pub count: usize,
+}
+
+impl InstanceOptionalExtensions {
+  pub fn get_supported(entry: &ash::Entry) -> Result<Self, OutOfMemoryError> {
+    let properties = unsafe { entry.enumerate_instance_extension_properties(None) }?;
+
+    let mut supported = Self::default();
+
+    // a bit inefficient as it retests for valid cstrings but at least doesn't do any allocations
+    let is_supported = |ext| {
+      properties
+        .iter()
+        .any(|props| unsafe { utility::i8_array_as_cstr(&props.extension_name) }.unwrap() == ext)
+    };
+
+    let mut supported_count = 0;
+    if is_supported(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME) {
+      supported.get_surface_capabilities2 = true;
+      supported_count += 1;
+    }
+    if is_supported(SURFACE_MAINTENANCE_EXT_NAME) {
+      supported.surface_maintenance1 = true;
+      supported_count += 1;
+    }
+
+    supported.count = supported_count;
+    Ok(supported)
+  }
+
+  pub fn get_extension_list(&self) -> Vec<*const i8> {
+    let mut ptrs = Vec::with_capacity(self.count);
+    if self.get_surface_capabilities2 {
+      ptrs.push(vk::KHR_GET_SURFACE_CAPABILITIES2_NAME.as_ptr());
+    }
+    if self.surface_maintenance1 {
+      ptrs.push(SURFACE_MAINTENANCE_EXT_NAME.as_ptr());
+    }
+    ptrs
+  }
 }
 
 // checks if entry supports the target API version
@@ -77,7 +125,14 @@ fn get_app_info<'a>() -> vk::ApplicationInfo<'a> {
 pub fn create_instance(
   entry: &ash::Entry,
   display_handle: DisplayHandle,
-) -> Result<(ash::Instance, super::validation_layers::DebugUtils), InstanceCreationError> {
+) -> Result<
+  (
+    ash::Instance,
+    InstanceOptionalExtensions,
+    super::validation_layers::DebugUtils,
+  ),
+  InstanceCreationError,
+> {
   use super::validation_layers::{self, DebugUtils};
   use crate::render::ADDITIONAL_VALIDATION_FEATURES;
 
@@ -85,8 +140,12 @@ pub fn create_instance(
 
   let surface_extensions = ash_window::enumerate_required_extensions(display_handle.as_raw())
     .map_err(OutOfMemoryError::from)?;
-  let mut extensions = Vec::with_capacity(surface_extensions.len() + 1);
+  let optional_extensions = InstanceOptionalExtensions::get_supported(entry)?;
+  let optional_extensions_list = optional_extensions.get_extension_list();
+  let mut extensions =
+    Vec::with_capacity(surface_extensions.len() + optional_extensions_list.len() + 1);
   extensions.extend(surface_extensions.iter());
+  extensions.extend(optional_extensions_list.iter());
   extensions.push(ash::ext::debug_utils::NAME.as_ptr());
 
   let layers_str = validation_layers::get_supported_validation_layers(entry)
@@ -117,21 +176,31 @@ pub fn create_instance(
   log::debug!("Creating Debug Utils");
   let debug_utils = DebugUtils::create(entry, &instance, debug_create_info)?;
 
-  Ok((instance, debug_utils))
+  Ok((instance, optional_extensions, debug_utils))
 }
 
 #[cfg(not(feature = "vl"))]
 pub fn create_instance(
   entry: &ash::Entry,
   display_handle: DisplayHandle,
-) -> Result<ash::Instance, InstanceCreationError> {
+) -> Result<(ash::Instance, optional_extensions), InstanceCreationError> {
   check_api_version(entry)?;
 
   let app_info = get_app_info();
-  let extensions = ash_window::enumerate_required_extensions(display_handle.as_raw())
-    .map_err(|vkerr| OutOfMemoryError::from(vkerr))?;
+
+  let surface_extensions = ash_window::enumerate_required_extensions(display_handle.as_raw())
+    .map_err(OutOfMemoryError::from)?;
+  let optional_extensions = InstanceOptionalExtensions::get_supported(entry)?;
+  let optional_extensions_list = optional_extensions.get_extension_list();
+  let mut extensions =
+    Vec::with_capacity(surface_extensions.len() + optional_extensions_list.len());
+  extensions.extend(surface_extensions.iter());
+  extensions.extend(optional_extensions_list.iter());
+
   let layers = [];
-  create_instance_checked(entry, app_info, &extensions, &layers, ptr::null())
+  let instance = create_instance_checked(entry, app_info, &extensions, &layers, ptr::null());
+
+  Ok((instance, optional_extensions))
 }
 
 // check if extensions are layers are present and then create a vk instance

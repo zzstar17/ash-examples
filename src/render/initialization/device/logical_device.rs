@@ -8,15 +8,16 @@ use std::{
 };
 
 use crate::render::{
-  device_destroyable::ManuallyDestroyed, errors::OutOfMemoryError,
-  initialization::device::queues::Queue,
+  device_destroyable::ManuallyDestroyed,
+  errors::OutOfMemoryError,
+  initialization::device::{queues::Queue, DeviceFeatures},
 };
 
-use super::{EnabledDeviceExtensions, PhysicalDevice, SingleQueues};
+use super::{DeviceExtensions, PhysicalDevice, SingleQueues};
 
 pub struct Device {
   pub inner: ash::Device,
-  pub enabled_extensions: EnabledDeviceExtensions,
+  pub enabled_extensions: DeviceExtensions,
   // contains ash's extension loader if pageable_device_local_memory is enabled
   pub pageable_device_local_memory_loader: Option<ash::ext::pageable_device_local_memory::Device>,
 }
@@ -46,12 +47,17 @@ impl Device {
   pub fn create(
     instance: &ash::Instance,
     physical_device: &PhysicalDevice,
+    physical_device_supported_extensions: DeviceExtensions,
+    physical_device_supported_features: DeviceFeatures<'_>,
   ) -> Result<(Self, SingleQueues), DeviceCreationError> {
     let (queue_create_infos, unique_queue_size) =
       super::queues::get_single_queue_create_infos(&physical_device.queue_families);
 
-    let to_enable_extensions =
-      EnabledDeviceExtensions::mark_supported_by_physical_device(instance, **physical_device)?;
+    let mut to_enable_extensions = physical_device_supported_extensions.clone();
+    if !physical_device_supported_features.swapchain_maintenance1 {
+      to_enable_extensions.disable_swapchain_maintenance1();
+    }
+
     let extension_ptrs = to_enable_extensions.get_extension_list();
 
     log::info!(
@@ -59,8 +65,6 @@ impl Device {
       to_enable_extensions
     );
 
-    // enabled features
-    let features10 = vk::PhysicalDeviceFeatures::default();
     let mut features12 = vk::PhysicalDeviceVulkan12Features {
       ..Default::default()
     };
@@ -69,15 +73,30 @@ impl Device {
       ..Default::default()
     };
 
-    features12.p_next = &mut features13 as *mut vk::PhysicalDeviceVulkan13Features as *mut c_void;
+    // enabled features
+    let mut features2 = vk::PhysicalDeviceFeatures2::default()
+      .features(vk::PhysicalDeviceFeatures::default())
+      .push_next(&mut features13)
+      .push_next(&mut features12);
+
+    // vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR does not exist, but this should be equivalent
+    let mut swapchain_maintenance1 = vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT::default();
+    assert_eq!(
+      swapchain_maintenance1.s_type,
+      vk::StructureType::from_raw(1000275000)
+    );
+    if to_enable_extensions.swapchain_maintenance1 {
+      swapchain_maintenance1.swapchain_maintenance1 = vk::TRUE;
+      features2 = features2.push_next(&mut swapchain_maintenance1);
+    }
 
     #[allow(deprecated)]
     let create_info = vk::DeviceCreateInfo {
       s_type: vk::StructureType::DEVICE_CREATE_INFO,
       p_queue_create_infos: queue_create_infos.as_ptr(),
       queue_create_info_count: unique_queue_size as u32,
-      p_enabled_features: &features10,
-      p_next: &features12 as *const vk::PhysicalDeviceVulkan12Features as *const c_void,
+      p_enabled_features: ptr::null(),
+      p_next: &features2 as *const vk::PhysicalDeviceFeatures2 as *const c_void,
       pp_enabled_layer_names: ptr::null(), // deprecated
       enabled_layer_count: 0,              // deprecated
       pp_enabled_extension_names: extension_ptrs.as_ptr(),

@@ -47,7 +47,7 @@ impl<'a> BufferWriteDescriptorSet<'a> {
   }
 
   // returns a vk::WriteDescriptorSet that is valid for as long that self is not moved
-  pub fn contextualize(&self) -> vk::WriteDescriptorSet {
+  pub fn contextualize(&self) -> vk::WriteDescriptorSet<'_> {
     vk::WriteDescriptorSet {
       p_buffer_info: addr_of!(self.info),
       ..self.inner
@@ -85,7 +85,7 @@ impl<'a> ImageWriteDescriptorSet<'a> {
   }
 
   // returns a vk::WriteDescriptorSet that is valid for as long that self is not moved
-  pub fn contextualize(&self) -> vk::WriteDescriptorSet {
+  pub fn contextualize(&self) -> vk::WriteDescriptorSet<'_> {
     vk::WriteDescriptorSet {
       p_image_info: addr_of!(self.info),
       ..self.inner

@@ -19,7 +19,10 @@ use ash::vk;
 use device_selector::select_physical_device;
 
 use crate::{
-  render::{errors::OutOfMemoryError, gpu_data::TEXTURE_FORMAT_FEATURES},
+  render::{
+    errors::OutOfMemoryError, gpu_data::TEXTURE_FORMAT_FEATURES,
+    initialization::SWAPCHAIN_MAINTENANCE_EXT_NAME,
+  },
   utility,
 };
 
@@ -39,15 +42,16 @@ pub fn format_is_supported(
     .contains(TEXTURE_FORMAT_FEATURES)
 }
 
-#[derive(Debug, Default)]
-pub struct EnabledDeviceExtensions {
+#[derive(Debug, Default, Clone)]
+pub struct DeviceExtensions {
   pub memory_priority: bool,
   pub pageable_device_local_memory: bool,
   pub swapchain: bool,
+  pub swapchain_maintenance1: bool,
   count: usize,
 }
 
-impl EnabledDeviceExtensions {
+impl DeviceExtensions {
   pub fn mark_supported_by_physical_device(
     instance: &ash::Instance,
     physical_device: vk::PhysicalDevice,
@@ -76,6 +80,10 @@ impl EnabledDeviceExtensions {
       supported.swapchain = true;
       supported_count += 1;
     }
+    if is_supported(SWAPCHAIN_MAINTENANCE_EXT_NAME) {
+      supported.swapchain_maintenance1 = true;
+      supported_count += 1;
+    }
 
     supported.count = supported_count;
     Ok(supported)
@@ -92,7 +100,16 @@ impl EnabledDeviceExtensions {
     if self.swapchain {
       ptrs.push(ash::khr::swapchain::NAME.as_ptr());
     }
+    if self.swapchain_maintenance1 {
+      ptrs.push(SWAPCHAIN_MAINTENANCE_EXT_NAME.as_ptr());
+    }
     ptrs
+  }
+
+  pub fn disable_swapchain_maintenance1(&mut self) {
+    assert!(self.swapchain_maintenance1);
+    self.swapchain_maintenance1 = false;
+    self.count -= 1;
   }
 }
 
@@ -144,26 +161,35 @@ fn get_extended_properties(
 }
 
 #[allow(unused)]
-struct PhysicalDeviceFeatures<'a> {
+pub struct DeviceFeatures<'a> {
   pub f10: vk::PhysicalDeviceFeatures,
   pub f11: vk::PhysicalDeviceVulkan11Features<'a>,
   pub f12: vk::PhysicalDeviceVulkan12Features<'a>,
   pub f13: vk::PhysicalDeviceVulkan13Features<'a>,
+  pub swapchain_maintenance1: bool,
 }
 
-fn get_extended_features(
+// https://www.reddit.com/r/vulkan/comments/1j16wut/if_an_extension_defines_a_feature_struct_and_this/
+fn get_extended_features<'a>(
   instance: &ash::Instance,
   physical_device: vk::PhysicalDevice,
-) -> PhysicalDeviceFeatures<'_> {
+  supported_extensions: &DeviceExtensions,
+) -> DeviceFeatures<'a> {
   let mut features10: MaybeUninit<vk::PhysicalDeviceFeatures2> = MaybeUninit::uninit();
   let mut features11: MaybeUninit<vk::PhysicalDeviceVulkan11Features> = MaybeUninit::uninit();
   let mut features12: MaybeUninit<vk::PhysicalDeviceVulkan12Features> = MaybeUninit::uninit();
   let mut features13: MaybeUninit<vk::PhysicalDeviceVulkan13Features> = MaybeUninit::uninit();
 
+  // vk::PhysicalDeviceSwapchainMaintenance1FeaturesKHR does not exist, but this should be equivalent
+  let mut swapchain_maintenance1: MaybeUninit<vk::PhysicalDeviceSwapchainMaintenance1FeaturesEXT> =
+    MaybeUninit::uninit();
+
   let features10_ptr = features10.as_mut_ptr();
   let features11_ptr = features11.as_mut_ptr();
   let features12_ptr = features12.as_mut_ptr();
   let features13_ptr = features13.as_mut_ptr();
+
+  let swapchain_maintenance1_ptr = swapchain_maintenance1.as_mut_ptr();
 
   unsafe {
     addr_of_mut!((*features10_ptr).s_type).write(vk::StructureType::PHYSICAL_DEVICE_FEATURES_2);
@@ -179,12 +205,28 @@ fn get_extended_features(
     addr_of_mut!((*features12_ptr).p_next).write(features13_ptr as *mut c_void);
     addr_of_mut!((*features13_ptr).p_next).write(ptr::null_mut::<c_void>());
 
+    if supported_extensions.swapchain_maintenance1 {
+      addr_of_mut!((*swapchain_maintenance1_ptr).s_type)
+        .write(vk::StructureType::from_raw(1000275000));
+
+      addr_of_mut!((*features13_ptr).p_next).write(swapchain_maintenance1_ptr as *mut c_void);
+      addr_of_mut!((*swapchain_maintenance1_ptr).p_next).write(ptr::null_mut::<c_void>());
+    }
+
     instance.get_physical_device_features2(physical_device, features10_ptr.as_mut().unwrap());
-    PhysicalDeviceFeatures {
+
+    let swapchain_maintenance1_feature_supported = if supported_extensions.swapchain_maintenance1 {
+      swapchain_maintenance1.assume_init().swapchain_maintenance1 == vk::TRUE
+    } else {
+      false
+    };
+
+    DeviceFeatures {
       f10: features10.assume_init().features,
       f11: features11.assume_init(),
       f12: features12.assume_init(),
       f13: features13.assume_init(),
+      swapchain_maintenance1: swapchain_maintenance1_feature_supported,
     }
   }
 }

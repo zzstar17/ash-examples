@@ -46,9 +46,10 @@ impl RenderInit {
       .map_err(RenderInitError::DisplayHandle)?;
 
     #[cfg(feature = "vl")]
-    let (instance, debug_utils) = super::create_instance(&entry, display_handle)?;
+    let (instance, _instance_optional_extensions, debug_utils) =
+      super::create_instance(&entry, display_handle)?;
     #[cfg(not(feature = "vl"))]
-    let instance = super::create_instance(&entry, display_handle)?;
+    let (instance, _instance_optional_extensions) = super::create_instance(&entry, display_handle)?;
 
     Ok(Self {
       entry,

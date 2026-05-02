@@ -3,7 +3,11 @@ use std::{ffi::CString, marker::PhantomData, mem, ops::Deref, ptr};
 pub use ash::vk;
 use winit::dpi::PhysicalSize;
 
-use crate::{render::create_objs::create_semaphore, utility::OnErr, PREFERRED_PRESENTATION_METHOD};
+use crate::{
+  render::{create_objs::create_semaphore, initialization::device::Device},
+  utility::OnErr,
+  PREFERRED_PRESENTATION_METHOD,
+};
 
 use super::{
   create_objs::create_image_view,
@@ -120,7 +124,7 @@ impl Swapchains {
   pub fn new(
     instance: &ash::Instance,
     physical_device: &PhysicalDevice,
-    device: &ash::Device,
+    device: &Device,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
@@ -164,7 +168,7 @@ impl Swapchains {
   pub unsafe fn recreate(
     &mut self,
     physical_device: &PhysicalDevice,
-    device: &ash::Device,
+    device: &Device,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
@@ -279,7 +283,7 @@ pub struct RecreationChanges {
 impl Swapchain {
   pub fn create(
     physical_device: &PhysicalDevice,
-    device: &ash::Device,
+    device: &Device,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
@@ -318,7 +322,7 @@ impl Swapchain {
   pub fn recreate(
     &mut self,
     physical_device: &PhysicalDevice,
-    device: &ash::Device,
+    device: &Device,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
@@ -367,7 +371,7 @@ impl Swapchain {
   }
 
   fn create_with(
-    device: &ash::Device,
+    device: &Device,
     _queue_families: &QueueFamilies,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
@@ -386,9 +390,15 @@ impl Swapchain {
       capabilities.min_image_count + 1
     };
 
+    // ash currently doesn't have a struct for SwapchainPresentModesCreateInfoKHR (not EXT)
+    // but the EXT struct is equivalent
+    let present_modes = [present_mode];
+    let mut present_modes_create_info =
+      vk::SwapchainPresentModesCreateInfoEXT::default().present_modes(&present_modes);
+
     log::debug!("Creating swapchain with {} images", image_count);
 
-    let create_info = vk::SwapchainCreateInfoKHR {
+    let mut create_info = vk::SwapchainCreateInfoKHR {
       s_type: vk::StructureType::SWAPCHAIN_CREATE_INFO_KHR,
       p_next: ptr::null(),
       flags: vk::SwapchainCreateFlagsKHR::empty(),
@@ -413,6 +423,14 @@ impl Swapchain {
       old_swapchain,
       _marker: PhantomData,
     };
+
+    if device.enabled_extensions.swapchain_maintenance1 {
+      assert_eq!(
+        present_modes_create_info.s_type,
+        vk::StructureType::from_raw(1000275002)
+      );
+      create_info = create_info.push_next(&mut present_modes_create_info);
+    }
 
     let swapchain = unsafe { swapchain_loader.create_swapchain(&create_info, None) }?;
 
