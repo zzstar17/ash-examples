@@ -97,8 +97,9 @@ impl GraphicsPipeline {
   }
 
   // destroy old pipeline once it stops being used
-  pub unsafe fn destroy_old(&mut self, device: &ash::Device) {
+  pub unsafe fn destroy_old(&mut self, device: &ash::Device, cur_total_frame: usize) {
     if let Some(old) = self.old {
+      log::debug!("[Frame {}] Destroying old pipeline", cur_total_frame);
       device.destroy_pipeline(old, None);
       self.old = None;
     }

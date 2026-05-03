@@ -240,8 +240,7 @@ fn main_loop(event_loop: EventLoop<()>, mut status: RenderStatus) {
                 },
               );
 
-              // println!("\n\nRENDERING FRAME {}\n", frame_i);
-              if let Err(err) = status.renderer.render_next_frame(&ferris) {
+              if let Err(err) = status.renderer.render_next_frame(frame_i, &ferris) {
                 match err {
                   FrameRenderError::FailedToAcquireSwapchainImage(
                     AcquireNextImageError::OutOfDate,

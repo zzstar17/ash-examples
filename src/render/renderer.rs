@@ -182,6 +182,7 @@ impl Renderer {
       &instance,
       &physical_device,
       &device,
+      0,
       &surface,
       window.inner_size(),
       SWAPCHAIN_IMAGE_USAGES,
@@ -341,7 +342,10 @@ impl Renderer {
     Ok(())
   }
 
-  pub unsafe fn recreate_swapchain(&mut self) -> Result<(), SwapchainRecreationError> {
+  pub unsafe fn recreate_swapchain(
+    &mut self,
+    cur_total_frame: usize,
+  ) -> Result<(), SwapchainRecreationError> {
     // most of this function is just cleanup in case of an error
 
     // it is possible to use more than two frames in flight, but it would require having more than one old swapchain and pipeline
@@ -351,15 +355,20 @@ impl Renderer {
     }
 
     // old swapchain becomes retired
-    let changes = self.swapchains.recreate(
+    let (changes, destroyed_old) = self.swapchains.recreate(
       &self.physical_device,
       &self.device,
+      cur_total_frame,
       &self.surface,
       self.window.inner_size(),
       SWAPCHAIN_IMAGE_USAGES,
       #[cfg(feature = "vl")]
       &self.debug_utils_marker,
     )?;
+
+    if destroyed_old {
+      self.cleanup_after_old_swapchain(cur_total_frame);
+    }
 
     let mut new_render_pass = None;
     let mut new_render_targets = None;
@@ -440,10 +449,8 @@ impl Renderer {
 
   // destroy old objects that resulted of a swapchain recreation
   // this should only be called when they stop being in use
-  pub unsafe fn destroy_old(&mut self) {
-    self.pipeline.destroy_old(&self.device);
-
-    self.swapchains.destroy_old(&self.device);
+  pub unsafe fn cleanup_after_old_swapchain(&mut self, cur_total_frame: usize) {
+    self.pipeline.destroy_old(&self.device, cur_total_frame);
   }
 
   pub fn render_format(&self) -> vk::Format {
@@ -507,7 +514,7 @@ impl Drop for Renderer {
         .device_wait_idle()
         .expect("Failed to wait for the device to become idle during drop");
 
-      self.destroy_old();
+      self.cleanup_after_old_swapchain(usize::MAX);
 
       log::info!("Saving pipeline cache");
       if let Err(err) =

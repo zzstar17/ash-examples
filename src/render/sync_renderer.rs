@@ -25,9 +25,6 @@ pub struct SyncRenderer {
   // swapchain image available in this frame
   image_available: [vk::Semaphore; FRAMES_IN_FLIGHT],
 
-  // last frame swapchain was recreated and so current frame resources are marked as old
-  // having more than two frames in flight could require having more than one old set of resources
-  last_frame_recreated_swapchain: bool,
   // will have the new window size
   recreate_swapchain_next_frame: bool,
 
@@ -66,12 +63,10 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
-      last_frame_i: 1, // 1 so that the first frame starts at 0
+      last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
       frame_fences,
 
       image_available,
-      // image_finished_presenting,
-      last_frame_recreated_swapchain: false,
       recreate_swapchain_next_frame: false,
       save_next_frame: false,
       saving_frame: None,
@@ -86,7 +81,11 @@ impl SyncRenderer {
     &self.renderer.window
   }
 
-  pub fn render_next_frame(&mut self, ferris: &Ferris) -> Result<(), FrameRenderError> {
+  pub fn render_next_frame(
+    &mut self,
+    cur_total_frame: usize,
+    ferris: &Ferris,
+  ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
@@ -100,17 +99,21 @@ impl SyncRenderer {
 
     // current frame resources are now safe to use as they are not being used by the GPU
 
-    if self.last_frame_recreated_swapchain {
-      unsafe { self.renderer.destroy_old() }
-      self.last_frame_recreated_swapchain = false;
+    let destroyed_old_swapchain = self
+      .renderer
+      .swapchains
+      .attempt_destroy_old(&self.renderer.device, cur_total_frame)?;
+    if destroyed_old_swapchain {
+      unsafe {
+        self.renderer.cleanup_after_old_swapchain(cur_total_frame);
+      }
     }
 
     if self.recreate_swapchain_next_frame {
       unsafe {
-        self.renderer.recreate_swapchain()?;
+        self.renderer.recreate_swapchain(cur_total_frame)?;
       }
       self.recreate_swapchain_next_frame = false;
-      self.last_frame_recreated_swapchain = true;
     }
 
     if let Some((frame, format)) = self.saving_frame {
@@ -118,7 +121,10 @@ impl SyncRenderer {
         self.saving_frame = None;
         match self.renderer.save_screenshot_buffer_as_rgba8(format) {
           Ok(()) => {
-            println!("Screenshot saved to {:?}", SCREENSHOT_SAVE_FILE);
+            println!(
+              "[Frame {}] Screenshot saved to {:?}",
+              cur_total_frame, SCREENSHOT_SAVE_FILE
+            );
           }
           Err(err) => {
             log::error!(
@@ -144,7 +150,10 @@ impl SyncRenderer {
         (image_index, image_finished_presenting)
       }
       Err(err) => {
-        log::warn!("Failed to acquire next swapchain image");
+        log::warn!(
+          "[Frame {}] Failed to acquire next swapchain image",
+          cur_total_frame
+        );
         self.recreate_swapchain_next_frame = true;
 
         return Err(err.into());
@@ -234,6 +243,7 @@ impl SyncRenderer {
 
     unsafe {
       if let Err(err) = self.renderer.swapchains.queue_present(
+        &self.renderer.device,
         cur_image_i,
         self.renderer.queues.graphics.handle,
         &[image_finished_presenting],
@@ -265,7 +275,6 @@ impl Drop for SyncRenderer {
 
       self.frame_fences.destroy_self(device);
       self.image_available.destroy_self(device);
-      // self.image_finished_presenting.destroy_self(device);
     }
   }
 }

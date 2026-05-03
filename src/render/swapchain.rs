@@ -1,10 +1,19 @@
-use std::{ffi::CString, marker::PhantomData, mem, ops::Deref, ptr};
+use std::{
+  ffi::{c_void, CString},
+  marker::PhantomData,
+  mem,
+  ops::Deref,
+  ptr::{self, addr_of},
+};
 
 pub use ash::vk;
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  render::{create_objs::create_semaphore, initialization::device::Device},
+  render::{
+    create_objs::{create_fence, create_semaphore},
+    initialization::device::Device,
+  },
   utility::OnErr,
   PREFERRED_PRESENTATION_METHOD,
 };
@@ -125,6 +134,7 @@ impl Swapchains {
     instance: &ash::Instance,
     physical_device: &PhysicalDevice,
     device: &Device,
+    cur_total_frame: usize,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
@@ -135,6 +145,7 @@ impl Swapchains {
     let current = Swapchain::create(
       physical_device,
       device,
+      cur_total_frame,
       surface,
       &loader,
       window_size,
@@ -161,22 +172,90 @@ impl Swapchains {
     Ok((
       index,
       suboptimal,
-      self.current.image_finished_presenting[index as usize],
+      self.current.image_finished_presenting_sem[index as usize],
     ))
   }
 
-  pub unsafe fn recreate(
+  pub fn attempt_destroy_old(
+    &mut self,
+    device: &Device,
+    cur_total_frame: usize,
+  ) -> Result<bool, vk::Result> {
+    if let Some(old) = &self.old {
+      // swapchain resources may be still in use
+      // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
+      if let Some(fences) = &old.image_finished_presenting_fence {
+        unsafe {
+          match device.wait_for_fences(&fences, true, 0) {
+            Err(vkerr) => match vkerr {
+              vk::Result::TIMEOUT => {
+                return Ok(false);
+              }
+              other => {
+                return Err(other);
+              }
+            },
+            Ok(()) => {
+              log::info!(
+                "[Frame {}] Gracefully destroying old swapchain",
+                cur_total_frame
+              );
+              old.destroy_self(&self.loader, device);
+              self.old = None;
+              return Ok(true);
+            }
+          }
+        }
+      }
+    }
+    Ok(false)
+  }
+
+  pub fn recreate(
     &mut self,
     physical_device: &PhysicalDevice,
     device: &Device,
+    cur_total_frame: usize,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
     #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
-  ) -> Result<RecreationChanges, SwapchainCreationError> {
-    let (old, changes) = self.current.recreate(
+  ) -> Result<(RecreationChanges, bool), SwapchainCreationError> {
+    let destroyed_old = if let Some(old) = &self.old {
+      log::info!(
+        "[Frame {}] Forcefully destroying old swapchain",
+        cur_total_frame
+      );
+
+      // swapchain resources may be still in use
+      // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
+      if let Some(fences) = &old.image_finished_presenting_fence {
+        unsafe {
+          device.wait_for_fences(&fences, true, u64::MAX).expect(
+            "Failed to wait for swapchain presentation fences during swapchain destruction",
+          );
+        }
+      } else {
+        unsafe {
+          device
+            .device_wait_idle()
+            .expect("Failed to wait for device idle during swapchain destruction");
+        }
+      }
+      unsafe {
+        old.destroy_self(&self.loader, device);
+      }
+      self.old = None;
+
+      true
+    } else {
+      false
+    };
+
+    let (current_old, changes) = self.current.recreate(
       physical_device,
       device,
+      cur_total_frame,
       surface,
       &self.loader,
       window_size,
@@ -185,8 +264,8 @@ impl Swapchains {
       marker,
     )?;
 
-    self.old = Some(old);
-    Ok(changes)
+    self.old = Some(current_old);
+    Ok((changes, destroyed_old))
   }
 
   pub fn revert_recreate(&mut self, device: &ash::Device) {
@@ -200,11 +279,12 @@ impl Swapchains {
 
   pub unsafe fn queue_present(
     &mut self,
+    device: &Device,
     image_index: u32,
     present_queue: vk::Queue,
     wait_semaphores: &[vk::Semaphore],
   ) -> Result<bool, AcquireNextImageError> {
-    let present_info = vk::PresentInfoKHR {
+    let mut present_info = vk::PresentInfoKHR {
       s_type: vk::StructureType::PRESENT_INFO_KHR,
       p_next: ptr::null(),
       wait_semaphore_count: wait_semaphores.len() as u32,
@@ -216,17 +296,25 @@ impl Swapchains {
       _marker: PhantomData,
     };
 
+    let mut fence_present_info = vk::SwapchainPresentFenceInfoEXT::default();
+    assert_eq!(
+      fence_present_info.s_type,
+      vk::StructureType::from_raw(1000275001)
+    );
+    if let Some(fences) = &self.current.image_finished_presenting_fence {
+      let fence = [fences[image_index as usize]];
+      unsafe {
+        device.reset_fences(&fence)?;
+      }
+      fence_present_info.swapchain_count = 1;
+      fence_present_info.p_fences = &fence as *const vk::Fence;
+
+      fence_present_info.p_next = ptr::null();
+      present_info.p_next = addr_of!(fence_present_info) as *const c_void;
+    }
+
     unsafe { self.loader.queue_present(present_queue, &present_info) }
       .map_err(AcquireNextImageError::from)
-  }
-
-  pub fn destroy_old(&mut self, device: &ash::Device) {
-    if let Some(old) = &mut self.old {
-      unsafe {
-        old.destroy_self(&self.loader, device);
-      }
-      self.old = None;
-    }
   }
 
   pub fn get_format(&self) -> vk::Format {
@@ -261,7 +349,9 @@ struct Swapchain {
   images: Box<[vk::Image]>, // owned by the swapchain
   // semaphore signaling that the image in the swapchain has finished being presented
   // and can be used again
-  image_finished_presenting: Box<[vk::Semaphore]>,
+  image_finished_presenting_sem: Box<[vk::Semaphore]>,
+  // only available with VK_KHR_swapchain_maintenance1 enabled
+  image_finished_presenting_fence: Option<Box<[vk::Fence]>>,
   pub image_views: Box<[vk::ImageView]>,
   pub format: vk::Format,
   pub extent: vk::Extent2D,
@@ -284,6 +374,7 @@ impl Swapchain {
   pub fn create(
     physical_device: &PhysicalDevice,
     device: &Device,
+    cur_total_frame: usize,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
@@ -296,7 +387,8 @@ impl Swapchain {
     let extent = get_swapchain_extent(&capabilities, window_size);
 
     log::info!(
-      "Creating swapchain with ({}, {}) extent, {:?} format and {:?} present mode",
+      "[Frame {}] Creating swapchain with ({}, {}) extent, {:?} format and {:?} present mode",
+      cur_total_frame,
       extent.width,
       extent.height,
       image_format,
@@ -323,6 +415,7 @@ impl Swapchain {
     &mut self,
     physical_device: &PhysicalDevice,
     device: &Device,
+    cur_total_frame: usize,
     surface: &Surface,
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
@@ -335,7 +428,8 @@ impl Swapchain {
     let extent = get_swapchain_extent(&capabilities, window_size);
 
     log::info!(
-      "Recreating swapchain with ({}, {}) extent, {:?} format and {:?} present mode",
+      "[Frame {}] Recreating swapchain with ({}, {}) extent, {:?} format and {:?} present mode",
+      cur_total_frame,
       extent.width,
       extent.height,
       image_format,
@@ -466,7 +560,7 @@ impl Swapchain {
       image_views
     );
 
-    let mut image_finished_presenting: Vec<vk::Semaphore> =
+    let mut image_finished_presenting_sem: Vec<vk::Semaphore> =
       Vec::with_capacity(image_count as usize);
     for i in 0..image_count {
       let name = CString::new(format!(
@@ -482,7 +576,7 @@ impl Swapchain {
         &name,
       )
       .on_err(|_err| unsafe {
-        for sem in image_finished_presenting.iter() {
+        for sem in image_finished_presenting_sem.iter() {
           sem.destroy_self(device);
         }
         for view in image_views.iter() {
@@ -491,9 +585,46 @@ impl Swapchain {
         swapchain_loader.destroy_swapchain(swapchain, None);
       })?;
 
-      image_finished_presenting.push(sem);
+      image_finished_presenting_sem.push(sem);
     }
-    let image_finished_presenting = image_finished_presenting.into_boxed_slice();
+    let image_finished_presenting_sem = image_finished_presenting_sem.into_boxed_slice();
+
+    let image_finished_presenting_fence = if device.enabled_extensions.swapchain_maintenance1 {
+      let mut fences: Vec<vk::Fence> = Vec::with_capacity(image_count as usize);
+      for i in 0..image_count {
+        let name = CString::new(format!(
+          "Swapchain {:?}: Image {} finished presenting",
+          swapchain, i
+        ))
+        .unwrap();
+        let fence = create_fence(
+          device,
+          vk::FenceCreateFlags::SIGNALED,
+          #[cfg(feature = "vl")]
+          marker,
+          #[cfg(feature = "vl")]
+          &name,
+        )
+        .on_err(|_err| unsafe {
+          for fence in fences.iter() {
+            fence.destroy_self(device);
+          }
+          for sem in image_finished_presenting_sem.iter() {
+            sem.destroy_self(device);
+          }
+          for view in image_views.iter() {
+            view.destroy_self(device);
+          }
+          swapchain_loader.destroy_swapchain(swapchain, None);
+        })?;
+
+        fences.push(fence);
+      }
+
+      Some(fences.into_boxed_slice())
+    } else {
+      None
+    };
 
     Ok(Self {
       inner: swapchain,
@@ -501,7 +632,8 @@ impl Swapchain {
       image_views,
       format: image_format.format,
       extent,
-      image_finished_presenting,
+      image_finished_presenting_sem,
+      image_finished_presenting_fence,
     })
   }
 
@@ -514,14 +646,12 @@ impl Swapchain {
   }
 
   pub unsafe fn destroy_self(&self, loader: &ash::khr::swapchain::Device, device: &ash::Device) {
-    // swapchain resources may be still in use
-    // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
-    unsafe {
-      device
-        .device_wait_idle()
-        .expect("Failed to wait for device idle during swapchain destruction");
+    if let Some(fences) = &self.image_finished_presenting_fence {
+      for fence in fences {
+        fence.destroy_self(device);
+      }
     }
-    for sem in self.image_finished_presenting.iter() {
+    for sem in self.image_finished_presenting_sem.iter() {
       sem.destroy_self(device);
     }
     for view in self.image_views.iter() {
