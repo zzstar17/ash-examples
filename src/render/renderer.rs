@@ -2,11 +2,7 @@ use std::mem::MaybeUninit;
 
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
-use winit::{
-  dpi::PhysicalSize,
-  event_loop::EventLoopWindowTarget,
-  window::{Window, WindowBuilder},
-};
+use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   ferris::Ferris, render::initialization::device::SingleQueues, utility::OnErr,
@@ -111,10 +107,10 @@ impl<const N: usize> Destructor<N> {
 impl Renderer {
   pub fn initialize(
     pre_window: RenderInit,
-    target: &EventLoopWindowTarget<()>,
+    event_loop: &ActiveEventLoop,
   ) -> Result<Self, InitializationError> {
     // having an error during window creation triggers pre_window drop
-    let window = WindowBuilder::new()
+    let window_attributes = Window::default_attributes()
       .with_title(WINDOW_TITLE)
       .with_inner_size(PhysicalSize {
         width: INITIAL_WINDOW_WIDTH,
@@ -123,9 +119,9 @@ impl Renderer {
       .with_min_inner_size(PhysicalSize {
         width: Ferris::WIDTH,
         height: Ferris::HEIGHT,
-      })
-      // .with_resizable(false)
-      .build(target)?;
+      });
+    // .with_resizable(false)
+    let window = event_loop.create_window(window_attributes)?;
 
     let mut destructor: Destructor<16> = Destructor::new();
 
@@ -146,7 +142,7 @@ impl Renderer {
     let surface = Surface::new(
       &entry,
       &instance,
-      target.display_handle()?,
+      event_loop.display_handle()?,
       window.window_handle()?,
     )
     .on_err(|_| destroy_instance())?;

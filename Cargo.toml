@@ -11,7 +11,7 @@ ash-window = "0.13.0"
 # version depends on ash-window
 raw-window-handle = "0.6.0"
 
-winit = {version = "0.29.10", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]}
+winit = {version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]}
 image = "0.25.1"
 
 log = {version = "0.4"}
@@ -20,7 +20,7 @@ thiserror = "2.0.18"
 
 # random utilities
 take_mut = "0.2.2"
-itertools = "0.13.0"
+itertools = "0.14.0"
 
 
 [features]

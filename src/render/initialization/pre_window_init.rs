@@ -1,5 +1,5 @@
 use raw_window_handle::{HandleError, HasDisplayHandle};
-use winit::event_loop::{EventLoop, EventLoopWindowTarget};
+use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::render::{
   device_destroyable::ManuallyDestroyed, errors::InitializationError, renderer::Renderer,
@@ -59,10 +59,7 @@ impl RenderInit {
     })
   }
 
-  pub fn start(
-    self,
-    event_loop: &EventLoopWindowTarget<()>,
-  ) -> Result<SyncRenderer, InitializationError> {
+  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<SyncRenderer, InitializationError> {
     let renderer = Renderer::initialize(self, event_loop)?;
     SyncRenderer::new(renderer)
   }
