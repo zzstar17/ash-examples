@@ -273,6 +273,7 @@ impl Renderer {
       GraphicsCommandBufferPool::create(
         &device,
         &physical_device.queue_families,
+        #[cfg(feature = "vl")]
         &debug_utils_marker
       ),
       FRAMES_IN_FLIGHT

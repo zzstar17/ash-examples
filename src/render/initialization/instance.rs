@@ -183,7 +183,7 @@ pub fn create_instance(
 pub fn create_instance(
   entry: &ash::Entry,
   display_handle: DisplayHandle,
-) -> Result<(ash::Instance, optional_extensions), InstanceCreationError> {
+) -> Result<(ash::Instance, InstanceOptionalExtensions), InstanceCreationError> {
   check_api_version(entry)?;
 
   let app_info = get_app_info();
@@ -198,7 +198,7 @@ pub fn create_instance(
   extensions.extend(optional_extensions_list.iter());
 
   let layers = [];
-  let instance = create_instance_checked(entry, app_info, &extensions, &layers, ptr::null());
+  let instance = create_instance_checked(entry, app_info, &extensions, &layers, ptr::null())?;
 
   Ok((instance, optional_extensions))
 }
