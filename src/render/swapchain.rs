@@ -668,7 +668,7 @@ fn select_swapchain_image_format(
   let formats = unsafe { surface.get_formats(physical_device) }?;
   for available_format in formats.iter() {
     // commonly available
-    if available_format.format == vk::Format::B8G8R8A8_SRGB
+    if available_format.format == super::SWAPCHAIN_PREFERRED_IMAGE_FORMAT
       && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
     {
       return Ok(*available_format);

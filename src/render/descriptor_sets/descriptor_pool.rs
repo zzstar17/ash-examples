@@ -18,7 +18,7 @@ fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemo
     address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
     anisotropy_enable: vk::FALSE,
     max_anisotropy: 0.0,
-    border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+    border_color: vk::BorderColor::INT_TRANSPARENT_BLACK,
     unnormalized_coordinates: vk::FALSE,
     compare_enable: vk::FALSE,
     compare_op: vk::CompareOp::NEVER,

@@ -221,7 +221,11 @@ impl Renderer {
     destructor.push(&gpu_data);
     destructor.push(&gpu_data_pending_initialization);
 
-    let render_format = swapchains.get_format(); // same as swapchain
+    // use same format for surface and the render target
+    // see SWAPCHAIN_PREFERRED_IMAGE_FORMAT in render/mod.rs
+    // vkCmdCopyImage does not convert formats, while vkCmdBlitImage does, so using different formats
+    // would mean not using vkCmdCopyImage at all anymore
+    let render_format = swapchains.get_format();
     let render_pass =
       create_render_pass(&device, render_format).on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&render_pass);
@@ -373,6 +377,7 @@ impl Renderer {
     let mut new_render_pass = None;
     let mut new_render_targets = None;
 
+    // shouldn't happen commonly
     if changes.format {
       log::info!("Changing swapchain format");
 
@@ -410,10 +415,15 @@ impl Renderer {
         })?,
       );
     } else if !changes.extent {
-      log::warn!("Recreating swapchain without any extent or format change");
+      log::warn!(
+        "[Frame {}] Recreating swapchain without any extent or format change",
+        cur_total_frame
+      );
     }
 
+    // recreate pipeline because of a new render pass
     if changes.format {
+      log::info!("[Frame {}] Recreating pipeline", cur_total_frame);
       match self.pipeline.recreate(
         &self.device,
         self.pipeline_cache,

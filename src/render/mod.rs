@@ -52,3 +52,9 @@ const RENDER_EXTENT: vk::Extent2D = vk::Extent2D {
 // minimum memory size of an image that can be rendered to with the specified resolution
 const IMAGE_WITH_RESOLUTION_MINIMAL_SIZE: u64 =
   RENDER_EXTENT.width as u64 * RENDER_EXTENT.height as u64 * 4;
+
+// https://stackoverflow.com/questions/66401081/vulkan-swapchain-format-unorm-vs-srgb
+// https://stackoverflow.com/questions/75094730/why-prefer-non-srgb-format-for-vulkan-swapchain
+// we're using the same format for the render target and the swapchain, so there is no
+// difference in color for Ferris, only for the background color (as the color gets interpreted differently)
+const SWAPCHAIN_PREFERRED_IMAGE_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;

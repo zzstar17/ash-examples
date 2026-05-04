@@ -30,13 +30,16 @@ const RESOLUTION: [u32; 2] = [800, 800];
 
 const SCREENSHOT_SAVE_FILE: &str = "last_screenshot.png";
 
+// const BACKGROUND_COLOR: vk::ClearColorValue = vk::ClearColorValue {
+//   float32: [0.1, 0.1, 0.1, 1.0],
+// };
 const BACKGROUND_COLOR: vk::ClearColorValue = vk::ClearColorValue {
-  float32: [0.01, 0.01, 0.01, 1.0],
+  float32: [0.5, 0.5, 0.5, 1.0],
 };
 // color exterior the game area
 // (that appears if window is resized to a size with ratio different that in RESOLUTION)
 const OUT_OF_BOUNDS_AREA_COLOR: vk::ClearColorValue = vk::ClearColorValue {
-  float32: [0.0, 0.0, 0.0, 1.0],
+  float32: [1.0, 0.0, 0.0, 1.0],
 };
 
 // see https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html
