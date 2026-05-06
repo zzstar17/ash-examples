@@ -91,7 +91,7 @@ fn create_and_copy_from_staging_buffers(
         (QUAD_INDICES.as_ptr() as *const u8, QUAD_INDICES_SIZE),
       ],
       #[cfg(feature = "log_alloc")]
-      "DEVICE LOCAL OBJECTS",
+      "Staging buffers",
       #[cfg(feature = "vl")]
       marker,
     )
@@ -153,7 +153,7 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"texture",
+      c"Texture",
     )?;
     let vertex_buffer = create_buffer(
       device,
@@ -162,7 +162,7 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"vertex buffer",
+      c"Vertex buffer",
     )
     .on_err(|_| unsafe { texture.destroy_self(device) })?;
     let index_buffer = create_buffer(
@@ -172,7 +172,7 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"index buffer",
+      c"Index buffer",
     )
     .on_err(|_| unsafe { destroy!(device => &vertex_buffer, &texture) })?;
 
@@ -188,7 +188,7 @@ impl GPUData {
       #[cfg(feature = "log_alloc")]
       Some(["Target image", "Vertex buffer", "Index buffer"]),
       #[cfg(feature = "log_alloc")]
-      "DEVICE LOCAL OBJECTS",
+      "Constant data",
     )
     .on_err(|_| unsafe { destroy!(device => &texture, &index_buffer, &vertex_buffer) })?;
 
