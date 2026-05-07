@@ -1,9 +1,9 @@
-mod ferris;
+mod compute;
+mod last_frames_durations;
 mod render;
 mod utility;
 
 use ash::vk;
-use ferris::Ferris;
 use render::{
   AcquireNextImageError, FrameRenderError, InitializationError, RenderInit, RenderInitError,
   SyncRenderer,
@@ -20,6 +20,8 @@ use winit::{
   event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
 };
+
+use crate::last_frames_durations::LastFramesDurations;
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
@@ -48,10 +50,17 @@ const OUT_OF_BOUNDS_AREA_COLOR: vk::ClearColorValue = vk::ClearColorValue {
 // FIFO_KHR is required to be supported and functions as vsync
 // IMMEDIATE will be chosen over RELAXED_KHR if the latter is not supported
 // otherwise, presentation mode will fallback to FIFO_KHR
-const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::IMMEDIATE;
+const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::FIFO_RELAXED;
 
 // prints current frame 1 / <time since last frame> every x time
 const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);
+// same but for compute frames
+const PRINT_UPS_EVERY: Duration = Duration::from_millis(1000);
+// keep track of the duration of last x frames
+const KEEP_FRAME_DURATION_COUNT_FPS: usize = 16;
+const KEEP_FRAME_DURATION_COUNT_UPS: usize = KEEP_FRAME_DURATION_COUNT_FPS;
+
+const MAX_UPS: f64 = 4200.0;
 
 const START_PAUSED: bool = false; // start application in a paused state
 
@@ -92,9 +101,9 @@ struct StartedStatus {
 struct App {
   status: RenderStatus,
   window_resize_handler: WindowResizeHandler,
-  ferris: Ferris,
   last_update: Instant,
   time_since_last_fps_print: Duration,
+  last_frames_durations: LastFramesDurations<KEEP_FRAME_DURATION_COUNT_FPS>,
   frame_i: usize,
 }
 
@@ -187,20 +196,19 @@ impl App {
       },
     };
 
-    let ferris = Ferris::new([0.2, 0.0], true, true);
-
     let last_update = Instant::now();
     let time_since_last_fps_print = Duration::ZERO;
+    let last_frames_durations = LastFramesDurations::new();
 
     let frame_i: usize = 0;
 
     Self {
       status,
       window_resize_handler,
-      ferris,
       last_update,
       time_since_last_fps_print,
       frame_i,
+      last_frames_durations,
     }
   }
 }
@@ -249,28 +257,21 @@ impl ApplicationHandler for App {
         let time_passed = now - self.last_update;
         self.last_update = now;
 
+        self.last_frames_durations.update_new(time_passed);
+
         self.time_since_last_fps_print += time_passed;
         if self.time_since_last_fps_print >= PRINT_FPS_EVERY {
           self.time_since_last_fps_print -= PRINT_FPS_EVERY;
-          println!("FPS: {}", 1.0 / time_passed.as_secs_f32());
+          let (min, max, average) = self.last_frames_durations.get_min_max_average_fps();
+          println!("FPS: {:.4} {:.4} {:.4}", min, max, average);
         }
 
         if self.frame_i <= RENDER_UNTIL_FRAME {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
           }
-          self.ferris.update(
-            time_passed,
-            PhysicalSize {
-              width: RESOLUTION[0],
-              height: RESOLUTION[1],
-            },
-          );
 
-          if let Err(err) = status
-            .renderer
-            .render_next_frame(self.frame_i, &self.ferris)
-          {
+          if let Err(err) = status.renderer.render_next_frame(self.frame_i) {
             match err {
               FrameRenderError::FailedToAcquireSwapchainImage(AcquireNextImageError::OutOfDate) => {
                 // window resizes can happen while this function is running and be not detected in time

@@ -5,7 +5,7 @@ use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  ferris::Ferris, render::initialization::device::SingleQueues, utility::OnErr,
+  compute::ferris::Ferris, render::initialization::device::SingleQueues, utility::OnErr,
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 

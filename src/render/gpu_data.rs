@@ -35,7 +35,7 @@ pub struct GPUData {
 
   pub vertex_buffer: vk::Buffer,
   pub index_buffer: vk::Buffer,
-
+  // pub instance_buffers: [vk::Buffer; FRAMES_IN_FLIGHT],
   memories: Vec<MemoryWithType>,
 }
 

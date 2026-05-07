@@ -1,11 +1,11 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::window::Window;
 
 use crate::{
-  ferris::Ferris, render::create_objs::create_fence, utility::OnErr, DEBUG_PRINT_FRAME_INFO,
-  SCREENSHOT_SAVE_FILE,
+  compute::ComputeThread, render::create_objs::create_fence, utility::OnErr,
+  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
@@ -13,11 +13,14 @@ use super::{
   device_destroyable::{fill_destroyable_array_with_expression, DeviceManuallyDestroyed},
   errors::InitializationError,
   renderer::Renderer,
-  FrameRenderError, FRAMES_IN_FLIGHT, RENDER_EXTENT,
+  FrameRenderError, FRAMES_IN_FLIGHT,
 };
 
 pub struct SyncRenderer {
   pub renderer: Renderer,
+  // none if thread has terminated
+  compute_thread: Option<ComputeThread>,
+
   last_frame_i: usize,
   // frame resources are free
   frame_fences: [vk::Fence; FRAMES_IN_FLIGHT],
@@ -35,6 +38,7 @@ pub struct SyncRenderer {
 impl SyncRenderer {
   pub fn new(renderer: Renderer) -> Result<Self, InitializationError> {
     let device = &renderer.device;
+    let compute_thread = crate::compute::start_compute(device.inner.clone());
     let frame_fences = fill_destroyable_array_with_expression!(
       device,
       create_fence(
@@ -63,6 +67,7 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
+      compute_thread: Some(compute_thread),
       last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
       frame_fences,
 
@@ -81,11 +86,7 @@ impl SyncRenderer {
     &self.renderer.window
   }
 
-  pub fn render_next_frame(
-    &mut self,
-    cur_total_frame: usize,
-    ferris: &Ferris,
-  ) -> Result<(), FrameRenderError> {
+  pub fn render_next_frame(&mut self, cur_total_frame: usize) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
@@ -176,6 +177,16 @@ impl SyncRenderer {
         .reset_fences(&[self.frame_fences[cur_frame_i]])?;
     }
 
+    // get compute data
+
+    let ferris_render_position = self
+      .compute_thread
+      .as_ref()
+      .unwrap()
+      .result_receiver
+      .recv()
+      .expect("Compute thread data sender has disconnected");
+
     // actual rendering
 
     unsafe {
@@ -188,10 +199,7 @@ impl SyncRenderer {
       self.renderer.record_graphics(
         cur_frame_i,
         cur_image_i as usize,
-        &ferris.get_render_position(PhysicalSize {
-          width: RENDER_EXTENT.width,
-          height: RENDER_EXTENT.height,
-        }),
+        &ferris_render_position,
         record_screenshot,
       )?;
     }
@@ -267,12 +275,13 @@ impl SyncRenderer {
 
 impl Drop for SyncRenderer {
   fn drop(&mut self) {
+    // waits for device
+    let compute_thread = self.compute_thread.take();
+    compute_thread.unwrap().terminate_and_wait();
+
+    log::debug!("Destroying SyncRenderer");
     let device = &self.renderer.device;
     unsafe {
-      device
-        .device_wait_idle()
-        .expect("Failed to wait for device idleness while dropping SyncRenderer");
-
       self.frame_fences.destroy_self(device);
       self.image_available.destroy_self(device);
     }

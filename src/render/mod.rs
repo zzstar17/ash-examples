@@ -44,7 +44,7 @@ const TARGET_API_VERSION: u32 = vk::API_VERSION_1_3;
 
 const SWAPCHAIN_IMAGE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(vk::ImageUsageFlags => vk::ImageUsageFlags::COLOR_ATTACHMENT, vk::ImageUsageFlags::TRANSFER_DST);
 
-const RENDER_EXTENT: vk::Extent2D = vk::Extent2D {
+pub const RENDER_EXTENT: vk::Extent2D = vk::Extent2D {
   width: RESOLUTION[0],
   height: RESOLUTION[1],
 };
