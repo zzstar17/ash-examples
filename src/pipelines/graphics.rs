@@ -6,13 +6,12 @@ use std::{
 use ash::vk;
 
 use crate::{
-  device_destroyable::DeviceManuallyDestroyed,
-  errors::OutOfMemoryError,
   shaders::{self},
   vertex_input_state_create_info,
   vertices::Vertex,
   IMAGE_HEIGHT, IMAGE_WIDTH,
 };
+use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
 use super::PipelineCreationError;
 

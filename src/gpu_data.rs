@@ -1,19 +1,18 @@
 use std::{marker::PhantomData, mem::size_of, ops::BitOr, ptr};
 
 use ash::vk;
+use vkobjects::{destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::{
   allocator::{self, DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers},
   command_pools::{self, initialization::PendingInitialization},
   create_objs::{create_buffer, create_image, create_image_view},
-  device_destroyable::{destroy, DeviceManuallyDestroyed},
-  errors::QueueSubmitError,
-  initialization::device::{Device, PhysicalDevice, SingleQueues},
   render_pass::create_framebuffer,
-  utility::OnErr,
   vertices::Vertex,
   INDICES, VERTICES,
 };
+
+use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 static VERTEX_SIZE: u64 = (size_of::<Vertex>() * VERTICES.len()) as u64;
 static INDEX_SIZE: u64 = (size_of::<u16>() * INDICES.len()) as u64;
@@ -65,7 +64,7 @@ fn create_and_copy_from_staging_buffers(
   queues: &SingleQueues,
   vertex_buffer: vk::Buffer,
   index_buffer: vk::Buffer,
-  #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
 ) -> Result<PendingDataInitialization, DeviceMemoryInitializationError> {
   let graphics_pool = command_pools::initialization::InitCommandBufferPool::new(
     device,
@@ -127,7 +126,7 @@ impl GPUData {
     render_extent: vk::Extent2D,
     output_size: u64,
     queues: &SingleQueues,
-    #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(Self, PendingDataInitialization), DeviceMemoryInitializationError> {
     let render_target = create_image(
       device,

@@ -1,28 +1,33 @@
 use ash::vk;
+use vkinitialization::InstanceOptionalExtensions;
 use std::{marker::PhantomData, ptr};
+use vkinitialization::device::{
+  Device, DeviceExtensions, PhysicalDevice, PhysicalDeviceFeatures, SingleQueues,
+};
+use vkobjects::{
+  destroy,
+  errors::{OutOfMemoryError, QueueSubmitError},
+  utility::OnErr,
+  DeviceManuallyDestroyed, ManuallyDestroyed,
+};
 
 use crate::{
   command_pools::CommandPools,
   create_objs::{create_fence, create_semaphore},
-  device_destroyable::{destroy, DeviceManuallyDestroyed, ManuallyDestroyed},
-  errors::{InitializationError, OutOfMemoryError, QueueSubmitError},
+  errors::InitializationError,
   gpu_data::GPUData,
-  initialization::{
-    self, create_instance,
-    device::{Device, PhysicalDevice, SingleQueues},
-  },
+  initialization,
   pipelines::{self, GraphicsPipeline},
   render_pass::create_render_pass,
-  utility::OnErr,
 };
 
 pub struct Renderer {
   _entry: ash::Entry,
   instance: ash::Instance,
   #[cfg(feature = "vl")]
-  debug_utils: crate::initialization::DebugUtils,
+  debug_utils: vkinitialization::DebugUtils,
   #[cfg(feature = "vl")]
-  marker: crate::initialization::DebugUtilsMarker,
+  marker: vkinitialization::DebugUtilsMarker,
   physical_device: PhysicalDevice,
   device: Device,
   queues: SingleQueues,
@@ -41,12 +46,20 @@ impl Renderer {
     image_height: u32,
     buffer_size: u64,
   ) -> Result<Self, InitializationError> {
-    let entry: ash::Entry = unsafe { initialization::get_entry() };
+    let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
+    let app_info = crate::initialization::get_app_info();
     #[cfg(feature = "vl")]
-    let (instance, debug_utils) = create_instance(&entry)?;
+    let (instance, enabled_optional_extensions, debug_utils) =
+      vkinitialization::create_instance(&entry, app_info, InstanceOptionalExtensions::default())?;
     #[cfg(not(feature = "vl"))]
-    let instance = create_instance(&entry)?;
+    let (instance, enabled_optional_extensions) =
+      vkinitialization::create_instance(&entry, app_info, InstanceOptionalExtensions::default())?;
+
+    log::info!(
+      "Enabled instance extensions:\n{:#?}",
+      enabled_optional_extensions
+    );
 
     let destroy_instance = || unsafe {
       #[cfg(feature = "vl")]
@@ -54,20 +67,29 @@ impl Renderer {
       destroy!(&instance);
     };
 
-    let physical_device =
-      match unsafe { PhysicalDevice::select(&instance) }.on_err(|_| destroy_instance())? {
-        Some(device) => device,
+    // can return an error and can also return no devices
+    let (physical_device, _supported_extensions, _supported_features) =
+      match unsafe { PhysicalDevice::select(&instance, initialization::select_physical_device) }
+        .on_err(|_| destroy_instance())?
+      {
+        Some(tu) => tu,
         None => {
           destroy_instance();
           return Err(InitializationError::NoCompatibleDevices);
         }
       };
 
-    let (device, queues) =
-      Device::create(&instance, &physical_device).on_err(|_| destroy_instance())?;
+    // PhysicalDeviceFeatures::default();
+    let (device, queues) = Device::create(
+      &instance,
+      &physical_device,
+      DeviceExtensions::default(),
+      PhysicalDeviceFeatures::default(),
+    )
+    .on_err(|_| destroy_instance())?;
 
     #[cfg(feature = "vl")]
-    let marker = crate::initialization::DebugUtilsMarker::new(&instance, &device);
+    let marker = vkinitialization::DebugUtilsMarker::new(&instance, &device);
     #[cfg(feature = "vl")]
     unsafe {
       marker.set_queue_labels(queues);

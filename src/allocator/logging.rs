@@ -2,14 +2,12 @@ use std::fmt::{self, Write};
 
 use ash::vk;
 
-use crate::{
-  allocator::mem_type_assignment::{
-    assign_memory_type_indexes_to_objects_for_allocation, UnassignedToMemoryObjectsData,
-  },
-  initialization::device::{Device, PhysicalDevice},
+use crate::allocator::mem_type_assignment::{
+  assign_memory_type_indexes_to_objects_for_allocation, UnassignedToMemoryObjectsData,
 };
 
 use super::{mem_type_assignment::MemoryAssignmentError, MemoryBound};
+use vkinitialization::device::{Device, PhysicalDevice};
 
 fn digit_count(mut n: usize) -> usize {
   if n == 0 {

@@ -8,17 +8,14 @@ mod transfer;
 
 pub use graphics::GraphicsCommandBufferPool;
 pub use transfer::TransferCommandBufferPool;
-
-use crate::{
-  device_destroyable::DeviceManuallyDestroyed, errors::OutOfMemoryError,
-  initialization::device::PhysicalDevice, utility::OnErr,
-};
+use vkinitialization::device::PhysicalDevice;
+use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
 fn create_command_pool(
   device: &ash::Device,
   flags: vk::CommandPoolCreateFlags,
   queue_family_index: u32,
-  #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &std::ffi::CStr,
 ) -> Result<vk::CommandPool, OutOfMemoryError> {
   let command_pool_create_info = vk::CommandPoolCreateInfo {
@@ -44,7 +41,7 @@ fn allocate_primary_command_buffers(
   device: &ash::Device,
   command_pool: vk::CommandPool,
   command_buffer_count: u32,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] names: &[&std::ffi::CStr],
 ) -> Result<Vec<vk::CommandBuffer>, OutOfMemoryError> {
   let allocate_info = vk::CommandBufferAllocateInfo {
@@ -100,7 +97,7 @@ impl CommandPools {
   pub fn new(
     device: &ash::Device,
     physical_device: &PhysicalDevice,
-    #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, OutOfMemoryError> {
     let graphics_pool = GraphicsCommandBufferPool::create(
       device,

@@ -1,6 +1,5 @@
 use ash::vk;
-
-use crate::errors::OutOfMemoryError;
+use vkobjects::errors::OutOfMemoryError;
 
 pub trait MemoryBound {
   unsafe fn bind(

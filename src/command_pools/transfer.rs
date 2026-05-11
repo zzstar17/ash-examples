@@ -1,11 +1,10 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use vkinitialization::device::QueueFamilies;
+use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
-use crate::{
-  device_destroyable::DeviceManuallyDestroyed, errors::OutOfMemoryError,
-  initialization::device::QueueFamilies, IMAGE_HEIGHT, IMAGE_WIDTH,
-};
+use crate::{IMAGE_HEIGHT, IMAGE_WIDTH};
 
 use super::dependency_info;
 
@@ -18,7 +17,7 @@ impl TransferCommandBufferPool {
   pub fn create(
     device: &ash::Device,
     queue_families: &QueueFamilies,
-    #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, OutOfMemoryError> {
     let flags = vk::CommandPoolCreateFlags::TRANSIENT;
     let pool = super::create_command_pool(

@@ -1,8 +1,9 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use vkobjects::errors::OutOfMemoryError;
 
-use crate::{errors::OutOfMemoryError, IMAGE_FORMAT};
+use crate::IMAGE_FORMAT;
 
 pub fn create_render_pass(device: &ash::Device) -> Result<vk::RenderPass, OutOfMemoryError> {
   let image_attachment = vk::AttachmentDescription {

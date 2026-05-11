@@ -5,13 +5,13 @@ use mem_type_assignment::{
   assign_memory_type_indexes_to_objects_for_allocation, MemoryAssignmentError,
   UnassignedToMemoryObjectsData,
 };
-
-use crate::{
-  device_destroyable::DeviceManuallyDestroyed,
+use vkobjects::{
   errors::OutOfMemoryError,
-  initialization::device::{Device, PhysicalDevice},
   utility::{self, OnErr},
+  DeviceManuallyDestroyed,
 };
+
+use vkinitialization::device::{Device, PhysicalDevice};
 
 #[cfg(feature = "log_alloc")]
 mod logging;

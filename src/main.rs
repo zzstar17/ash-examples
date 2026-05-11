@@ -2,7 +2,6 @@
 mod allocator;
 mod command_pools;
 mod create_objs;
-mod device_destroyable;
 mod errors;
 mod gpu_data;
 mod initialization;
@@ -10,8 +9,6 @@ mod pipelines;
 mod render_pass;
 mod renderer;
 mod shaders;
-#[allow(dead_code)]
-mod utility;
 mod vertices;
 
 use ash::vk;
@@ -19,15 +16,6 @@ use std::ffi::CStr;
 use vertices::Vertex;
 
 use crate::renderer::Renderer;
-
-// validation layers names should be valid cstrings (not contain null bytes nor invalid characters)
-#[cfg(feature = "vl")]
-const VALIDATION_LAYERS: [&CStr; 1] = [c"VK_LAYER_KHRONOS_validation"];
-#[cfg(feature = "vl")]
-const ADDITIONAL_VALIDATION_FEATURES: [vk::ValidationFeatureEnableEXT; 2] = [
-  vk::ValidationFeatureEnableEXT::BEST_PRACTICES,
-  vk::ValidationFeatureEnableEXT::SYNCHRONIZATION_VALIDATION,
-];
 
 const TARGET_API_VERSION: u32 = vk::API_VERSION_1_3;
 

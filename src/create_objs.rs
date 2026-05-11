@@ -3,12 +3,13 @@ use std::{ffi::CStr, marker::PhantomData, ptr};
 #[cfg(feature = "vl")]
 use ash::vk::Handle;
 use ash::vk::{self};
+use vkobjects::errors::OutOfMemoryError;
 
-use crate::{errors::OutOfMemoryError, IMAGE_FORMAT};
+use crate::IMAGE_FORMAT;
 
 pub fn create_semaphore(
   device: &ash::Device,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Semaphore, OutOfMemoryError> {
   let create_info = vk::SemaphoreCreateInfo::default();
@@ -22,7 +23,7 @@ pub fn create_semaphore(
 
 pub fn create_fence(
   device: &ash::Device,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Fence, OutOfMemoryError> {
   let create_info = vk::FenceCreateInfo::default();
@@ -38,7 +39,7 @@ pub fn create_buffer(
   device: &ash::Device,
   size: u64,
   usage: vk::BufferUsageFlags,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Buffer, OutOfMemoryError> {
   let create_info = vk::BufferCreateInfo {
@@ -65,7 +66,7 @@ pub fn create_image(
   width: u32,
   height: u32,
   usage: vk::ImageUsageFlags,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::Image, OutOfMemoryError> {
   // 1 color layer 2d image

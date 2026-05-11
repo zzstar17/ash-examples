@@ -6,9 +6,9 @@ use std::{
   os::raw::c_void,
   ptr::{self},
 };
-
+use vkobjects::ManuallyDestroyed;
 use crate::{
-  device_destroyable::ManuallyDestroyed, errors::OutOfMemoryError,
+  errors::OutOfMemoryError,
   initialization::device::queues::Queue,
 };
 

@@ -6,18 +6,22 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ash = {version = "0.38", default-features = false, features = ["debug"]}
-log = {version = "0.4"}
+ash = { version = "0.38", default-features = false, features = ["debug"] }
+log = { version = "0.4" }
 env_logger = "0.11.0"
 image = "0.25.10"
 thiserror = "2.0.18"
+vkobjects = { git = "https://github.com/zzstar17/vkobjects" }
+vkinitialization = { version = "0.1.5", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
+    "graphics_family",
+    "transfer_family",
+] }
 
 [features]
-"default" = ["load", "vl", "graphics_family", "transfer_family", "log_alloc"]
-"load" = ["ash/loaded"]
-"link" = ["ash/linked"]
-"vl" = []
-"graphics_family" = []
-"compute_family" = []
-"transfer_family" = []
-"log_alloc" = ["ash/debug"] # log extended allocation info to debug or error streams
+"default" = ["load", "vl", "log_alloc"]
+"load" = ["ash/loaded", "vkinitialization/load"]
+"link" = ["ash/linked", "vkinitialization/link"]
+"vl" = ["vkinitialization/vl"]
+"log_alloc" = [
+    "ash/debug",
+] # log extended allocation info to debug or error streams

@@ -4,14 +4,14 @@ use std::{
 };
 
 use ash::vk;
-
-use crate::{
-  create_objs::create_buffer,
-  device_destroyable::{fill_destroyable_array_from_iter_using_default, DeviceManuallyDestroyed},
+use vkinitialization::device::{Device, PhysicalDevice};
+use vkobjects::{
   errors::{DeviceIsLost, OutOfMemoryError},
-  initialization::device::{Device, PhysicalDevice},
   utility::OnErr,
+  DeviceManuallyDestroyed,
 };
+
+use crate::create_objs::create_buffer;
 
 use super::{AllocationError, MemoryBound, MemoryWithType};
 
@@ -63,10 +63,10 @@ pub unsafe fn create_single_use_staging_buffers<const S: usize>(
   physical_device: &PhysicalDevice,
   data: [(*const u8, vk::DeviceSize); S],
   #[cfg(feature = "log_alloc")] allocation_name: &str,
-  #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
 ) -> Result<SingleUseStagingBuffers<S>, DeviceMemoryInitializationError> {
   assert!(!data.is_empty());
-  let staging_buffers: [vk::Buffer; S] = fill_destroyable_array_from_iter_using_default!(
+  let staging_buffers: [vk::Buffer; S] = vkobjects::fill_destroyable_array_from_iter_using_default!(
     device,
     data.iter().map(|&(_, size)| create_buffer(
       device,

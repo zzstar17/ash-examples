@@ -1,12 +1,12 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::{vk, Device};
-
-use crate::{
-  create_objs::create_fence,
-  device_destroyable::DeviceManuallyDestroyed,
+use vkobjects::{
   errors::{OutOfMemoryError, QueueSubmitError},
+  DeviceManuallyDestroyed,
 };
+
+use crate::create_objs::create_fence;
 
 pub struct InitCommandBufferPool {
   pool: vk::CommandPool,
@@ -34,7 +34,7 @@ impl InitCommandBufferPool {
   pub fn new(
     device: &ash::Device,
     queue_family_index: u32,
-    #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, OutOfMemoryError> {
     let flags = vk::CommandPoolCreateFlags::TRANSIENT;
     let pool = super::create_command_pool(
@@ -85,7 +85,7 @@ impl InitCommandBufferPool {
     self,
     device: &Device,
     queue: vk::Queue,
-    #[cfg(feature = "vl")] marker: &crate::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<PendingInitialization, (Self, QueueSubmitError)> {
     let cb: vk::CommandBuffer = self.cb;
     if let Err(err) = device.end_command_buffer(cb) {
