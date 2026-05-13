@@ -141,6 +141,7 @@ dependencies = [
  "image",
  "log",
  "thiserror",
+ "vkallocator",
  "vkinitialization",
  "vkobjects",
 ]
@@ -1240,6 +1241,18 @@ dependencies = [
  "aligned-vec",
  "num-traits",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vkallocator"
+version = "0.1.0"
+source = "git+https://github.com/zzstar17/vkallocator#d717382dc198f2fa2cd57a812c4f2a4770961b7c"
+dependencies = [
+ "ash",
+ "log",
+ "thiserror",
+ "vkinitialization",
+ "vkobjects",
 ]
 
 [[package]]

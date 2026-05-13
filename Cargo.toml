@@ -16,12 +16,13 @@ vkinitialization = { version = "0.1.5", git = "https://github.com/zzstar17/vkini
     "graphics_family",
     "transfer_family",
 ] }
+vkallocator = { git = "https://github.com/zzstar17/vkallocator" }
 
 [features]
 "default" = ["load", "vl", "log_alloc"]
 "load" = ["ash/loaded", "vkinitialization/load"]
 "link" = ["ash/linked", "vkinitialization/link"]
-"vl" = ["vkinitialization/vl"]
+"vl" = ["vkinitialization/vl", "vkallocator/vl"]
 "log_alloc" = [
     "ash/debug",
 ] # log extended allocation info to debug or error streams

@@ -1,10 +1,10 @@
 use std::{marker::PhantomData, mem::size_of, ops::BitOr, ptr};
 
 use ash::vk;
+use vkallocator::{self, DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers};
 use vkobjects::{destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::{
-  allocator::{self, DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers},
   command_pools::{self, initialization::PendingInitialization},
   create_objs::{create_buffer, create_image, create_image_view},
   render_pass::create_framebuffer,
@@ -74,7 +74,7 @@ fn create_and_copy_from_staging_buffers(
   )?;
 
   unsafe {
-    let staging_buffers = allocator::create_single_use_staging_buffers(
+    let staging_buffers = vkallocator::create_single_use_staging_buffers(
       device,
       physical_device,
       [
@@ -159,7 +159,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe { destroy!(device => &vertex_buffer, &render_target) })?;
 
-    let device_alloc = allocator::allocate_and_bind_memory(
+    let device_alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [
@@ -196,7 +196,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe { destroy!(device => &render_target, &pending_device_init, &index_buffer, &vertex_buffer, &device_alloc) })?;
 
-    let host_output_buffer_alloc = allocator::allocate_and_bind_memory(
+    let host_output_buffer_alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [

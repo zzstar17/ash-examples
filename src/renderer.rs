@@ -1,8 +1,8 @@
 use ash::vk;
-use vkinitialization::InstanceOptionalExtensions;
 use std::{marker::PhantomData, ptr};
-use vkinitialization::device::{
-  Device, DeviceExtensions, PhysicalDevice, PhysicalDeviceFeatures, SingleQueues,
+use vkinitialization::{
+  device::{Device, DeviceExtensions, PhysicalDevice, PhysicalDeviceFeatures, SingleQueues},
+  InstanceOptionalExtensions,
 };
 use vkobjects::{
   destroy,

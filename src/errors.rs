@@ -1,24 +1,11 @@
+use vkallocator::{AllocationError, DeviceMemoryInitializationError};
 use vkinitialization::{
   device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
   InstanceCreationError,
 };
-use vkobjects::errors::{DeviceIsLost, OutOfMemoryError, QueueSubmitError};
+use vkobjects::errors::{OutOfMemoryError, QueueSubmitError};
 
-use crate::{
-  allocator::{AllocationError, DeviceMemoryInitializationError},
-  pipelines::{PipelineCacheError, PipelineCreationError},
-};
-
-impl From<QueueSubmitError> for DeviceMemoryInitializationError {
-  fn from(value: QueueSubmitError) -> Self {
-    match value {
-      QueueSubmitError::DeviceIsLost(_) => {
-        DeviceMemoryInitializationError::DeviceIsLost(DeviceIsLost {})
-      }
-      QueueSubmitError::OutOfMemory(v) => v.into(),
-    }
-  }
-}
+use crate::pipelines::{PipelineCacheError, PipelineCreationError};
 
 #[derive(thiserror::Error, Debug)]
 pub enum InitializationError {
