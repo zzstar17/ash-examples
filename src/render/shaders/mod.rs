@@ -9,8 +9,7 @@ use ash::vk;
 pub mod shader;
 
 pub use shader::Shader;
-
-use crate::render::errors::OutOfMemoryError;
+use vkobjects::errors::OutOfMemoryError;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ShaderError {

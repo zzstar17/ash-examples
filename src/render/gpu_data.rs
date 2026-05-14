@@ -1,21 +1,17 @@
 use std::ops::BitOr;
 
+use crate::render::{
+  command_pools::{self, initialization::PendingInitialization},
+  create_objs::{create_buffer, create_image, create_image_view},
+  render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
+};
 use ash::vk;
-
-use crate::{
-  render::{
-    allocator::{self, MemoryWithType},
-    command_pools::{self, initialization::PendingInitialization},
-    create_objs::{create_buffer, create_image, create_image_view},
-    device_destroyable::{destroy, DeviceManuallyDestroyed},
-    errors::QueueSubmitError,
-    initialization::device::{Device, PhysicalDevice, SingleQueues},
-    render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
-  },
-  utility::{const_flag_bitor, OnErr},
+use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
+use vkobjects::{
+  const_flag_bitor, destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed,
 };
 
-use super::allocator::{DeviceMemoryInitializationError, SingleUseStagingBuffers};
+use vkallocator::{DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers};
 
 pub const TEXTURE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(
   vk::ImageUsageFlags =>
@@ -73,7 +69,7 @@ fn create_and_copy_from_staging_buffers(
   texture: vk::Image,
   texture_extent: vk::Extent2D,
   texture_data: Vec<u8>,
-  #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
 ) -> Result<PendingDataInitialization, DeviceMemoryInitializationError> {
   let graphics_pool = command_pools::initialization::InitCommandBufferPool::new(
     device,
@@ -82,7 +78,7 @@ fn create_and_copy_from_staging_buffers(
     marker,
   )?;
   unsafe {
-    let staging_buffers = allocator::create_single_use_staging_buffers(
+    let staging_buffers = vkallocator::create_single_use_staging_buffers(
       device,
       physical_device,
       [
@@ -142,7 +138,7 @@ impl GPUData {
     texture_format: vk::Format,
     texture_data: Vec<u8>,
     queues: &SingleQueues,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(Self, PendingDataInitialization), DeviceMemoryInitializationError> {
     let texture = create_image(
       device,
@@ -155,7 +151,7 @@ impl GPUData {
       #[cfg(feature = "vl")]
       c"Texture",
     )?;
-    let vertex_buffer = create_buffer(
+    let vertex_buffer: vk::Buffer = create_buffer(
       device,
       VERTICES_SIZE,
       vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -165,7 +161,7 @@ impl GPUData {
       c"Vertex buffer",
     )
     .on_err(|_| unsafe { texture.destroy_self(device) })?;
-    let index_buffer = create_buffer(
+    let index_buffer: vk::Buffer = create_buffer(
       device,
       QUAD_INDICES_SIZE,
       vk::BufferUsageFlags::INDEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -176,7 +172,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe { destroy!(device => &vertex_buffer, &texture) })?;
 
-    let device_alloc = allocator::allocate_and_bind_memory(
+    let device_alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [

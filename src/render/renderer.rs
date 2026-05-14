@@ -2,27 +2,28 @@ use std::mem::MaybeUninit;
 
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use vkinitialization::{
+  device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
+  Surface,
+};
+use vkobjects::{
+  destroy, errors::OutOfMemoryError, fill_destroyable_array_with_expression, utility::OnErr,
+  DeviceManuallyDestroyed, ManuallyDestroyed,
+};
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  compute::ferris::Ferris, render::initialization::device::SingleQueues, utility::OnErr,
-  INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
+  compute::ferris::Ferris, INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION,
+  SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
 use super::{
   command_pools::GraphicsCommandBufferPool,
   descriptor_sets::DescriptorPool,
-  device_destroyable::{
-    destroy, fill_destroyable_array_with_expression, DeviceManuallyDestroyed, ManuallyDestroyed,
-  },
-  errors::{ImageError, InitializationError, OutOfMemoryError, SwapchainRecreationError},
+  errors::{ImageError, InitializationError, SwapchainRecreationError},
   format_conversions::{self, KNOWN_FORMATS},
   gpu_data::GPUData,
-  initialization::{
-    self,
-    device::{self, Device, PhysicalDevice},
-    Surface,
-  },
+  initialization::{self},
   pipelines::{self, GraphicsPipeline},
   render_object::RenderPosition,
   render_pass::create_render_pass,
@@ -50,9 +51,9 @@ pub struct Renderer {
   _entry: ash::Entry,
   instance: ash::Instance,
   #[cfg(feature = "vl")]
-  debug_utils: initialization::DebugUtils,
+  debug_utils: vkinitialization::DebugUtils,
   #[cfg(feature = "vl")]
-  pub debug_utils_marker: initialization::DebugUtilsMarker,
+  pub debug_utils_marker: vkinitialization::DebugUtilsMarker,
   physical_device: PhysicalDevice,
   pub device: Device,
   pub queues: SingleQueues,
@@ -148,27 +149,48 @@ impl Renderer {
     .on_err(|_| destroy_instance())?;
     destructor.push(&surface);
 
-    let (physical_device, physical_device_supported_extensions, physical_device_supported_features) =
-      match unsafe { PhysicalDevice::select(&instance, &surface) }.on_err(|_| destroy_instance())? {
-        Some(device) => device,
-        None => {
-          destroy_instance();
-          return Err(InitializationError::NoCompatibleDevices);
-        }
-      };
+    // can return an error and can also return no devices
+    let physical_device_creation = match unsafe {
+      PhysicalDevice::select(&instance, &surface, initialization::select_physical_device)
+    }
+    .on_err(|_| destroy_instance())?
+    {
+      Some(tu) => tu,
+      None => {
+        destroy_instance();
+        return Err(InitializationError::NoCompatibleDevices);
+      }
+    };
 
     let (device, queues) = Device::create(
       &instance,
-      &physical_device,
-      physical_device_supported_extensions,
-      physical_device_supported_features,
+      &physical_device_creation,
+      DeviceExtensions {
+        swapchain: true,
+        ..Default::default()
+      },
+      DeviceExtensions {
+        memory_priority: true,
+        pageable_device_local_memory: true,
+        swapchain_maintenance1: true,
+        ..Default::default()
+      },
+      DeviceFeatures {
+        synchronization2: true,
+        ..Default::default()
+      },
+      DeviceFeatures {
+        swapchain_maintenance1: true,
+        ..Default::default()
+      },
     )
     .on_err(|_| destroy_instance())?;
     destructor.push(&device);
 
+    let physical_device = physical_device_creation.physical_device;
+
     #[cfg(feature = "vl")]
-    let debug_utils_marker =
-      crate::render::initialization::DebugUtilsMarker::new(&instance, &device);
+    let debug_utils_marker = vkinitialization::DebugUtilsMarker::new(&instance, &device);
     #[cfg(feature = "vl")]
     unsafe {
       debug_utils_marker.set_queue_labels(queues);
@@ -194,7 +216,7 @@ impl Renderer {
     } else {
       KNOWN_FORMATS
         .into_iter()
-        .find(|&f| device::format_is_supported(&instance, *physical_device, f))
+        .find(|&f| initialization::format_is_supported(&instance, *physical_device, f))
         .unwrap()
     };
 

@@ -211,6 +211,9 @@ dependencies = [
  "raw-window-handle",
  "take_mut",
  "thiserror 2.0.18",
+ "vkallocator",
+ "vkinitialization",
+ "vkobjects",
  "winit",
 ]
 
@@ -2213,6 +2216,41 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vkallocator"
+version = "0.1.0"
+source = "git+https://github.com/zzstar17/vkallocator#d717382dc198f2fa2cd57a812c4f2a4770961b7c"
+dependencies = [
+ "ash",
+ "log",
+ "thiserror 2.0.18",
+ "vkinitialization",
+ "vkobjects",
+]
+
+[[package]]
+name = "vkinitialization"
+version = "0.1.7"
+source = "git+https://github.com/zzstar17/vkinitialization#57797315edf756b4b1c4f18ba90e4bc39ad3db61"
+dependencies = [
+ "ash",
+ "ash-window",
+ "itertools",
+ "log",
+ "raw-window-handle",
+ "thiserror 2.0.18",
+ "vkobjects",
+]
+
+[[package]]
+name = "vkobjects"
+version = "0.1.1"
+source = "git+https://github.com/zzstar17/vkobjects#daee39bb066f4c95bd4b445a0fa4d6add01cf862"
+dependencies = [
+ "ash",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "walkdir"

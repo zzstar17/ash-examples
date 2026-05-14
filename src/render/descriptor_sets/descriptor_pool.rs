@@ -1,8 +1,7 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
-
-use crate::render::{device_destroyable::DeviceManuallyDestroyed, errors::OutOfMemoryError};
+use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
 use super::texture_write_descriptor_set;
 

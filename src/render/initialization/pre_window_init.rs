@@ -1,13 +1,10 @@
 use raw_window_handle::{HandleError, HasDisplayHandle};
+use vkinitialization::{InstanceCreationError, InstanceOptionalExtensions};
+use vkobjects::ManuallyDestroyed;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
-use crate::render::{
-  device_destroyable::ManuallyDestroyed, errors::InitializationError, renderer::Renderer,
-  SyncRenderer,
-};
+use crate::render::{errors::InitializationError, renderer::Renderer, SyncRenderer};
 use std::mem;
-
-use super::InstanceCreationError;
 
 use std::{
   self,
@@ -19,7 +16,7 @@ pub struct RenderInit {
   pub entry: ash::Entry,
   pub instance: ash::Instance,
   #[cfg(feature = "vl")]
-  pub debug_utils: super::DebugUtils,
+  pub debug_utils: vkinitialization::DebugUtils,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -39,17 +36,23 @@ impl From<InstanceCreationError> for RenderInitError {
 
 impl RenderInit {
   pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let entry: ash::Entry = unsafe { super::get_entry() };
+    let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
     let display_handle = event_loop
       .display_handle()
       .map_err(RenderInitError::DisplayHandle)?;
 
+    let app_info = crate::render::initialization::get_app_info();
+    let optional_extensions = InstanceOptionalExtensions {
+      get_surface_capabilities2: true,
+      surface_maintenance1: true,
+    };
     #[cfg(feature = "vl")]
     let (instance, _instance_optional_extensions, debug_utils) =
-      super::create_instance(&entry, display_handle)?;
+      vkinitialization::create_instance(&entry, app_info, optional_extensions, display_handle)?;
     #[cfg(not(feature = "vl"))]
-    let (instance, _instance_optional_extensions) = super::create_instance(&entry, display_handle)?;
+    let (instance, _instance_optional_extensions) =
+      vkinitialization::create_instance(&entry, app_info, optional_extensions, display_handle)?;
 
     Ok(Self {
       entry,
@@ -66,7 +69,7 @@ impl RenderInit {
 
   // take values out without calling drop
   #[cfg(feature = "vl")]
-  pub fn deconstruct(mut self) -> (ash::Entry, ash::Instance, super::DebugUtils) {
+  pub fn deconstruct(mut self) -> (ash::Entry, ash::Instance, vkinitialization::DebugUtils) {
     unsafe {
       // could't find a less stupid way of doing this
       let mut entry: MaybeUninit<ash::Entry> = MaybeUninit::uninit();

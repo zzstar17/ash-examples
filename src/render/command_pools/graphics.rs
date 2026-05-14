@@ -1,20 +1,19 @@
 use std::{cmp::Ordering, marker::PhantomData, ptr};
 
 use ash::vk;
+use vkinitialization::device::QueueFamilies;
+use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
   render::{
     descriptor_sets::DescriptorPool,
-    device_destroyable::DeviceManuallyDestroyed,
-    errors::OutOfMemoryError,
     gpu_data::GPUData,
-    initialization::device::QueueFamilies,
     pipelines::GraphicsPipeline,
     render_object::{RenderPosition, QUAD_INDICES},
     render_targets::RenderTargets,
     RENDER_EXTENT,
   },
-  utility, BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
+  BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
 };
 
 use super::dependency_info;
@@ -28,8 +27,8 @@ impl GraphicsCommandBufferPool {
   pub fn create(
     device: &ash::Device,
     queue_families: &QueueFamilies,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
-  ) -> Result<Self, vk::Result> {
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, OutOfMemoryError> {
     let flags = vk::CommandPoolCreateFlags::TRANSIENT;
     let pool = super::create_command_pool(
       device,

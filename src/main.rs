@@ -1,7 +1,6 @@
 mod compute;
 mod last_frames_durations;
 mod render;
-mod utility;
 
 use ash::vk;
 use render::{

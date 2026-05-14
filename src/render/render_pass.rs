@@ -1,8 +1,7 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
-
-use crate::render::errors::OutOfMemoryError;
+use vkobjects::errors::OutOfMemoryError;
 
 pub fn create_render_pass(
   device: &ash::Device,
