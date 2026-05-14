@@ -1,7 +1,7 @@
 use ash::vk;
 use std::{marker::PhantomData, ptr};
 use vkinitialization::{
-  device::{Device, DeviceExtensions, PhysicalDevice, PhysicalDeviceFeatures, SingleQueues},
+  device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
   InstanceOptionalExtensions,
 };
 use vkobjects::{
@@ -68,7 +68,7 @@ impl Renderer {
     };
 
     // can return an error and can also return no devices
-    let (physical_device, _supported_extensions, _supported_features) =
+    let physical_device_creation =
       match unsafe { PhysicalDevice::select(&instance, initialization::select_physical_device) }
         .on_err(|_| destroy_instance())?
       {
@@ -82,11 +82,22 @@ impl Renderer {
     // PhysicalDeviceFeatures::default();
     let (device, queues) = Device::create(
       &instance,
-      &physical_device,
+      &physical_device_creation,
       DeviceExtensions::default(),
-      PhysicalDeviceFeatures::default(),
+      DeviceExtensions {
+        memory_priority: true,
+        pageable_device_local_memory: true,
+        ..Default::default()
+      },
+      DeviceFeatures {
+        synchronization2: true,
+        ..Default::default()
+      },
+      DeviceFeatures::default(),
     )
     .on_err(|_| destroy_instance())?;
+
+    let physical_device = physical_device_creation.physical_device;
 
     #[cfg(feature = "vl")]
     let marker = vkinitialization::DebugUtilsMarker::new(&instance, &device);
