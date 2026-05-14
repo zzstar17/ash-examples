@@ -10,14 +10,13 @@ use ash::vk::{self, Handle};
 use crate::{
   render::{
     descriptor_sets::DescriptorPool,
-    device_destroyable::DeviceManuallyDestroyed,
-    errors::OutOfMemoryError,
     render_object::RenderPosition,
     shaders::{self, Shader},
     vertices::Vertex,
   },
   vertex_input_state_create_info,
 };
+use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
 use super::PipelineCreationError;
 

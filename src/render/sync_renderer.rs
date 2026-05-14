@@ -1,19 +1,16 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
-  ferris::Ferris, render::create_objs::create_fence, utility::OnErr, DEBUG_PRINT_FRAME_INFO,
-  SCREENSHOT_SAVE_FILE,
+  ferris::Ferris, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
-  create_objs::create_semaphore,
-  device_destroyable::{fill_destroyable_array_with_expression, DeviceManuallyDestroyed},
-  errors::InitializationError,
-  renderer::Renderer,
-  FrameRenderError, FRAMES_IN_FLIGHT, RENDER_EXTENT,
+  create_objs::create_semaphore, errors::InitializationError, renderer::Renderer, FrameRenderError,
+  FRAMES_IN_FLIGHT, RENDER_EXTENT,
 };
 
 pub struct SyncRenderer {

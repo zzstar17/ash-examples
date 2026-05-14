@@ -4,21 +4,11 @@ use std::{
 };
 
 use ash::vk;
+use vkallocator::{DeviceMemoryInitializationError, MemoryWithType};
+use vkinitialization::device::{Device, PhysicalDevice};
+use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
-use crate::{
-  render::{
-    allocator,
-    allocator::DeviceMemoryInitializationError,
-    create_objs::create_buffer,
-    device_destroyable::{destroy, DeviceManuallyDestroyed},
-    errors::OutOfMemoryError,
-    initialization::device::{Device, PhysicalDevice},
-    IMAGE_WITH_RESOLUTION_MINIMAL_SIZE,
-  },
-  utility::OnErr,
-};
-
-use super::allocator::MemoryWithType;
+use crate::render::{create_objs::create_buffer, IMAGE_WITH_RESOLUTION_MINIMAL_SIZE};
 
 pub struct ScreenshotBuffer {
   pub buffer: vk::Buffer,
@@ -34,7 +24,7 @@ impl ScreenshotBuffer {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, DeviceMemoryInitializationError> {
     let buffer = create_buffer(
       &device,
@@ -46,7 +36,7 @@ impl ScreenshotBuffer {
       c"screenshot buffer",
     )?;
 
-    let alloc = allocator::allocate_and_bind_memory(
+    let alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [vk::MemoryPropertyFlags::HOST_VISIBLE],

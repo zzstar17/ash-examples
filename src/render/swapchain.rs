@@ -7,26 +7,22 @@ use std::{
 };
 
 pub use ash::vk;
+use vkinitialization::{
+  device::{Device, PhysicalDevice, QueueFamilies},
+  Surface, SurfaceError,
+};
+use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 use winit::dpi::PhysicalSize;
 
 use crate::{
   render::{
     create_objs::{create_fence, create_semaphore},
-    initialization::device::Device,
+    errors::error_chain_fmt,
   },
-  utility::OnErr,
   PREFERRED_PRESENTATION_METHOD,
 };
 
-use super::{
-  create_objs::create_image_view,
-  device_destroyable::DeviceManuallyDestroyed,
-  errors::{error_chain_fmt, OutOfMemoryError},
-  initialization::{
-    device::{PhysicalDevice, QueueFamilies},
-    Surface, SurfaceError,
-  },
-};
+use super::create_objs::create_image_view;
 
 // VK_ERROR_NATIVE_WINDOW_IN_USE_KHR shouldn't happen unless some other program somehow hijacks
 //    the created window other API
@@ -138,7 +134,7 @@ impl Swapchains {
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     let loader = ash::khr::swapchain::Device::new(instance, device);
 
@@ -219,7 +215,7 @@ impl Swapchains {
     surface: &Surface,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(RecreationChanges, bool), SwapchainCreationError> {
     let destroyed_old = if let Some(old) = &self.old {
       log::info!(
@@ -379,7 +375,7 @@ impl Swapchain {
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     let capabilities = unsafe { surface.get_capabilities(**physical_device) }?;
     let image_format = select_swapchain_image_format(**physical_device, surface)?;
@@ -420,7 +416,7 @@ impl Swapchain {
     swapchain_loader: &ash::khr::swapchain::Device,
     window_size: PhysicalSize<u32>,
     image_usages: vk::ImageUsageFlags,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(Self, RecreationChanges), SwapchainCreationError> {
     let capabilities = unsafe { surface.get_capabilities(**physical_device) }?;
     let image_format = select_swapchain_image_format(**physical_device, surface)?;
@@ -475,7 +471,7 @@ impl Swapchain {
     present_mode: vk::PresentModeKHR,
     extent: vk::Extent2D,
     old_swapchain: vk::SwapchainKHR,
-    #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, SwapchainCreationError> {
     // it is usually recommended to use one more than the minimum number of images
     let image_count = if capabilities.max_image_count > 0 {

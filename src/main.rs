@@ -1,6 +1,5 @@
 mod ferris;
 mod render;
-mod utility;
 
 use ash::vk;
 use ferris::Ferris;

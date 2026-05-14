@@ -1,11 +1,13 @@
 use ash::vk;
 use raw_window_handle::HandleError;
-
-use crate::render::initialization::device::{DeviceCreationError, DeviceSelectionError};
+use vkallocator::{AllocationError, DeviceMemoryInitializationError};
+use vkinitialization::{
+  device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
+  InstanceCreationError,
+};
+use vkobjects::errors::{DeviceIsLost, OutOfMemoryError, QueueSubmitError};
 
 use super::{
-  allocator::{AllocationError, DeviceMemoryInitializationError},
-  initialization::InstanceCreationError,
   pipelines::{PipelineCacheError, PipelineCreationError},
   swapchain::{AcquireNextImageError, SwapchainCreationError},
 };
@@ -23,78 +25,12 @@ pub fn error_chain_fmt(
   Ok(())
 }
 
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum OutOfMemoryError {
-  #[error("Out of device memory")]
-  OutOfDeviceMemory,
-  #[error("Out of host memory")]
-  OutOfHostMemory,
-}
-
-impl From<vk::Result> for OutOfMemoryError {
-  fn from(value: vk::Result) -> Self {
-    match value {
-      vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => OutOfMemoryError::OutOfDeviceMemory,
-      vk::Result::ERROR_OUT_OF_HOST_MEMORY => OutOfMemoryError::OutOfHostMemory,
-      _ => {
-        panic!("Invalid vk::Result to OutOfMemoryError cast: {:?}", value);
-      }
-    }
-  }
-}
-
-impl From<OutOfMemoryError> for vk::Result {
-  fn from(value: OutOfMemoryError) -> Self {
-    match value {
-      OutOfMemoryError::OutOfDeviceMemory => vk::Result::ERROR_OUT_OF_DEVICE_MEMORY,
-      OutOfMemoryError::OutOfHostMemory => vk::Result::ERROR_OUT_OF_HOST_MEMORY,
-    }
-  }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
   #[error("OS error")]
   OsError(#[source] winit::error::OsError),
   #[error("Failed to get handle")]
   HandleError(#[source] HandleError),
-}
-
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-#[error("Vulkan returned ERROR_DEVICE_LOST. See https://docs.vulkan.org/spec/latest/chapters/devsandqueues.html#devsandqueues-lost-device")]
-pub struct DeviceIsLost;
-
-#[derive(thiserror::Error, Debug, Clone, Copy)]
-pub enum QueueSubmitError {
-  #[error(transparent)]
-  OutOfMemory(#[from] OutOfMemoryError),
-  #[error(transparent)]
-  DeviceIsLost(#[from] DeviceIsLost),
-}
-
-impl From<vk::Result> for QueueSubmitError {
-  fn from(value: vk::Result) -> Self {
-    match value {
-      vk::Result::ERROR_OUT_OF_DEVICE_MEMORY | vk::Result::ERROR_OUT_OF_HOST_MEMORY => {
-        QueueSubmitError::OutOfMemory(value.into())
-      }
-      vk::Result::ERROR_DEVICE_LOST => QueueSubmitError::DeviceIsLost(DeviceIsLost {}),
-      _ => {
-        panic!("Invalid vk::Result to QueueSubmitError cast: {:?}", value);
-      }
-    }
-  }
-}
-
-impl From<QueueSubmitError> for DeviceMemoryInitializationError {
-  fn from(value: QueueSubmitError) -> Self {
-    match value {
-      QueueSubmitError::DeviceIsLost(_) => {
-        DeviceMemoryInitializationError::DeviceIsLost(DeviceIsLost {})
-      }
-      QueueSubmitError::OutOfMemory(v) => v.into(),
-    }
-  }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -115,7 +51,7 @@ pub enum InitializationError {
   InstanceCreationFailed(#[from] InstanceCreationError),
 
   #[error("An error occurred during device selection: {0}")]
-  DeviceSelectionError(#[from] DeviceSelectionError),
+  PhysicalDeviceSelectionError(#[from] PhysicalDeviceSelectionError),
   #[error("No physical device supports the application")]
   NoCompatibleDevices,
   #[error("An error occurred during the creation of the logical device:\n    {0}")]

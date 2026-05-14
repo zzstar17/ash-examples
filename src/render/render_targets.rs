@@ -1,17 +1,15 @@
 use std::ops::BitOr;
 
 use ash::vk;
-
-use crate::utility::OnErr;
+use vkallocator::{AllocationError, MemoryBound, MemoryWithType};
+use vkinitialization::device::{Device, PhysicalDevice};
+use vkobjects::{
+  destroy, fill_destroyable_array_from_iter, fill_destroyable_array_with_expression,
+  utility::OnErr, DeviceManuallyDestroyed,
+};
 
 use super::{
-  allocator::{self, AllocationError, MemoryBound, MemoryWithType},
   create_objs::{create_image, create_image_view},
-  device_destroyable::{
-    destroy, fill_destroyable_array_from_iter, fill_destroyable_array_with_expression,
-    DeviceManuallyDestroyed,
-  },
-  initialization::device::{Device, PhysicalDevice},
   render_pass::create_framebuffer,
   FRAMES_IN_FLIGHT, RENDER_EXTENT,
 };
@@ -34,7 +32,7 @@ impl RenderTargets {
     physical_device: &PhysicalDevice,
     render_pass: vk::RenderPass,
     render_format: vk::Format,
-    #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, AllocationError> {
     let images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
       device,
@@ -62,7 +60,7 @@ impl RenderTargets {
       temp
     };
 
-    let alloc = allocator::allocate_and_bind_memory(
+    let alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [

@@ -6,8 +6,7 @@ mod graphics;
 pub mod initialization;
 
 pub use graphics::GraphicsCommandBufferPool;
-
-use crate::render::errors::OutOfMemoryError;
+use vkobjects::errors::OutOfMemoryError;
 
 const ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange =
   vk::ImageSubresourceRange {
@@ -30,7 +29,7 @@ fn create_command_pool(
   device: &ash::Device,
   flags: vk::CommandPoolCreateFlags,
   queue_family_index: u32,
-  #[cfg(feature = "vl")] marker: &crate::render::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &std::ffi::CStr,
 ) -> Result<vk::CommandPool, OutOfMemoryError> {
   let command_pool_create_info = vk::CommandPoolCreateInfo {
@@ -56,7 +55,7 @@ fn allocate_primary_command_buffers(
   device: &ash::Device,
   command_pool: vk::CommandPool,
   command_buffer_count: u32,
-  #[cfg(feature = "vl")] marker: &super::initialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] names: &[&std::ffi::CStr],
 ) -> Result<Vec<vk::CommandBuffer>, OutOfMemoryError> {
   let allocate_info = vk::CommandBufferAllocateInfo {

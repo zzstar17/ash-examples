@@ -1,20 +1,40 @@
-pub mod device;
-mod entry;
-mod instance;
+mod device_selector;
 mod pre_window_init;
-mod surface;
 
-#[cfg(feature = "vl")]
-mod validation_layers;
+use ash::vk;
+pub use device_selector::select_physical_device;
 
-use std::ffi::CStr;
+use std::{marker::PhantomData, ptr};
 
-pub use entry::get_entry;
-pub use instance::{create_instance, InstanceCreationError};
 pub use pre_window_init::{RenderInit, RenderInitError};
-pub use surface::{Surface, SurfaceError};
-#[cfg(feature = "vl")]
-pub use validation_layers::{DebugUtils, DebugUtilsMarker};
 
-static SURFACE_MAINTENANCE_EXT_NAME: &CStr = c"VK_KHR_surface_maintenance1";
-static SWAPCHAIN_MAINTENANCE_EXT_NAME: &CStr = c"VK_KHR_swapchain_maintenance1";
+use crate::{
+  render::{gpu_data::TEXTURE_FORMAT_FEATURES, TARGET_API_VERSION},
+  APPLICATION_NAME, APPLICATION_VERSION,
+};
+
+pub fn get_app_info<'a>() -> vk::ApplicationInfo<'a> {
+  vk::ApplicationInfo {
+    s_type: vk::StructureType::APPLICATION_INFO,
+    api_version: TARGET_API_VERSION,
+    p_application_name: APPLICATION_NAME.as_ptr(),
+    application_version: APPLICATION_VERSION,
+    p_engine_name: ptr::null(),
+    engine_version: vk::make_api_version(0, 1, 0, 0),
+    p_next: ptr::null(),
+    _marker: PhantomData,
+  }
+}
+
+pub fn format_is_supported(
+  instance: &ash::Instance,
+  physical_device: vk::PhysicalDevice,
+  format: vk::Format,
+) -> bool {
+  let properties =
+    unsafe { instance.get_physical_device_format_properties(physical_device, format) };
+
+  properties
+    .optimal_tiling_features
+    .contains(TEXTURE_FORMAT_FEATURES)
+}
