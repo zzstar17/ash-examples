@@ -11,7 +11,7 @@ use vkobjects::{
   const_flag_bitor, destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed,
 };
 
-use vkallocator::{DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers};
+use vkallocator::{DetailedMemory, DeviceMemoryInitializationError, SingleUseStagingBuffers};
 
 pub const TEXTURE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(
   vk::ImageUsageFlags =>
@@ -32,7 +32,7 @@ pub struct GPUData {
   pub vertex_buffer: vk::Buffer,
   pub index_buffer: vk::Buffer,
 
-  memories: Vec<MemoryWithType>,
+  memories: Vec<DetailedMemory>,
 }
 
 #[must_use]
