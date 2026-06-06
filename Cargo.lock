@@ -1245,8 +1245,8 @@ dependencies = [
 
 [[package]]
 name = "vkallocator"
-version = "0.1.0"
-source = "git+https://github.com/zzstar17/vkallocator#d717382dc198f2fa2cd57a812c4f2a4770961b7c"
+version = "0.1.3"
+source = "git+https://github.com/zzstar17/vkallocator#75fcb95c17a4f86e8945e9b77924373c2cc17087"
 dependencies = [
  "ash",
  "log",
@@ -1257,8 +1257,8 @@ dependencies = [
 
 [[package]]
 name = "vkinitialization"
-version = "0.1.6"
-source = "git+https://github.com/zzstar17/vkinitialization#5d21b487cb1df6451eb8013926694836a77a473f"
+version = "0.1.7"
+source = "git+https://github.com/zzstar17/vkinitialization#57797315edf756b4b1c4f18ba90e4bc39ad3db61"
 dependencies = [
  "ash",
  "ash-window",
@@ -1271,8 +1271,8 @@ dependencies = [
 
 [[package]]
 name = "vkobjects"
-version = "0.1.0"
-source = "git+https://github.com/zzstar17/vkobjects#0376a5dcc386f614a530b2b85f93bb5d06df103f"
+version = "0.1.1"
+source = "git+https://github.com/zzstar17/vkobjects#daee39bb066f4c95bd4b445a0fa4d6add01cf862"
 dependencies = [
  "ash",
  "thiserror",

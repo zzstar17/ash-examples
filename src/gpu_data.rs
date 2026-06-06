@@ -1,7 +1,7 @@
 use std::{marker::PhantomData, mem::size_of, ops::BitOr, ptr};
 
 use ash::vk;
-use vkallocator::{self, DeviceMemoryInitializationError, MemoryWithType, SingleUseStagingBuffers};
+use vkallocator::{self, DetailedMemory, DeviceMemoryInitializationError, SingleUseStagingBuffers};
 use vkobjects::{destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::{
@@ -30,7 +30,7 @@ pub struct GPUData {
   host_output_buffer_memory_index: usize,
   host_output_buffer_memory_offset: u64,
 
-  memories: Vec<MemoryWithType>,
+  memories: Vec<DetailedMemory>,
 }
 
 #[must_use]
@@ -211,7 +211,8 @@ impl GPUData {
       "OUTPUT BUFFER",
     )
     .on_err(|_| unsafe {destroy!(device => &host_output_buffer, &render_target, &pending_device_init, &index_buffer, &vertex_buffer, &device_alloc) })?;
-    let host_output_buffer_memory_offset = host_output_buffer_alloc.obj_to_memory_assignment[0].1;
+    let host_output_buffer_memory_offset =
+      host_output_buffer_alloc.obj_to_memory_assignment[0].memory_offset;
 
     const EXPECTED_MAX_MEM_COUNT: usize = 4;
     let mut memories = Vec::with_capacity(EXPECTED_MAX_MEM_COUNT);
@@ -262,7 +263,11 @@ impl GPUData {
     physical_device: &PhysicalDevice,
     output_size: u64,
   ) -> Result<&[u8], vk::Result> {
-    let MemoryWithType { memory, type_index } = self.memories[self.host_output_buffer_memory_index];
+    let DetailedMemory {
+      memory,
+      type_index,
+      size: _size,
+    } = self.memories[self.host_output_buffer_memory_index];
     if !physical_device.mem_properties.memory_types[type_index]
       .property_flags
       .contains(vk::MemoryPropertyFlags::HOST_COHERENT)

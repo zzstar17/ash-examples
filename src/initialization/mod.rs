@@ -23,13 +23,13 @@ pub fn get_app_info<'a>() -> vk::ApplicationInfo<'a> {
 }
 
 const REQUIRED_IMAGE_FORMAT_FEATURES: vk::FormatFeatureFlags = const_flag_bitor!(
-  vk::FormatFeatureFlags,
+  vk::FormatFeatureFlags =>
   vk::FormatFeatureFlags::TRANSFER_SRC,
   vk::FormatFeatureFlags::COLOR_ATTACHMENT
 );
 
 const REQUIRED_IMAGE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(
-  vk::ImageUsageFlags,
+  vk::ImageUsageFlags =>
   vk::ImageUsageFlags::TRANSFER_SRC,
   vk::ImageUsageFlags::COLOR_ATTACHMENT
 );
