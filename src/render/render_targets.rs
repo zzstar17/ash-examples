@@ -1,7 +1,7 @@
 use std::ops::BitOr;
 
 use ash::vk;
-use vkallocator::{AllocationError, MemoryBound, MemoryWithType};
+use vkallocator::{AllocationError, DetailedMemory, MemoryBound};
 use vkinitialization::device::{Device, PhysicalDevice};
 use vkobjects::{
   destroy, fill_destroyable_array_from_iter, fill_destroyable_array_with_expression,
@@ -19,7 +19,7 @@ use super::{
 #[derive(Debug)]
 pub struct RenderTargets {
   pub images: [vk::Image; FRAMES_IN_FLIGHT],
-  pub memories: Box<[MemoryWithType]>,
+  pub memories: Box<[DetailedMemory]>,
   pub image_views: [vk::ImageView; FRAMES_IN_FLIGHT],
   pub framebuffers: [vk::Framebuffer; FRAMES_IN_FLIGHT],
 }

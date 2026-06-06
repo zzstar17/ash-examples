@@ -4,7 +4,7 @@ use std::{
 };
 
 use ash::vk;
-use vkallocator::{DeviceMemoryInitializationError, MemoryWithType};
+use vkallocator::{DetailedMemory, DeviceMemoryInitializationError};
 use vkinitialization::device::{Device, PhysicalDevice};
 use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
@@ -13,7 +13,7 @@ use crate::render::{create_objs::create_buffer, IMAGE_WITH_RESOLUTION_MINIMAL_SI
 pub struct ScreenshotBuffer {
   pub buffer: vk::Buffer,
   ptr: NonNull<u8>,
-  mem: MemoryWithType,
+  mem: DetailedMemory,
 }
 
 impl ScreenshotBuffer {
@@ -49,7 +49,7 @@ impl ScreenshotBuffer {
     )
     .on_err(|_| unsafe { destroy!(device => &buffer) })?;
     let mem = alloc.memories[0];
-    let offset = alloc.obj_to_memory_assignment[0].1;
+    let offset = alloc.obj_to_memory_assignment[0].memory_offset;
 
     let ptr = unsafe {
       device

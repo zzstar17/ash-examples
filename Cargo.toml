@@ -23,7 +23,7 @@ vkinitialization = { version = "0.1.7", git = "https://github.com/zzstar17/vkini
     "transfer_family",
     "surface"
 ] }
-vkallocator = { git = "https://github.com/zzstar17/vkallocator" }
+vkallocator = { version = "0.1.3", git = "https://github.com/zzstar17/vkallocator" }
 
 # random utilities
 take_mut = "0.2.2"
