@@ -12,30 +12,35 @@ pub use sync_renderer::ComputeSyncRenderer;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 use crate::{
-  last_frames_durations::LastFramesDurations, render::RenderPosition,
+  compute::sync_renderer::ComputeFrameRenderError,
+  last_frames_durations::LastFramesDurations,
+  render::{InitializationError, RenderPosition},
   KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
 
-pub enum ComputeEvent {
+pub enum GraphicsToComputeEvent {
   Terminate,
+}
+
+pub enum ComputeToGraphicsEvent {
+  InitializationComplete,
 }
 
 pub struct ComputeThread {
   pub handle: thread::JoinHandle<()>,
   pub result_receiver: mpsc::Receiver<RenderPosition>,
-  pub event_sender: mpsc::Sender<ComputeEvent>,
+  pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
+  pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
 }
 
 impl ComputeThread {
   pub fn terminate_and_wait(self) {
-    self
-      .event_sender
-      .send(ComputeEvent::Terminate)
-      .expect("Failed to send termination event to compute thread. Receiver is disconnected.");
-    self
-      .handle
-      .join()
-      .expect("Compute thread finished abruptly");
+    if let Err(_err) = self.event_sender.send(GraphicsToComputeEvent::Terminate) {
+      log::warn!("Failed to send termination event to compute thread. Receiver is disconnected.")
+    }
+    if let Err(_err) = self.handle.join() {
+      log::error!("Compute thread panicked.");
+    }
   }
 }
 
@@ -46,15 +51,35 @@ pub fn start_compute(
   #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
 ) -> ComputeThread {
   let (data_sender, data_receiver) = mpsc::sync_channel(1);
-  let (event_sender, event_receiver) = mpsc::channel();
+  // events from compute queue
+  let (compute_event_sender, compute_event_receiver) = mpsc::channel();
+  // events from graphics queue
+  let (graphics_event_sender, graphics_event_receiver) = mpsc::channel();
 
   let handle = thread::spawn(move || {
     log::info!("Starting compute thread");
 
-    // todo: handle errors
     let mut sync_renderer =
-      ComputeSyncRenderer::new(device, &physical_device, &queues, data_sender, &marker)
-        .expect("Failed to start compute sync renderer");
+      match ComputeSyncRenderer::new(device, &physical_device, &queues, data_sender, &marker) {
+        Ok(v) => {
+          if let Err(_err) =
+            compute_event_sender.send(Ok(ComputeToGraphicsEvent::InitializationComplete))
+          {
+            log::error!("Main thread disconnected during initialization");
+            return;
+          }
+          v
+        }
+        Err(err) => {
+          match compute_event_sender.send(Err(err)) {
+            Ok(()) => {}
+            Err(_err) => {
+              log::error!("Main thread disconnected during initialization");
+            }
+          }
+          return;
+        }
+      };
 
     let mut last_update = Instant::now();
     let mut time_since_last_ups_print = Duration::ZERO;
@@ -63,9 +88,9 @@ pub fn start_compute(
     let min_time_between_frames = Duration::from_secs_f64(1.0 / MAX_UPS);
 
     'compute_loop: loop {
-      for event in event_receiver.try_iter() {
+      for event in graphics_event_receiver.try_iter() {
         match event {
-          ComputeEvent::Terminate => {
+          GraphicsToComputeEvent::Terminate => {
             break 'compute_loop;
           }
         }
@@ -90,7 +115,14 @@ pub fn start_compute(
         println!("UPS: {:.4} {:.4} {:.4}", min, max, average);
       }
 
-      sync_renderer.next_compute_frame(time_passed);
+      if let Err(err) = sync_renderer.next_compute_frame(time_passed) {
+        match err {
+          ComputeFrameRenderError::SenderDisconnected => {
+            log::error!("Main thread disconnected");
+            break;
+          }
+        }
+      }
     }
 
     log::info!("Compute thead: Exiting");
@@ -99,6 +131,7 @@ pub fn start_compute(
   ComputeThread {
     handle,
     result_receiver: data_receiver,
-    event_sender: event_sender,
+    event_sender: graphics_event_sender,
+    event_receiver: compute_event_receiver,
   }
 }

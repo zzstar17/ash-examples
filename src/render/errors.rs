@@ -133,6 +133,9 @@ impl From<vk::Result> for InitializationError {
 
 #[derive(thiserror::Error)]
 pub enum FrameRenderError {
+  #[error("The compute thread has disconnected")]
+  ComputeThreadDisconnected,
+
   #[error(transparent)]
   OutOfMemory(#[from] OutOfMemoryError),
 
@@ -141,7 +144,6 @@ pub enum FrameRenderError {
 
   #[error("Failed to acquire swapchain image: {0}")]
   FailedToAcquireSwapchainImage(#[from] AcquireNextImageError),
-
   #[error("Failed to recreate swapchain: {0}")]
   FailedToRecreateSwapchain(#[from] SwapchainRecreationError),
 }

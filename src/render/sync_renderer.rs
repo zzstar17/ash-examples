@@ -181,7 +181,7 @@ impl SyncRenderer {
 
     let ferris_render_position = compute_message_rcv
       .recv()
-      .expect("Compute thread data sender has disconnected");
+      .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
 
     // actual rendering
 

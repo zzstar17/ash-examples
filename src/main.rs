@@ -283,7 +283,8 @@ impl ApplicationHandler for App {
                   "Rendering a frame returned an unrecoverable error\n{}",
                   other
                 );
-                std::process::exit(1);
+                event_loop.exit();
+                return;
               }
             }
           }

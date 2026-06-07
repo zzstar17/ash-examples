@@ -17,10 +17,15 @@ pub struct ComputeSyncRenderer {
 
   ferris: Ferris,
 
-  // todo: make this send errors as well
   compute_result_sender: mpsc::SyncSender<RenderPosition>,
 
   gpu_data: GPUData,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ComputeFrameRenderError {
+  #[error("Graphics thread receiver disconnected")]
+  SenderDisconnected,
 }
 
 impl ComputeSyncRenderer {
@@ -43,7 +48,10 @@ impl ComputeSyncRenderer {
     })
   }
 
-  pub fn next_compute_frame(&mut self, time_since_last_update: Duration) {
+  pub fn next_compute_frame(
+    &mut self,
+    time_since_last_update: Duration,
+  ) -> Result<(), ComputeFrameRenderError> {
     self.ferris.update(
       time_since_last_update,
       PhysicalSize {
@@ -62,10 +70,12 @@ impl ComputeSyncRenderer {
       Err(err) => match err {
         mpsc::TrySendError::Full(_) => {}
         mpsc::TrySendError::Disconnected(_) => {
-          panic!("Compute loop: Render mpsc receiver disconnected")
+          return Err(ComputeFrameRenderError::SenderDisconnected);
         }
       },
     }
+
+    Ok(())
   }
 }
 

@@ -1,7 +1,7 @@
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  compute::ComputeThread,
+  compute::{ComputeThread, ComputeToGraphicsEvent},
   render::{FrameRenderError, InitializationError, PostWindowInit, Renderer, SyncRenderer},
 };
 
@@ -27,7 +27,31 @@ impl ThreadsManager {
     );
 
     let renderer = Renderer::initialize(post_window_init)?;
-    let sync_renderer = SyncRenderer::new(renderer)?;
+    let mut sync_renderer = SyncRenderer::new(renderer)?;
+
+    let receiver_res = compute_thread.event_receiver.recv();
+    let mut compute_initialized = false;
+    match receiver_res {
+      Ok(event_res) => match event_res {
+        Ok(event) => match event {
+          ComputeToGraphicsEvent::InitializationComplete => {
+            log::info!("Compute thread initialization complete");
+            compute_initialized = true;
+          }
+        },
+        Err(err) => {
+          log::error!("Compute thread failed to initialize.\n{}", err);
+        }
+      },
+      Err(_err) => {
+        log::error!("Compute thread disconnected before even finishing initializing");
+      }
+    }
+    if !compute_initialized {
+      unsafe {
+        sync_renderer.destroy_self();
+      }
+    }
 
     Ok(Self {
       compute_thread: Some(compute_thread),
@@ -60,7 +84,6 @@ impl ThreadsManager {
 
 impl Drop for ThreadsManager {
   fn drop(&mut self) {
-    // waits for device
     let compute_thread = self.compute_thread.take();
     compute_thread.unwrap().terminate_and_wait();
 
