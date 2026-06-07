@@ -1,5 +1,5 @@
 mod command_pools;
-mod create_objs;
+pub mod create_objs;
 mod descriptor_sets;
 mod errors;
 mod format_conversions;

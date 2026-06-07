@@ -54,7 +54,7 @@ pub struct Renderer {
   debug_utils: vkinitialization::DebugUtils,
   #[cfg(feature = "vl")]
   pub debug_utils_marker: vkinitialization::DebugUtilsMarker,
-  physical_device: PhysicalDevice,
+  pub physical_device: PhysicalDevice,
   pub device: Device,
   pub queues: SingleQueues,
 

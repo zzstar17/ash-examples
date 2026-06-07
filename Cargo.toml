@@ -6,24 +6,31 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ash = {version = "0.38", default-features = false, features = ["debug"]}
+ash = { version = "0.38", default-features = false, features = ["debug"] }
 ash-window = "0.13.0"
 # version depends on ash-window
 raw-window-handle = "0.6.0"
 
-winit = {version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-dlopen", "wayland-csd-adwaita"]}
+winit = { version = "0.30.13", default-features = false, features = [
+    "rwh_06",
+    "x11",
+    "wayland",
+    "wayland-dlopen",
+    "wayland-csd-adwaita",
+] }
 image = "0.25.1"
 
-log = {version = "0.4"}
+log = { version = "0.4" }
 env_logger = "0.11.0"
 thiserror = "2.0.18"
 vkobjects = { version = "0.1.1", git = "https://github.com/zzstar17/vkobjects" }
-vkinitialization = { version = "0.1.7", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
+vkinitialization = { version = "0.1.8", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
     "graphics_family",
     "transfer_family",
-    "surface"
+    "compute_family",
+    "surface",
 ] }
-vkallocator = { version = "0.1.3", git = "https://github.com/zzstar17/vkallocator" }
+vkallocator = { version = "0.1.4", git = "https://github.com/zzstar17/vkallocator" }
 
 # random utilities
 take_mut = "0.2.2"

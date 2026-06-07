@@ -1,31 +1,45 @@
 use std::{sync::mpsc, time::Duration};
 
+use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
+use vkobjects::DeviceManuallyDestroyed;
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  render::{RenderPosition, RENDER_EXTENT},
+  compute::gpu_data::GPUData,
+  render::{InitializationError, RenderPosition, RENDER_EXTENT},
   RESOLUTION,
 };
 
 use super::ferris::Ferris;
 
 pub struct ComputeSyncRenderer {
-  device: ash::Device,
+  device: Device,
 
   ferris: Ferris,
 
   compute_result_sender: mpsc::SyncSender<RenderPosition>,
+
+  gpu_data: GPUData,
 }
 
 impl ComputeSyncRenderer {
-  pub fn new(device: ash::Device, compute_result_sender: mpsc::SyncSender<RenderPosition>) -> Self {
+  pub fn new(
+    device: Device,
+    physical_device: &PhysicalDevice,
+    queues: &SingleQueues,
+    compute_result_sender: mpsc::SyncSender<RenderPosition>,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([0.2, 0.0], true, true);
 
-    Self {
+    let gpu_data = GPUData::new(&device, physical_device, queues, marker)?;
+
+    Ok(Self {
       device,
       ferris,
       compute_result_sender,
-    }
+      gpu_data,
+    })
   }
 
   pub fn next_compute_frame(&mut self, time_since_last_update: Duration) {
@@ -61,7 +75,9 @@ impl Drop for ComputeSyncRenderer {
       self
         .device
         .device_wait_idle()
-        .expect("Failed to wait for device idleness while dropping SyncRenderer");
+        .expect("Failed to wait for device idleness while dropping Compute SyncRenderer");
+
+      self.gpu_data.destroy_self(&self.device);
     }
   }
 }

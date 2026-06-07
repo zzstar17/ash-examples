@@ -1,4 +1,5 @@
 pub mod ferris;
+mod gpu_data;
 mod sync_renderer;
 
 use std::{
@@ -8,6 +9,7 @@ use std::{
 };
 
 pub use sync_renderer::ComputeSyncRenderer;
+use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 use crate::{
   last_frames_durations::LastFramesDurations, render::RenderPosition,
@@ -37,14 +39,22 @@ impl ComputeThread {
   }
 }
 
-pub fn start_compute(device: ash::Device) -> ComputeThread {
+pub fn start_compute(
+  device: Device,
+  physical_device: PhysicalDevice,
+  queues: SingleQueues,
+  #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
+) -> ComputeThread {
   let (data_sender, data_receiver) = mpsc::sync_channel(1);
   let (event_sender, event_receiver) = mpsc::channel();
 
   let handle = thread::spawn(move || {
     log::info!("Starting compute thread");
 
-    let mut sync_renderer = ComputeSyncRenderer::new(device, data_sender);
+    // todo: handle errors
+    let mut sync_renderer =
+      ComputeSyncRenderer::new(device, &physical_device, &queues, data_sender, &marker)
+        .expect("Failed to start compute sync renderer");
 
     let mut last_update = Instant::now();
     let mut time_since_last_ups_print = Duration::ZERO;

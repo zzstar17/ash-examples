@@ -36,7 +36,12 @@ pub struct SyncRenderer {
 impl SyncRenderer {
   pub fn new(renderer: Renderer) -> Result<Self, InitializationError> {
     let device = &renderer.device;
-    let compute_thread = crate::compute::start_compute(device.inner.clone());
+    let compute_thread = crate::compute::start_compute(
+      device.clone(),
+      renderer.physical_device.clone(),
+      renderer.queues.clone(),
+      renderer.debug_utils_marker.clone(),
+    );
     let frame_fences = fill_destroyable_array_with_expression!(
       device,
       create_fence(
