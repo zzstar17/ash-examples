@@ -20,8 +20,9 @@ use ash::vk;
 use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
-pub use initialization::{RenderInit, RenderInitError};
+pub use initialization::{PostWindowInit, PreWindowInit, PreWindowInitError};
 pub use render_object::RenderPosition;
+pub use renderer::Renderer;
 pub use swapchain::AcquireNextImageError;
 pub use sync_renderer::SyncRenderer;
 

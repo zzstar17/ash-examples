@@ -1,17 +1,10 @@
-use std::{
-  ops::BitOr,
-  ptr::{self, NonNull},
-};
+use std::{ops::BitOr, ptr::NonNull};
 
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
-use vkobjects::{
-  const_flag_bitor, destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed,
-};
+use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
 
-use vkallocator::{
-  DetailedMemory, DeviceMemoryInitializationError, MappedHostBuffer, SingleUseStagingBuffers,
-};
+use vkallocator::{DetailedMemory, DeviceMemoryInitializationError, MappedHostBuffer};
 
 use crate::render::create_objs::create_buffer;
 
@@ -44,7 +37,7 @@ impl GPUData {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    queues: &SingleQueues,
+    _queues: &SingleQueues,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, DeviceMemoryInitializationError> {
     let particles_compute_0 = create_buffer(

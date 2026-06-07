@@ -1,11 +1,12 @@
 mod compute;
+mod destructor;
 mod last_frames_durations;
 mod render;
+mod threads_manager;
 
 use ash::vk;
 use render::{
-  AcquireNextImageError, FrameRenderError, InitializationError, RenderInit, RenderInitError,
-  SyncRenderer,
+  AcquireNextImageError, FrameRenderError, InitializationError, PreWindowInit, PreWindowInitError,
 };
 use std::{
   ffi::CStr,
@@ -20,7 +21,7 @@ use winit::{
   keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::last_frames_durations::LastFramesDurations;
+use crate::{last_frames_durations::LastFramesDurations, threads_manager::ThreadsManager};
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
@@ -85,12 +86,12 @@ struct WindowResizeHandler {
 // clippy kinda hallucinates here
 #[allow(clippy::large_enum_variant)]
 enum RenderStatus {
-  Initialized(RenderInit),
+  Initialized(PreWindowInit),
   Started(StartedStatus),
 }
 
 struct StartedStatus {
-  pub renderer: SyncRenderer,
+  pub threads_manager: ThreadsManager,
   pub paused: bool,
   pub occluded: bool,
   pub suspended: bool,
@@ -150,17 +151,17 @@ impl StartedStatus {
 }
 
 impl RenderStatus {
-  pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let render = RenderInit::new(event_loop)?;
+  pub fn new(event_loop: &EventLoop<()>) -> Result<Self, PreWindowInitError> {
+    let render = PreWindowInit::new(event_loop)?;
     Ok(RenderStatus::Initialized(render))
   }
 
   pub fn start(self, event_loop: &ActiveEventLoop) -> Result<Self, InitializationError> {
     match self {
       RenderStatus::Initialized(init) => {
-        let renderer = init.start(event_loop)?;
+        let threads_manager = ThreadsManager::start(init, event_loop)?;
         Ok(Self::Started(StartedStatus {
-          renderer,
+          threads_manager,
           paused: START_PAUSED,
           occluded: false,
           suspended: false,
@@ -244,7 +245,7 @@ impl ApplicationHandler for App {
             >= FORCE_WINDOW_RESIZE_DURATION_THRESHOLD
         {
           status.set_waiting_for_window_events(event_loop, false);
-          status.renderer.window_resized();
+          status.threads_manager.window_resized();
           self.window_resize_handler.active = false;
         }
 
@@ -270,7 +271,7 @@ impl ApplicationHandler for App {
             log::debug!("Starting frame {}", self.frame_i);
           }
 
-          if let Err(err) = status.renderer.render_next_frame(self.frame_i) {
+          if let Err(err) = status.threads_manager.render_next_frame(self.frame_i) {
             match err {
               FrameRenderError::FailedToAcquireSwapchainImage(AcquireNextImageError::OutOfDate) => {
                 // window resizes can happen while this function is running and be not detected in time
@@ -288,7 +289,7 @@ impl ApplicationHandler for App {
           }
         }
         self.frame_i += 1;
-        status.renderer.window().request_redraw();
+        status.threads_manager.window().request_redraw();
       }
       WindowEvent::CloseRequested => {
         event_loop.exit();
@@ -307,7 +308,7 @@ impl ApplicationHandler for App {
           let size_delta = width_delta.max(height_delta);
 
           if size_delta > FORCE_WINDOW_RESIZE_SIZE_THRESHOLD {
-            status.renderer.window_resized();
+            status.threads_manager.window_resized();
 
             if self.window_resize_handler.active {
               self.window_resize_handler.active = false;
@@ -325,9 +326,9 @@ impl ApplicationHandler for App {
             self.window_resize_handler.last_activation_size = new_size;
           }
         } else {
-          status.renderer.window_resized();
+          status.threads_manager.window_resized();
         }
-        status.renderer.window().request_redraw();
+        status.threads_manager.window().request_redraw();
       }
       WindowEvent::KeyboardInput { event, .. } => {
         let pressed = event.state.is_pressed();
@@ -341,7 +342,7 @@ impl ApplicationHandler for App {
               if pressed {
                 if status.paused {
                   log::info!("Unpaused!");
-                  status.renderer.window().request_redraw();
+                  status.threads_manager.window().request_redraw();
                 } else {
                   log::info!("Paused!");
                 }
@@ -350,18 +351,21 @@ impl ApplicationHandler for App {
             }
             KeyCode::F2 | KeyCode::F12 => {
               if pressed && !repeating {
-                status.renderer.screenshot();
+                status.threads_manager.screenshot();
               }
             }
             KeyCode::F3 | KeyCode::F10 => {
               if pressed && !repeating {
                 // attempt to resize the window to native resolution
-                let old_size = status.renderer.window().inner_size();
+                let old_size = status.threads_manager.window().inner_size();
                 if old_size.width != RESOLUTION[0] && old_size.height != RESOLUTION[1] {
-                  match status.renderer.window().request_inner_size(PhysicalSize {
-                    width: RESOLUTION[0],
-                    height: RESOLUTION[1],
-                  }) {
+                  match status
+                    .threads_manager
+                    .window()
+                    .request_inner_size(PhysicalSize {
+                      width: RESOLUTION[0],
+                      height: RESOLUTION[1],
+                    }) {
                     Some(size) => {
                       if size == old_size {
                         println!("Attempted to resize to native resolution, however resizing is currently disallowed by the windowing system.");

@@ -17,6 +17,7 @@ pub struct ComputeSyncRenderer {
 
   ferris: Ferris,
 
+  // todo: make this send errors as well
   compute_result_sender: mpsc::SyncSender<RenderPosition>,
 
   gpu_data: GPUData,

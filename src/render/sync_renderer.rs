@@ -1,12 +1,12 @@
-use std::{marker::PhantomData, ptr};
+use std::{marker::PhantomData, ptr, sync::mpsc};
 
 use ash::vk;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
 use winit::window::Window;
 
 use crate::{
-  compute::ComputeThread, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO,
-  SCREENSHOT_SAVE_FILE,
+  render::{create_objs::create_fence, RenderPosition},
+  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
@@ -16,8 +16,6 @@ use super::{
 
 pub struct SyncRenderer {
   pub renderer: Renderer,
-  // none if thread has terminated
-  compute_thread: Option<ComputeThread>,
 
   last_frame_i: usize,
   // frame resources are free
@@ -35,20 +33,14 @@ pub struct SyncRenderer {
 
 impl SyncRenderer {
   pub fn new(renderer: Renderer) -> Result<Self, InitializationError> {
-    let device = &renderer.device;
-    let compute_thread = crate::compute::start_compute(
-      device.clone(),
-      renderer.physical_device.clone(),
-      renderer.queues.clone(),
-      renderer.debug_utils_marker.clone(),
-    );
+    let device = &renderer.init.device;
     let frame_fences = fill_destroyable_array_with_expression!(
       device,
       create_fence(
         device,
         vk::FenceCreateFlags::SIGNALED,
         #[cfg(feature = "vl")]
-        &renderer.debug_utils_marker,
+        &renderer.init.debug_utils_marker,
         #[cfg(feature = "vl")]
         c"frame fence"
       ),
@@ -56,11 +48,11 @@ impl SyncRenderer {
     )?;
 
     let image_available = fill_destroyable_array_with_expression!(
-      &renderer.device,
+      &renderer.init.device,
       create_semaphore(
         device,
         #[cfg(feature = "vl")]
-        &renderer.debug_utils_marker,
+        &renderer.init.debug_utils_marker,
         #[cfg(feature = "vl")]
         c"image available"
       ),
@@ -70,7 +62,6 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
-      compute_thread: Some(compute_thread),
       last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
       frame_fences,
 
@@ -86,19 +77,24 @@ impl SyncRenderer {
   }
 
   pub fn window(&self) -> &Window {
-    &self.renderer.window
+    &self.renderer.init.window
   }
 
-  pub fn render_next_frame(&mut self, cur_total_frame: usize) -> Result<(), FrameRenderError> {
+  pub fn render_next_frame(
+    &mut self,
+    cur_total_frame: usize,
+    compute_message_rcv: &mpsc::Receiver<RenderPosition>,
+  ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     unsafe {
-      self
-        .renderer
-        .device
-        .wait_for_fences(&[self.frame_fences[cur_frame_i]], true, u64::MAX)?;
+      self.renderer.init.device.wait_for_fences(
+        &[self.frame_fences[cur_frame_i]],
+        true,
+        u64::MAX,
+      )?;
     }
 
     // current frame resources are now safe to use as they are not being used by the GPU
@@ -106,7 +102,7 @@ impl SyncRenderer {
     let destroyed_old_swapchain = self
       .renderer
       .swapchains
-      .attempt_destroy_old(&self.renderer.device, cur_total_frame)?;
+      .attempt_destroy_old(&self.renderer.init.device, cur_total_frame)?;
     if destroyed_old_swapchain {
       unsafe {
         self.renderer.cleanup_after_old_swapchain(cur_total_frame);
@@ -176,17 +172,14 @@ impl SyncRenderer {
       // only reset after making sure the fence is going to be signalled again
       self
         .renderer
+        .init
         .device
         .reset_fences(&[self.frame_fences[cur_frame_i]])?;
     }
 
     // get compute data
 
-    let ferris_render_position = self
-      .compute_thread
-      .as_ref()
-      .unwrap()
-      .result_receiver
+    let ferris_render_position = compute_message_rcv
       .recv()
       .expect("Compute thread data sender has disconnected");
 
@@ -245,8 +238,8 @@ impl SyncRenderer {
       .wait_semaphore_infos(&wait_semaphores)
       .signal_semaphore_infos(&signal_semaphores);
     unsafe {
-      self.renderer.device.queue_submit2(
-        self.renderer.queues.graphics.handle,
+      self.renderer.init.device.queue_submit2(
+        self.renderer.init.queues.graphics.handle,
         &[submit_info],
         self.frame_fences[cur_frame_i],
       )?;
@@ -254,9 +247,9 @@ impl SyncRenderer {
 
     unsafe {
       if let Err(err) = self.renderer.swapchains.queue_present(
-        &self.renderer.device,
+        &self.renderer.init.device,
         cur_image_i,
-        self.renderer.queues.graphics.handle,
+        self.renderer.init.queues.graphics.handle,
         &[image_finished_presenting],
       ) {
         self.recreate_swapchain_next_frame = true;
@@ -274,19 +267,14 @@ impl SyncRenderer {
       self.save_next_frame = true;
     }
   }
-}
 
-impl Drop for SyncRenderer {
-  fn drop(&mut self) {
-    // waits for device
-    let compute_thread = self.compute_thread.take();
-    compute_thread.unwrap().terminate_and_wait();
-
-    log::debug!("Destroying SyncRenderer");
-    let device = &self.renderer.device;
+  pub unsafe fn destroy_self(&mut self) {
+    let device = &self.renderer.init.device;
     unsafe {
       self.frame_fences.destroy_self(device);
       self.image_available.destroy_self(device);
+
+      self.renderer.destroy_self();
     }
   }
 }

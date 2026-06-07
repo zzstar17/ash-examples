@@ -1,4 +1,5 @@
 mod device_selector;
+mod post_window_init;
 mod pre_window_init;
 
 use ash::vk;
@@ -6,7 +7,8 @@ pub use device_selector::select_physical_device;
 
 use std::{marker::PhantomData, ptr};
 
-pub use pre_window_init::{RenderInit, RenderInitError};
+pub use post_window_init::PostWindowInit;
+pub use pre_window_init::{PreWindowInit, PreWindowInitError};
 
 use crate::{
   render::{gpu_data::TEXTURE_FORMAT_FEATURES, TARGET_API_VERSION},

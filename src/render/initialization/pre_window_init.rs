@@ -1,9 +1,8 @@
 use raw_window_handle::{HandleError, HasDisplayHandle};
 use vkinitialization::{InstanceCreationError, InstanceOptionalExtensions};
 use vkobjects::ManuallyDestroyed;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::event_loop::EventLoop;
 
-use crate::render::{errors::InitializationError, renderer::Renderer, SyncRenderer};
 use std::mem;
 
 use std::{
@@ -12,7 +11,7 @@ use std::{
   ptr::{self, addr_of_mut},
 };
 
-pub struct RenderInit {
+pub struct PreWindowInit {
   pub entry: ash::Entry,
   pub instance: ash::Instance,
   #[cfg(feature = "vl")]
@@ -20,7 +19,7 @@ pub struct RenderInit {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum RenderInitError {
+pub enum PreWindowInitError {
   #[error("Failed to create a Vulkan Instance")]
   InstanceCreationFailed(#[source] InstanceCreationError),
 
@@ -28,19 +27,19 @@ pub enum RenderInitError {
   DisplayHandle(#[source] HandleError),
 }
 
-impl From<InstanceCreationError> for RenderInitError {
+impl From<InstanceCreationError> for PreWindowInitError {
   fn from(value: InstanceCreationError) -> Self {
-    RenderInitError::InstanceCreationFailed(value)
+    PreWindowInitError::InstanceCreationFailed(value)
   }
 }
 
-impl RenderInit {
-  pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
+impl PreWindowInit {
+  pub fn new(event_loop: &EventLoop<()>) -> Result<Self, PreWindowInitError> {
     let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
     let display_handle = event_loop
       .display_handle()
-      .map_err(RenderInitError::DisplayHandle)?;
+      .map_err(PreWindowInitError::DisplayHandle)?;
 
     let app_info = crate::render::initialization::get_app_info();
     let optional_extensions = InstanceOptionalExtensions {
@@ -60,11 +59,6 @@ impl RenderInit {
       #[cfg(feature = "vl")]
       debug_utils,
     })
-  }
-
-  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<SyncRenderer, InitializationError> {
-    let renderer = Renderer::initialize(self, event_loop)?;
-    SyncRenderer::new(renderer)
   }
 
   // take values out without calling drop
@@ -102,7 +96,7 @@ impl RenderInit {
   }
 }
 
-impl Drop for RenderInit {
+impl Drop for PreWindowInit {
   fn drop(&mut self) {
     unsafe {
       #[cfg(feature = "vl")]
