@@ -168,7 +168,7 @@ impl DescriptorPool {
       ]),
     )?;
     let texture_set = sets[0];
-    let compute_sets = [sets[1], sets[1]];
+    let compute_sets = [sets[1], sets[2]];
 
     // update texture set
     let texture_write = texture_write_descriptor_set(texture_set, texture_view, 0);

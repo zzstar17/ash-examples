@@ -1,6 +1,3 @@
-#![feature(vec_into_raw_parts)]
-#![feature(array_chunks)]
-#![feature(new_uninit)]
 
 mod player;
 mod render;

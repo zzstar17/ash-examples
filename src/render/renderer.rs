@@ -512,6 +512,8 @@ impl Renderer {
 
     // copy data to faster memory
     let mut data: Vec<u8> = ref_slice.into();
+    let (data_chunks, data_chunks_remainder) = data.as_chunks_mut::<4>();
+    assert!(data_chunks_remainder.is_empty());
 
     // todo: make data save in a separate thread to not stall rendering
 
@@ -519,7 +521,7 @@ impl Renderer {
     match saved_format {
       vk::Format::R8G8B8A8_SRGB | vk::Format::R8G8B8A8_UNORM => {}
       vk::Format::B8G8R8A8_SRGB | vk::Format::B8G8R8A8_UNORM => {
-        for pixel in data.array_chunks_mut::<4>() {
+        for pixel in data_chunks {
           pixel.swap(0, 2); // swap B and R
         }
       }
