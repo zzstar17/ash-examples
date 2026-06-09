@@ -13,8 +13,8 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  ferris::Ferris, INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE,
-  WINDOW_TITLE,
+  ferris::Ferris, render::gpu_data::GPUDataAllocationError, INITIAL_WINDOW_HEIGHT,
+  INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
 use super::{
@@ -256,7 +256,8 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destructor.fire(&device) })
+    .map_err(|err| GPUDataAllocationError::from(err))?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
 
@@ -357,7 +358,7 @@ impl Renderer {
       &self.data,
       position,
       if save_to_screenshot_buffer {
-        Some(self.screenshot_buffer.buffer)
+        Some(*self.screenshot_buffer.buffer)
       } else {
         None
       },
@@ -491,15 +492,8 @@ impl Renderer {
     &self,
     saved_format: vk::Format,
   ) -> Result<(), ImageError> {
-    let ref_slice = unsafe {
-      self
-        .screenshot_buffer
-        .invalidate_memory(&self.device, &self.physical_device)?;
-      self.screenshot_buffer.read_memory()
-    };
+    let mut data = unsafe { self.screenshot_buffer.read_memory(&self.device) }?;
 
-    // copy data to faster memory
-    let mut data: Vec<u8> = ref_slice.into();
     let (data_chunks, data_chunks_remainder) = data.as_chunks_mut::<4>();
     assert!(data_chunks_remainder.is_empty());
 

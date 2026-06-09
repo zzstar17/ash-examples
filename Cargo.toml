@@ -18,12 +18,12 @@ log = {version = "0.4"}
 env_logger = "0.11.0"
 thiserror = "2.0.18"
 vkobjects = { version = "0.1.1", git = "https://github.com/zzstar17/vkobjects" }
-vkinitialization = { version = "0.1.7", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
+vkinitialization = { version = "0.1.9", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
     "graphics_family",
     "transfer_family",
     "surface"
 ] }
-vkallocator = { version = "0.1.3", git = "https://github.com/zzstar17/vkallocator" }
+vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocator", default-features = false}
 
 # random utilities
 take_mut = "0.2.2"
@@ -36,5 +36,5 @@ itertools = "0.14.0"
 "link" = ["ash/linked", "vkinitialization/link"]
 "vl" = ["vkinitialization/vl", "vkallocator/vl"]
 "log_alloc" = [
-    "ash/debug",
+    "ash/debug", "vkallocator/log_alloc"
 ] # log extended allocation info to debug or error streams
