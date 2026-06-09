@@ -1,11 +1,13 @@
-use vkallocator::{AllocationError, DeviceMemoryInitializationError};
 use vkinitialization::{
   device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
   InstanceCreationError,
 };
 use vkobjects::errors::{OutOfMemoryError, QueueSubmitError};
 
-use crate::pipelines::{PipelineCacheError, PipelineCreationError};
+use crate::{
+  gpu_data::GPUDataAllocationError,
+  pipelines::{PipelineCacheError, PipelineCreationError},
+};
 
 #[derive(thiserror::Error, Debug)]
 pub enum InitializationError {
@@ -21,8 +23,8 @@ pub enum InitializationError {
 
   #[error("Some command failed because of a generic OutOfMemory error: {0}")]
   OutOfMemoryError(#[from] OutOfMemoryError),
-  #[error("Failed to allocate device memory:\n    ")]
-  AllocationError(#[from] DeviceMemoryInitializationError),
+  #[error("Failed to allocate device memory during initialization:\n    {0}")]
+  AllocationError(#[from] GPUDataAllocationError),
   #[error("Failed to submit some queue: {0}")]
   QueueSubmissionError(#[from] QueueSubmitError),
   #[error("Failed to create pipelines:\n{0}")]
@@ -32,10 +34,4 @@ pub enum InitializationError {
 
   #[error(transparent)]
   IOError(#[from] std::io::Error),
-}
-
-impl From<AllocationError> for InitializationError {
-  fn from(value: AllocationError) -> Self {
-    Self::AllocationError(value.into())
-  }
 }

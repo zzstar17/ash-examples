@@ -10,7 +10,7 @@ mod shaders;
 mod vertices;
 
 use ash::vk;
-use std::ffi::CStr;
+use std::{ffi::CStr, time::Instant};
 use vertices::Vertex;
 
 use crate::renderer::Renderer;
@@ -62,20 +62,31 @@ fn run_app() -> Result<(), String> {
   unsafe { renderer.record_work() }.map_err(|err| format!("Failed to record work: {}", err))?;
 
   println!("Submitting work...");
+  let submit_work_start = Instant::now();
   renderer
     .submit_and_wait()
     .map_err(|err| format!("Failed to submit work: {}", err))?;
-  println!("GPU finished!");
+  println!(
+    "GPU finished! ({}µs)",
+    submit_work_start.elapsed().as_micros()
+  );
 
-  println!("Saving file...");
+  println!("Copying result data...");
+  let data_work_start = Instant::now();
   let data = unsafe {
     renderer
-      .get_resulting_data(IMAGE_MINIMAL_SIZE)
+      .get_resulting_data(IMAGE_MINIMAL_SIZE as usize)
       .map_err(|err| format!("Failed to get resulting data: {}", err))?
   };
+  println!(
+    "Data copy finished ({}µs)",
+    data_work_start.elapsed().as_micros()
+  );
+
+  println!("Saving file...");
   image::save_buffer(
     IMAGE_SAVE_PATH,
-    data,
+    &data,
     IMAGE_WIDTH,
     IMAGE_HEIGHT,
     IMAGE_SAVE_TYPE,

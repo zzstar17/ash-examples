@@ -1,5 +1,6 @@
 use ash::vk;
 use std::{marker::PhantomData, ptr};
+use vkallocator::HostMemorySyncError;
 use vkinitialization::{
   device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
   InstanceOptionalExtensions,
@@ -204,7 +205,7 @@ impl Renderer {
       &self.device,
       &self.physical_device.queue_families,
       self.gpu_data.render_target,
-      self.gpu_data.host_output_buffer,
+      self.gpu_data.host_output_buffer.buffer,
     )?;
 
     Ok(())
@@ -285,10 +286,13 @@ impl Renderer {
     Ok(())
   }
 
-  pub unsafe fn get_resulting_data(&self, buffer_size: u64) -> Result<&[u8], vk::Result> {
+  pub unsafe fn get_resulting_data(
+    &self,
+    buffer_size: usize,
+  ) -> Result<Box<[u8]>, HostMemorySyncError> {
     self
       .gpu_data
-      .map_buffer_after_completion(&self.device, &self.physical_device, buffer_size)
+      .read_buffer_after_completion(&self.device, buffer_size)
   }
 }
 

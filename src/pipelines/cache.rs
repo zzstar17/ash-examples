@@ -53,11 +53,11 @@ impl PipelineCacheHeader {
     let props = &physical_device.properties;
     Self {
       magic: MAGIC,
-      vendor_id: props.vendor_id,
-      device_id: props.device_id,
-      driver_version: props.driver_version,
+      vendor_id: props.p10.vendor_id,
+      device_id: props.p10.device_id,
+      driver_version: props.p10.driver_version,
       driver_abi: size_of::<*const c_void>() as u32,
-      cache_uuid: props.pipeline_cache_uuid,
+      cache_uuid: props.p10.pipeline_cache_uuid,
       data_size: data.len() as u32,
       data_hash: hash_data(data),
     }
@@ -66,11 +66,11 @@ impl PipelineCacheHeader {
   fn is_compatible(&self, physical_device: &PhysicalDevice) -> bool {
     let props = &physical_device.properties;
     self.magic == MAGIC
-      && self.vendor_id == props.vendor_id
-      && self.device_id == props.device_id
-      && self.driver_version == props.driver_version
+      && self.vendor_id == props.p10.vendor_id
+      && self.device_id == props.p10.device_id
+      && self.driver_version == props.p10.driver_version
       && self.driver_abi == size_of::<*const c_void>() as u32
-      && self.cache_uuid == props.pipeline_cache_uuid
+      && self.cache_uuid == props.p10.pipeline_cache_uuid
   }
 
   fn bytes<'a>(&self) -> &'a [u8] {

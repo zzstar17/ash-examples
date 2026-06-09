@@ -1,8 +1,16 @@
-use std::{marker::PhantomData, mem::size_of, ops::BitOr, ptr};
+use std::{mem::size_of, ops::BitOr};
 
 use ash::vk;
-use vkallocator::{self, DetailedMemory, DeviceMemoryInitializationError, SingleUseStagingBuffers};
-use vkobjects::{destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed};
+use vkallocator::{
+  self, AllocationError, DetailedMemory, DeviceMemoryInitializationError, HostAllocationError,
+  HostMemorySyncError, MappedHostBuffer, SingleUseStagingBuffers,
+};
+use vkobjects::{
+  destroy,
+  errors::{OutOfMemoryError, QueueSubmitError},
+  utility::OnErr,
+  DeviceManuallyDestroyed,
+};
 
 use crate::{
   command_pools::{self, initialization::PendingInitialization},
@@ -17,6 +25,18 @@ use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 static VERTEX_SIZE: u64 = (size_of::<Vertex>() * VERTICES.len()) as u64;
 static INDEX_SIZE: u64 = (size_of::<u16>() * INDICES.len()) as u64;
 
+#[derive(Debug, thiserror::Error)]
+pub enum GPUDataAllocationError {
+  #[error(transparent)]
+  StagingBufferError(#[from] DeviceMemoryInitializationError),
+  #[error("Failed to allocate one of the main device memory objects.\n{0}")]
+  AllocationError(#[from] AllocationError),
+  #[error("Failed to allocate one of the main host memory objects.\n{0}")]
+  HostAllocationError(#[from] HostAllocationError),
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+}
+
 #[derive(Debug)]
 pub struct GPUData {
   pub render_target: vk::Image,
@@ -26,9 +46,7 @@ pub struct GPUData {
   pub vertex_buffer: vk::Buffer,
   pub index_buffer: vk::Buffer,
 
-  pub host_output_buffer: vk::Buffer,
-  host_output_buffer_memory_index: usize,
-  host_output_buffer_memory_offset: u64,
+  pub host_output_buffer: MappedHostBuffer<u8>,
 
   memories: Vec<DetailedMemory>,
 }
@@ -127,7 +145,7 @@ impl GPUData {
     output_size: u64,
     queues: &SingleQueues,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-  ) -> Result<(Self, PendingDataInitialization), DeviceMemoryInitializationError> {
+  ) -> Result<(Self, PendingDataInitialization), GPUDataAllocationError> {
     let render_target = create_image(
       device,
       render_extent.width,
@@ -168,6 +186,7 @@ impl GPUData {
       ],
       [&vertex_buffer, &index_buffer, &render_target],
       0.5,
+      false,
       #[cfg(feature = "log_alloc")]
       Some(["Vertex buffer", "Index buffer", "Target image"]),
       #[cfg(feature = "log_alloc")]
@@ -196,7 +215,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe { destroy!(device => &render_target, &pending_device_init, &index_buffer, &vertex_buffer, &device_alloc) })?;
 
-    let host_output_buffer_alloc = vkallocator::allocate_and_bind_memory(
+    let (host_output_buffer_alloc, mapped_objs) = vkallocator::allocate_and_map_host_memory(
       device,
       physical_device,
       [
@@ -211,20 +230,13 @@ impl GPUData {
       "OUTPUT BUFFER",
     )
     .on_err(|_| unsafe {destroy!(device => &host_output_buffer, &render_target, &pending_device_init, &index_buffer, &vertex_buffer, &device_alloc) })?;
-    let host_output_buffer_memory_offset =
-      host_output_buffer_alloc.obj_to_memory_assignment[0].memory_offset;
+    let host_output_buffer = mapped_objs[0].into_buffer();
 
-    const EXPECTED_MAX_MEM_COUNT: usize = 4;
-    let mut memories = Vec::with_capacity(EXPECTED_MAX_MEM_COUNT);
+    let mut memories = Vec::with_capacity(
+      device_alloc.get_memories().len() + host_output_buffer_alloc.get_memories().len(),
+    );
     memories.extend_from_slice(device_alloc.get_memories());
     memories.extend_from_slice(host_output_buffer_alloc.get_memories());
-    let host_output_buffer_memory_index = memories.len() - 1;
-    memories.shrink_to_fit();
-
-    debug_assert!(
-      memories.len() <= EXPECTED_MAX_MEM_COUNT,
-      "Allocating more than expected"
-    );
     log::info!("Allocated memory count: {}", memories.len());
 
     let r_target_image_view = create_image_view(device, render_target)
@@ -247,54 +259,20 @@ impl GPUData {
         index_buffer,
         host_output_buffer,
         memories,
-        host_output_buffer_memory_index,
-        host_output_buffer_memory_offset,
       },
       pending_device_init,
     ))
   }
 
   // returns a slice representing buffer contents after all operations have completed
-  // map can fail with vk::Result::ERROR_MEMORY_MAP_FAILED
-  // in most cases it may be possible to try mapping again a smaller range
-  pub unsafe fn map_buffer_after_completion(
+  pub unsafe fn read_buffer_after_completion(
     &self,
     device: &ash::Device,
-    physical_device: &PhysicalDevice,
-    output_size: u64,
-  ) -> Result<&[u8], vk::Result> {
-    let DetailedMemory {
-      memory,
-      type_index,
-      size: _size,
-    } = self.memories[self.host_output_buffer_memory_index];
-    if !physical_device.mem_properties.memory_types[type_index]
-      .property_flags
-      .contains(vk::MemoryPropertyFlags::HOST_COHERENT)
-    {
-      let range = vk::MappedMemoryRange {
-        s_type: vk::StructureType::MAPPED_MEMORY_RANGE,
-        p_next: ptr::null(),
-        memory,
-        offset: 0,
-        size: vk::WHOLE_SIZE,
-        _marker: PhantomData,
-      };
-      device.invalidate_mapped_memory_ranges(&[range])?;
-    }
+    output_size: usize,
+  ) -> Result<Box<[u8]>, HostMemorySyncError> {
+    self.host_output_buffer.invalidate_memory_range(device)?;
 
-    let ptr = device.map_memory(
-      memory,
-      0,
-      // if size is not vk::WHOLE_SIZE, mapping should follow alignments
-      vk::WHOLE_SIZE,
-      vk::MemoryMapFlags::empty(),
-    )? as *const u8;
-
-    Ok(std::slice::from_raw_parts(
-      ptr.byte_add(self.host_output_buffer_memory_offset as usize),
-      output_size as usize,
-    ))
+    Ok(self.host_output_buffer.read_to_box(output_size))
   }
 }
 

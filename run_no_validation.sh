@@ -1,1 +1,1 @@
-cargo run --release --no-default-features --features link,graphics_family,transfer_family,log_alloc
+cargo run --release --no-default-features --features link
