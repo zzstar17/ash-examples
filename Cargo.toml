@@ -19,7 +19,7 @@ vkinitialization = { version = "0.1.9", git = "https://github.com/zzstar17/vkini
 vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocator", default-features = false}
 
 [features]
-"default" = ["load"]
+"default" = ["load", "vl", "log_alloc"]
 "load" = ["ash/loaded", "vkinitialization/load"]
 "link" = ["ash/linked", "vkinitialization/link"]
 "vl" = ["vkinitialization/vl", "vkallocator/vl"]
