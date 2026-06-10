@@ -1,11 +1,13 @@
 use ash::vk;
 use raw_window_handle::HandleError;
-use vkallocator::{AllocationError, DeviceMemoryInitializationError};
+use vkallocator::{AllocationError, HostMemorySyncError};
 use vkinitialization::{
   device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
   InstanceCreationError,
 };
 use vkobjects::errors::{DeviceIsLost, OutOfMemoryError, QueueSubmitError};
+
+use crate::render::gpu_data::GPUDataAllocationError;
 
 use super::{
   pipelines::{PipelineCacheError, PipelineCreationError},
@@ -63,8 +65,8 @@ pub enum InitializationError {
   #[error("Image error: {0}")]
   ImageError(#[from] image::ImageError),
 
-  #[error("Failed to allocate memory for some buffer or image\n{0}")]
-  AllocationFailed(#[from] DeviceMemoryInitializationError),
+  #[error("Failed to allocate device memory during initialization:\n    {0}")]
+  AllocationError(#[from] GPUDataAllocationError),
 
   #[error("Ran out of memory while issuing some command or creating memory: {0}")]
   GenericOutOfMemoryError(#[from] OutOfMemoryError),
@@ -95,12 +97,6 @@ impl std::fmt::Debug for InitializationError {
 impl From<winit::error::OsError> for InitializationError {
   fn from(value: winit::error::OsError) -> Self {
     InitializationError::WindowError(WindowError::OsError(value))
-  }
-}
-
-impl From<AllocationError> for InitializationError {
-  fn from(value: AllocationError) -> Self {
-    InitializationError::AllocationFailed(value.into())
   }
 }
 
@@ -176,25 +172,14 @@ impl From<QueueSubmitError> for InitializationError {
 
 #[derive(thiserror::Error)]
 pub enum ImageError {
-  #[error("Out of memory")]
-  OutOfMemory(#[source] OutOfMemoryError),
+  #[error("Failed to sync screenshot buffer: {0}")]
+  HostMemorySyncError(#[from] HostMemorySyncError),
 
   #[error("Image Error")]
-  ImageError(#[source] image::ImageError),
+  ImageError(#[from] image::ImageError),
 }
 impl std::fmt::Debug for ImageError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     error_chain_fmt(self, f)
-  }
-}
-
-impl From<image::ImageError> for ImageError {
-  fn from(value: image::ImageError) -> Self {
-    Self::ImageError(value)
-  }
-}
-impl From<OutOfMemoryError> for ImageError {
-  fn from(value: OutOfMemoryError) -> Self {
-    Self::OutOfMemory(value)
   }
 }

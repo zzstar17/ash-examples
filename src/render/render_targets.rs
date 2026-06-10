@@ -69,6 +69,7 @@ impl RenderTargets {
       ],
       images_trait,
       Self::PRIORITY,
+      false,
       #[cfg(feature = "log_alloc")]
       None,
       #[cfg(feature = "log_alloc")]

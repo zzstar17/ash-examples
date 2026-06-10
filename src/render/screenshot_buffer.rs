@@ -1,18 +1,14 @@
-use std::{
-  marker::PhantomData,
-  ptr::{self, NonNull},
+use ash::vk;
+use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
+use vkinitialization::device::{Device, PhysicalDevice};
+use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed};
+
+use crate::render::{
+  create_objs::create_buffer, gpu_data::GPUDataAllocationError, IMAGE_WITH_RESOLUTION_MINIMAL_SIZE,
 };
 
-use ash::vk;
-use vkallocator::{DetailedMemory, DeviceMemoryInitializationError};
-use vkinitialization::device::{Device, PhysicalDevice};
-use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
-
-use crate::render::{create_objs::create_buffer, IMAGE_WITH_RESOLUTION_MINIMAL_SIZE};
-
 pub struct ScreenshotBuffer {
-  pub buffer: vk::Buffer,
-  ptr: NonNull<u8>,
+  pub buffer: MappedHostBuffer<u8>,
   mem: DetailedMemory,
 }
 
@@ -25,7 +21,7 @@ impl ScreenshotBuffer {
     device: &Device,
     physical_device: &PhysicalDevice,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-  ) -> Result<Self, DeviceMemoryInitializationError> {
+  ) -> Result<Self, GPUDataAllocationError> {
     let buffer = create_buffer(
       &device,
       Self::BUFFER_SIZE,
@@ -36,7 +32,7 @@ impl ScreenshotBuffer {
       c"screenshot buffer",
     )?;
 
-    let alloc = vkallocator::allocate_and_bind_memory(
+    let (alloc, host_objects) = vkallocator::allocate_and_map_host_memory(
       device,
       physical_device,
       [vk::MemoryPropertyFlags::HOST_VISIBLE],
@@ -49,48 +45,14 @@ impl ScreenshotBuffer {
     )
     .on_err(|_| unsafe { destroy!(device => &buffer) })?;
     let mem = alloc.memories[0];
-    let offset = alloc.obj_to_memory_assignment[0].memory_offset;
+    let buffer = host_objects[0].into_buffer();
 
-    let ptr = unsafe {
-      device
-        .map_memory(
-          *mem,
-          0,
-          // if size is not vk::WHOLE_SIZE, mapping should follow alignments
-          vk::WHOLE_SIZE,
-          vk::MemoryMapFlags::empty(),
-        )?
-        .byte_add(offset as usize)
-    } as *mut u8;
-    let ptr = NonNull::new(ptr).unwrap();
-
-    Ok(Self { buffer, ptr, mem })
+    Ok(Self { buffer, mem })
   }
 
-  pub unsafe fn invalidate_memory(
-    &self,
-    device: &Device,
-    physical_device: &PhysicalDevice,
-  ) -> Result<(), OutOfMemoryError> {
-    if !physical_device.mem_properties.memory_types[self.mem.type_index]
-      .property_flags
-      .contains(vk::MemoryPropertyFlags::HOST_COHERENT)
-    {
-      let range = vk::MappedMemoryRange {
-        s_type: vk::StructureType::MAPPED_MEMORY_RANGE,
-        p_next: ptr::null(),
-        memory: *self.mem,
-        offset: 0,
-        size: vk::WHOLE_SIZE,
-        _marker: PhantomData,
-      };
-      device.invalidate_mapped_memory_ranges(&[range])?;
-    }
-    Ok(())
-  }
-
-  pub unsafe fn read_memory(&self) -> &[u8] {
-    std::slice::from_raw_parts(self.ptr.as_ptr(), Self::BUFFER_SIZE as usize)
+  pub unsafe fn read_memory(&self, device: &ash::Device) -> Result<Box<[u8]>, HostMemorySyncError> {
+    self.buffer.invalidate_memory_range(device)?;
+    Ok(self.buffer.read_to_box(Self::BUFFER_SIZE as usize))
   }
 }
 

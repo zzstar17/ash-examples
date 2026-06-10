@@ -8,10 +8,16 @@ use crate::render::{
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use vkobjects::{
-  const_flag_bitor, destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed,
+  const_flag_bitor, destroy,
+  errors::{OutOfMemoryError, QueueSubmitError},
+  utility::OnErr,
+  DeviceManuallyDestroyed,
 };
 
-use vkallocator::{DetailedMemory, DeviceMemoryInitializationError, SingleUseStagingBuffers};
+use vkallocator::{
+  AllocationError, DetailedMemory, DeviceMemoryInitializationError, HostAllocationError,
+  SingleUseStagingBuffers,
+};
 
 pub const TEXTURE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(
   vk::ImageUsageFlags =>
@@ -23,6 +29,20 @@ pub const TEXTURE_FORMAT_FEATURES: vk::FormatFeatureFlags = const_flag_bitor!(
   vk::FormatFeatureFlags::TRANSFER_DST,
   vk::FormatFeatureFlags::SAMPLED_IMAGE
 );
+
+#[derive(Debug, thiserror::Error)]
+pub enum GPUDataAllocationError {
+  #[error(transparent)]
+  StagingBufferError(#[from] DeviceMemoryInitializationError),
+  #[error("Failed to allocate one of the main device memory objects.\n{0}")]
+  AllocationError(#[from] AllocationError),
+  #[error("Failed to allocate one of the main host memory objects.\n{0}")]
+  HostAllocationError(#[from] HostAllocationError),
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+  #[error("Failed to submit allocation workload to a queue: {0}")]
+  QueueSubmitError(#[from] QueueSubmitError),
+}
 
 #[derive(Debug)]
 pub struct GPUData {
@@ -70,7 +90,7 @@ fn create_and_copy_from_staging_buffers(
   texture_extent: vk::Extent2D,
   texture_data: Vec<u8>,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-) -> Result<PendingDataInitialization, DeviceMemoryInitializationError> {
+) -> Result<PendingDataInitialization, GPUDataAllocationError> {
   let graphics_pool = command_pools::initialization::InitCommandBufferPool::new(
     device,
     physical_device.queue_families.graphics.index,
@@ -139,7 +159,7 @@ impl GPUData {
     texture_data: Vec<u8>,
     queues: &SingleQueues,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-  ) -> Result<(Self, PendingDataInitialization), DeviceMemoryInitializationError> {
+  ) -> Result<(Self, PendingDataInitialization), GPUDataAllocationError> {
     let texture = create_image(
       device,
       texture_format,
@@ -181,6 +201,7 @@ impl GPUData {
       ],
       [&texture, &vertex_buffer, &index_buffer],
       0.5,
+      false,
       #[cfg(feature = "log_alloc")]
       Some(["Target image", "Vertex buffer", "Index buffer"]),
       #[cfg(feature = "log_alloc")]
