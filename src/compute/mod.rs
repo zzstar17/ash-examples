@@ -1,6 +1,9 @@
 pub mod ferris;
 mod gpu_data;
+mod renderer;
 mod sync_renderer;
+
+pub use gpu_data::ComputeGPUData;
 
 use std::{
   sync::mpsc::{self},
@@ -60,7 +63,7 @@ pub fn start_compute(
     log::info!("Starting compute thread");
 
     let mut sync_renderer =
-      match ComputeSyncRenderer::new(device, &physical_device, &queues, data_sender, &marker) {
+      match ComputeSyncRenderer::new(device, physical_device, queues, data_sender, &marker) {
         Ok(v) => {
           if let Err(_err) =
             compute_event_sender.send(Ok(ComputeToGraphicsEvent::InitializationComplete))

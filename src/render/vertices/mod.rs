@@ -1,3 +1,4 @@
+mod particle;
 mod vertex;
 
 use std::{marker::PhantomData, pin::Pin, ptr};

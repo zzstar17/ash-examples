@@ -1,25 +1,26 @@
-use std::{sync::mpsc, time::Duration};
+use std::{marker::PhantomData, ptr, sync::mpsc, time::Duration};
 
+use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
-use vkobjects::DeviceManuallyDestroyed;
+use vkobjects::{DeviceManuallyDestroyed, ManuallyDestroyed};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  compute::gpu_data::GPUData,
-  render::{InitializationError, RenderPosition, RENDER_EXTENT},
+  compute::renderer::ComputeRenderer,
+  render::{create_objs::create_fence, InitializationError, RenderPosition, RENDER_EXTENT},
   RESOLUTION,
 };
 
 use super::ferris::Ferris;
 
 pub struct ComputeSyncRenderer {
-  device: Device,
-
   ferris: Ferris,
 
   compute_result_sender: mpsc::SyncSender<RenderPosition>,
 
-  gpu_data: GPUData,
+  renderer: ComputeRenderer,
+
+  instance_compute_fences: [vk::Fence; 2],
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -31,20 +32,74 @@ pub enum ComputeFrameRenderError {
 impl ComputeSyncRenderer {
   pub fn new(
     device: Device,
-    physical_device: &PhysicalDevice,
-    queues: &SingleQueues,
+    physical_device: PhysicalDevice,
+    queues: SingleQueues,
     compute_result_sender: mpsc::SyncSender<RenderPosition>,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([0.2, 0.0], true, true);
 
-    let gpu_data = GPUData::new(&device, physical_device, queues, marker)?;
+    let renderer = ComputeRenderer::new(
+      device,
+      physical_device,
+      queues,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
+
+    let instance_compute0_fence = create_fence(
+      &renderer.device,
+      vk::FenceCreateFlags::empty(),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Instance compute 0",
+    )?;
+    let instance_compute1_fence = create_fence(
+      &renderer.device,
+      vk::FenceCreateFlags::empty(),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Instance compute 1",
+    )?;
+    let instance_compute_fences = [instance_compute0_fence, instance_compute1_fence];
+
+    // write initial data to gpu_data
+    renderer
+      .gpu_data
+      .initialize_particles_compute(&renderer.device)?;
+
+    unsafe {
+      renderer.record_initialization()?;
+      let submit_info = vk::SubmitInfo {
+        s_type: vk::StructureType::SUBMIT_INFO,
+        p_next: ptr::null(),
+        wait_semaphore_count: 0,
+        p_wait_semaphores: ptr::null(),
+        p_wait_dst_stage_mask: ptr::null(),
+        command_buffer_count: 1,
+        p_command_buffers: &renderer.command_pool.cb,
+        signal_semaphore_count: 0,
+        p_signal_semaphores: ptr::null(),
+        _marker: PhantomData,
+      };
+
+      renderer.device.queue_submit(
+        queues.compute.handle,
+        &[submit_info],
+        instance_compute0_fence,
+      )?;
+      renderer
+        .device
+        .wait_for_fences(&[instance_compute0_fence], true, u64::MAX)?;
+    }
 
     Ok(Self {
-      device,
+      renderer,
       ferris,
       compute_result_sender,
-      gpu_data,
+      instance_compute_fences,
     })
   }
 
@@ -84,11 +139,15 @@ impl Drop for ComputeSyncRenderer {
     log::debug!("Destroying ComputeSyncRenderer");
     unsafe {
       self
+        .renderer
         .device
         .device_wait_idle()
         .expect("Failed to wait for device idleness while dropping Compute SyncRenderer");
 
-      self.gpu_data.destroy_self(&self.device);
+      self
+        .instance_compute_fences
+        .destroy_self(&self.renderer.device);
+      ManuallyDestroyed::destroy_self(&self.renderer);
     }
   }
 }

@@ -2,9 +2,11 @@ use std::{marker::PhantomData, ptr};
 
 use ash::vk;
 
+mod compute;
 mod graphics;
 pub mod initialization;
 
+pub use compute::ComputeCommandBufferPool;
 pub use graphics::GraphicsCommandBufferPool;
 use vkobjects::errors::OutOfMemoryError;
 

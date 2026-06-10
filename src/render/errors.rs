@@ -67,6 +67,8 @@ pub enum InitializationError {
 
   #[error("Failed to allocate device memory during initialization:\n    {0}")]
   AllocationError(#[from] GPUDataAllocationError),
+  #[error("Failed to flush contents to host buffer memory")]
+  HostMemorySyncError(#[from] HostMemorySyncError),
 
   #[error("Ran out of memory while issuing some command or creating memory: {0}")]
   GenericOutOfMemoryError(#[from] OutOfMemoryError),

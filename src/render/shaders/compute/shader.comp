@@ -1,0 +1,51 @@
+#version 460
+layout(local_size_x = 16, local_size_y = 1, local_size_z = 1) in;
+
+struct Particle {
+  vec2 pos;
+  vec2 vel;
+};
+
+layout(push_constant) uniform PushConstantData {
+  vec2 player_pos;
+
+  uint new_particle_count;
+  uint particle_count;
+} pc;
+
+layout(set = 0, binding = 0) restrict readonly buffer DataIn {
+  Particle particles[];
+}
+data_in;
+
+layout(set = 1, binding = 0) restrict writeonly buffer DataOut {
+  Particle particles[];
+}
+data_out;
+
+layout(set = 2, binding = 0) restrict readonly buffer NewDataIn {
+  Particle particles[];
+}
+new_data_in;
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  Particle p_in;
+
+  if (i >= pc.particle_count) {
+    uint new_particle_i = i - pc.particle_count;
+    if (new_particle_i >= pc.new_particle_count) {
+      return;
+    }
+    
+    p_in = new_data_in.particles[new_particle_i];
+  } else {
+    p_in = data_in.particles[i];
+  }
+
+  Particle p_out;
+  p_out.vel = p_in.vel;
+  p_out.pos = p_in.pos;
+
+  data_out.particles[i] = p_out;
+}

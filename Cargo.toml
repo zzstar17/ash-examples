@@ -35,6 +35,7 @@ vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocato
 # random utilities
 take_mut = "0.2.2"
 itertools = "0.14.0"
+rand = "0.10.1"
 
 
 [features]

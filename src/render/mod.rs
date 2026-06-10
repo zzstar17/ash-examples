@@ -1,11 +1,11 @@
-mod command_pools;
+pub mod command_pools;
 pub mod create_objs;
-mod descriptor_sets;
+pub mod descriptor_sets;
 mod errors;
 mod format_conversions;
 mod gpu_data;
 mod initialization;
-mod pipelines;
+pub mod pipelines;
 mod render_object;
 mod render_pass;
 mod render_targets;
@@ -20,6 +20,7 @@ use ash::vk;
 use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
+pub use gpu_data::GPUDataAllocationError;
 pub use initialization::{PostWindowInit, PreWindowInit, PreWindowInitError};
 pub use render_object::RenderPosition;
 pub use renderer::Renderer;

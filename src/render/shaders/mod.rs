@@ -6,6 +6,7 @@ use std::{
 
 use ash::vk;
 
+pub mod compute;
 pub mod shader;
 
 pub use shader::Shader;

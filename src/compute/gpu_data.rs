@@ -1,12 +1,13 @@
-use std::{ops::BitOr, ptr::NonNull};
+use std::ops::BitOr;
 
 use ash::vk;
+use rand::RngExt;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
-use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
+use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
-use vkallocator::{DetailedMemory, DeviceMemoryInitializationError, MappedHostBuffer};
+use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 
-use crate::render::create_objs::create_buffer;
+use crate::render::{create_objs::create_buffer, GPUDataAllocationError};
 
 const INITIAL_CAPACITY: u64 = 100;
 const INITIAL_SIZE: u64 = INITIAL_CAPACITY * size_of::<Particle>() as u64;
@@ -20,9 +21,11 @@ pub struct Particle {
 }
 
 #[derive(Debug)]
-pub struct GPUData {
+pub struct ComputeGPUData {
   // fully owned by compute
   pub particles_compute: [vk::Buffer; 2],
+  // fully owned by compute
+  pub particles_new: vk::Buffer,
   // copied to graphics
   pub particles_graphics: [vk::Buffer; 2],
   // read from cpu
@@ -30,16 +33,36 @@ pub struct GPUData {
   // write to cpu
   pub from_cpu_write: MappedHostBuffer<u8>,
 
+  pub particles_size: u64,
+  pub particles_capacity: u64,
+  pub particles_len: u64,
+
   memories: Vec<DetailedMemory>,
 }
 
-impl GPUData {
-  pub fn new(
+struct Buffers {
+  pub particles_compute: [vk::Buffer; 2],
+  pub particles_new: vk::Buffer,
+  pub particles_graphics: [vk::Buffer; 2],
+  pub particles_from_cpu_read: vk::Buffer,
+  pub from_cpu_write: vk::Buffer,
+}
+
+impl DeviceManuallyDestroyed for Buffers {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.particles_compute.destroy_self(device);
+    self.particles_new.destroy_self(device);
+    self.particles_graphics.destroy_self(device);
+    self.particles_from_cpu_read.destroy_self(device);
+    self.from_cpu_write.destroy_self(device);
+  }
+}
+
+impl ComputeGPUData {
+  fn create_buffers(
     device: &Device,
-    physical_device: &PhysicalDevice,
-    _queues: &SingleQueues,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-  ) -> Result<Self, DeviceMemoryInitializationError> {
+  ) -> Result<Buffers, OutOfMemoryError> {
     let particles_compute_0 = create_buffer(
       device,
       INITIAL_SIZE,
@@ -65,6 +88,17 @@ impl GPUData {
     .on_err(|_| unsafe { particles_compute_0.destroy_self(device) })?;
     let particles_compute = [particles_compute_0, particles_compute_1];
 
+    let particles_new = create_buffer(
+      device,
+      INITIAL_SIZE,
+      vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Particles new",
+    )
+    .on_err(|_| unsafe { particles_compute.destroy_self(device) })?;
+
     let particles_graphics_0 = create_buffer(
       device,
       INITIAL_SIZE,
@@ -74,7 +108,10 @@ impl GPUData {
       #[cfg(feature = "vl")]
       c"Particles graphics 0",
     )
-    .on_err(|_| unsafe { particles_compute.destroy_self(device) })?;
+    .on_err(|_| unsafe {
+      particles_new.destroy_self(device);
+      particles_compute.destroy_self(device)
+    })?;
     let particles_graphics_1 = create_buffer(
       device,
       INITIAL_SIZE,
@@ -86,6 +123,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe {
       particles_compute.destroy_self(device);
+      particles_new.destroy_self(device);
       particles_graphics_0.destroy_self(device)
     })?;
     let particles_graphics = [particles_graphics_0, particles_graphics_1];
@@ -101,6 +139,7 @@ impl GPUData {
     )
     .on_err(|_| unsafe {
       particles_compute.destroy_self(device);
+      particles_new.destroy_self(device);
       particles_graphics.destroy_self(device)
     })?;
     let cpu_write = create_buffer(
@@ -114,34 +153,50 @@ impl GPUData {
     )
     .on_err(|_| unsafe {
       particles_compute.destroy_self(device);
+      particles_new.destroy_self(device);
       particles_graphics.destroy_self(device);
       particles_cpu_read.destroy_self(device);
     })?;
 
-    let buffers = [
-      particles_compute_0,
-      particles_compute_1,
-      particles_graphics_0,
-      particles_graphics_1,
-      particles_cpu_read,
-      cpu_write,
-    ];
+    Ok(Buffers {
+      particles_compute,
+      particles_new,
+      particles_graphics,
+      particles_from_cpu_read: particles_cpu_read,
+      from_cpu_write: cpu_write,
+    })
+  }
+
+  pub fn new(
+    device: &Device,
+    physical_device: &PhysicalDevice,
+    _queues: &SingleQueues,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, GPUDataAllocationError> {
+    let buffers = Self::create_buffers(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
 
     let device_alloc = vkallocator::allocate_and_bind_memory(
       device,
       physical_device,
       [vk::MemoryPropertyFlags::DEVICE_LOCAL],
       [
-        &particles_compute_0,
-        &particles_compute_1,
-        &particles_graphics_0,
-        &particles_graphics_1,
+        &buffers.particles_compute[0],
+        &buffers.particles_compute[1],
+        &buffers.particles_new,
+        &buffers.particles_graphics[0],
+        &buffers.particles_graphics[1],
       ],
       0.7,
+      false,
       #[cfg(feature = "log_alloc")]
       Some([
         "Particles compute 0",
         "Particles compute 1",
+        "Particles new",
         "Particles graphics 0",
         "Particles graphics 1",
       ]),
@@ -152,14 +207,14 @@ impl GPUData {
       buffers.destroy_self(device);
     })?;
 
-    let host_map_alloc = vkallocator::allocate_and_bind_memory(
+    let (host_map_alloc, mapped_host_objs) = vkallocator::allocate_and_map_host_memory(
       device,
       physical_device,
       [
         vk::MemoryPropertyFlags::HOST_VISIBLE.bitor(vk::MemoryPropertyFlags::HOST_CACHED),
         vk::MemoryPropertyFlags::HOST_VISIBLE,
       ],
-      [&particles_cpu_read, &cpu_write],
+      [&buffers.particles_from_cpu_read, &buffers.from_cpu_write],
       0.5,
       #[cfg(feature = "log_alloc")]
       Some(["Particles CPU read", "CPU write"]),
@@ -176,37 +231,47 @@ impl GPUData {
     memories.extend_from_slice(device_alloc.get_memories());
     memories.extend_from_slice(host_map_alloc.get_memories());
 
-    let ptrs: [NonNull<u8>; 2] = vkallocator::map_host_visible_allocation(device, host_map_alloc)
-      .on_err(|_| unsafe {
-      buffers.destroy_self(device);
-      device_alloc.destroy_self(device);
-      host_map_alloc.destroy_self(device);
-    })?;
-
-    println!("{:?}", ptrs);
-
-    let particles_cpu_read_mapped = MappedHostBuffer {
-      buffer: particles_cpu_read,
-      data_ptr: NonNull::new(ptrs[0].as_ptr() as *mut Particle).unwrap(),
-    };
-    let cpu_write_mapped = MappedHostBuffer {
-      buffer: cpu_write,
-      data_ptr: ptrs[1],
-    };
+    let particles_from_cpu_read = mapped_host_objs[0].into_buffer();
+    let from_cpu_write = mapped_host_objs[1].into_buffer();
 
     Ok(Self {
-      particles_compute,
-      particles_graphics,
-      particles_from_cpu_read: particles_cpu_read_mapped,
-      from_cpu_write: cpu_write_mapped,
+      particles_compute: buffers.particles_compute,
+      particles_new: buffers.particles_new,
+      particles_graphics: buffers.particles_graphics,
+      particles_from_cpu_read,
+      from_cpu_write,
       memories,
+      particles_size: INITIAL_SIZE,
+      particles_capacity: INITIAL_CAPACITY,
+      particles_len: INITIAL_CAPACITY,
     })
+  }
+
+  pub fn initialize_particles_compute(&self, device: &Device) -> Result<(), HostMemorySyncError> {
+    let mut particles = Vec::with_capacity(INITIAL_CAPACITY as usize);
+    let mut rng = rand::rng();
+    for _ in 0..INITIAL_CAPACITY {
+      particles.push(Particle {
+        pos: rng.random(),
+        vel: [0.0, 0.0],
+      });
+    }
+
+    unsafe {
+      self
+        .particles_from_cpu_read
+        .copy_to_buffer_memory(&particles);
+      self.particles_from_cpu_read.flush_memory_range(device)?;
+    };
+
+    Ok(())
   }
 }
 
-impl DeviceManuallyDestroyed for GPUData {
+impl DeviceManuallyDestroyed for ComputeGPUData {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.particles_compute.destroy_self(device);
+    self.particles_new.destroy_self(device);
     self.particles_graphics.destroy_self(device);
 
     self.particles_from_cpu_read.destroy_self(device);
