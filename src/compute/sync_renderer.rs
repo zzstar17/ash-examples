@@ -1,17 +1,22 @@
-use std::{marker::PhantomData, ptr, sync::mpsc, time::Duration};
+use std::{ptr, sync::mpsc, time::Duration};
 
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
-use vkobjects::{DeviceManuallyDestroyed, ManuallyDestroyed};
+use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed, ManuallyDestroyed};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  compute::renderer::ComputeRenderer,
-  render::{create_objs::create_fence, InitializationError, RenderPosition, RENDER_EXTENT},
+  compute::{renderer::ComputeRenderer, ComputeGPUData},
+  render::{
+    create_objs::{create_fence, create_semaphore},
+    InitializationError, RenderPosition, RENDER_EXTENT,
+  },
   RESOLUTION,
 };
 
 use super::ferris::Ferris;
+
+pub const COMPUTE_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct ComputeSyncRenderer {
   ferris: Ferris,
@@ -20,13 +25,34 @@ pub struct ComputeSyncRenderer {
 
   renderer: ComputeRenderer,
 
-  instance_compute_fences: [vk::Fence; 2],
+  last_write_i: usize,
+  frame_fences: [vk::Fence; COMPUTE_FRAMES_IN_FLIGHT],
+
+  transfer_finished: vk::Semaphore,
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum ComputeFrameRenderError {
   #[error("Graphics thread receiver disconnected")]
   SenderDisconnected,
+
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+
+  #[error("Device is lost")]
+  DeviceLost,
+}
+
+impl From<vk::Result> for ComputeFrameRenderError {
+  fn from(value: vk::Result) -> Self {
+    match value {
+      vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+        ComputeFrameRenderError::OutOfMemory(OutOfMemoryError::from(value))
+      }
+      vk::Result::ERROR_DEVICE_LOST => ComputeFrameRenderError::DeviceLost,
+      _ => panic!("Invalid cast from vk::Result to ComputeFrameRenderError"),
+    }
+  }
 }
 
 impl ComputeSyncRenderer {
@@ -39,7 +65,8 @@ impl ComputeSyncRenderer {
   ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([0.2, 0.0], true, true);
 
-    let renderer = ComputeRenderer::new(
+    // todo: write all on errors
+    let mut renderer = ComputeRenderer::new(
       device,
       physical_device,
       queues,
@@ -47,59 +74,66 @@ impl ComputeSyncRenderer {
       marker,
     )?;
 
-    let instance_compute0_fence = create_fence(
+    let transfer_finished = create_semaphore(
       &renderer.device,
-      vk::FenceCreateFlags::empty(),
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"Instance compute 0",
+      c"Compute transfer",
     )?;
-    let instance_compute1_fence = create_fence(
+    let frame0 = create_fence(
       &renderer.device,
-      vk::FenceCreateFlags::empty(),
+      vk::FenceCreateFlags::SIGNALED,
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"Instance compute 1",
+      c"Compute main 0",
     )?;
-    let instance_compute_fences = [instance_compute0_fence, instance_compute1_fence];
+    let frame1 = create_fence(
+      &renderer.device,
+      vk::FenceCreateFlags::SIGNALED,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Compute main 1",
+    )?;
+    let frame_fences = [frame0, frame1];
 
     // write initial data to gpu_data
     renderer
       .gpu_data
-      .initialize_particles_compute(&renderer.device)?;
+      .write_particles_to_from_cpu_read(&renderer.device, ComputeGPUData::INITIAL_CAPACITY)?;
 
     unsafe {
-      renderer.record_initialization()?;
+      renderer.transfer_pool.record_copy_particles_new(
+        &renderer.device,
+        &queues,
+        &renderer.gpu_data,
+        renderer.gpu_data.current_new_particles_size(),
+      )?;
       let submit_info = vk::SubmitInfo {
-        s_type: vk::StructureType::SUBMIT_INFO,
-        p_next: ptr::null(),
         wait_semaphore_count: 0,
         p_wait_semaphores: ptr::null(),
         p_wait_dst_stage_mask: ptr::null(),
         command_buffer_count: 1,
-        p_command_buffers: &renderer.command_pool.cb,
-        signal_semaphore_count: 0,
-        p_signal_semaphores: ptr::null(),
-        _marker: PhantomData,
+        p_command_buffers: &renderer.transfer_pool.copy_particles_new,
+        signal_semaphore_count: 1,
+        p_signal_semaphores: &transfer_finished,
+        ..Default::default()
       };
 
-      renderer.device.queue_submit(
-        queues.compute.handle,
-        &[submit_info],
-        instance_compute0_fence,
-      )?;
       renderer
         .device
-        .wait_for_fences(&[instance_compute0_fence], true, u64::MAX)?;
+        .queue_submit(queues.transfer.handle, &[submit_info], vk::Fence::null())?;
     }
 
     Ok(Self {
       renderer,
       ferris,
       compute_result_sender,
-      instance_compute_fences,
+      transfer_finished,
+      frame_fences,
+      last_write_i: COMPUTE_FRAMES_IN_FLIGHT - 1,
     })
   }
 
@@ -107,6 +141,64 @@ impl ComputeSyncRenderer {
     &mut self,
     time_since_last_update: Duration,
   ) -> Result<(), ComputeFrameRenderError> {
+    let cur_read_i = self.last_write_i;
+    let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
+    self.last_write_i = cur_write_i;
+
+    // wait for frame of the same set (that holds current frame resources) to finish rendering
+    unsafe {
+      self
+        .renderer
+        .device
+        .wait_for_fences(&[self.frame_fences[cur_write_i]], true, u64::MAX)?;
+    }
+
+    unsafe {
+      // only reset after making sure the fence is going to be signalled again
+      self
+        .renderer
+        .device
+        .reset_fences(&[self.frame_fences[cur_write_i]])?;
+    }
+
+    // actual rendering
+
+    unsafe {
+      self.renderer.record_main(cur_read_i, cur_write_i)?;
+    }
+
+    let command_buffers = [vk::CommandBufferSubmitInfo::default()
+      .command_buffer(self.renderer.command_pools[cur_write_i].cb)];
+
+    let particle_copy_wait = [vk::SemaphoreSubmitInfo {
+      semaphore: self.transfer_finished,
+      stage_mask: vk::PipelineStageFlags2::TRANSFER,
+      ..Default::default()
+    }];
+    let empty: [vk::SemaphoreSubmitInfo<'_>; 0] = [];
+
+    let wait_semaphores: &[vk::SemaphoreSubmitInfo<'_>] =
+      if self.renderer.gpu_data.particles_copying > 0 {
+        &particle_copy_wait
+      } else {
+        &empty
+      };
+
+    let submit_info = vk::SubmitInfo2::default()
+      .command_buffer_infos(&command_buffers)
+      .wait_semaphore_infos(&wait_semaphores);
+    unsafe {
+      self.renderer.device.queue_submit2(
+        self.renderer.queues.compute.handle,
+        &[submit_info],
+        self.frame_fences[cur_write_i],
+      )?;
+    }
+
+    if self.renderer.gpu_data.particles_copying > 0 {
+      self.renderer.gpu_data.commit_new_particles();
+    }
+
     self.ferris.update(
       time_since_last_update,
       PhysicalSize {
@@ -144,9 +236,9 @@ impl Drop for ComputeSyncRenderer {
         .device_wait_idle()
         .expect("Failed to wait for device idleness while dropping Compute SyncRenderer");
 
-      self
-        .instance_compute_fences
-        .destroy_self(&self.renderer.device);
+      let device = &self.renderer.device;
+      self.frame_fences.destroy_self(device);
+      self.transfer_finished.destroy_self(device);
       ManuallyDestroyed::destroy_self(&self.renderer);
     }
   }

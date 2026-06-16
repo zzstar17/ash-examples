@@ -5,6 +5,7 @@ use std::{marker::PhantomData, pin::Pin, ptr};
 
 use ash::vk;
 
+pub use particle::Particle;
 pub use vertex::Vertex;
 
 pub struct PipelineVertexInputStateCreateInfo<'a> {

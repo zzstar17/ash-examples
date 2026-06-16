@@ -20,7 +20,7 @@ pub struct ComputePushConstants {
 #[derive(Debug)]
 pub struct ComputePipeline {
   pub layout: vk::PipelineLayout,
-  pub instance: vk::Pipeline,
+  pub main: vk::Pipeline,
 }
 
 impl ComputePipeline {
@@ -45,7 +45,7 @@ impl ComputePipeline {
       base_pipeline_index: -1, // -1 for invalid
       _marker: PhantomData,
     };
-    let instance = unsafe { device.create_compute_pipelines(cache, &[create_info], None) }
+    let main = unsafe { device.create_compute_pipelines(cache, &[create_info], None) }
       .map_err(|incomplete| incomplete.1)
       .map_err(|vkerr| match vkerr {
         vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
@@ -59,7 +59,7 @@ impl ComputePipeline {
       shader.destroy_self(device);
     }
 
-    Ok(Self { layout, instance })
+    Ok(Self { layout, main })
   }
 
   fn create_layout(
@@ -89,7 +89,7 @@ impl ComputePipeline {
 
 impl DeviceManuallyDestroyed for ComputePipeline {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.instance.destroy_self(device);
+    self.main.destroy_self(device);
     device.destroy_pipeline_layout(self.layout, None);
   }
 }

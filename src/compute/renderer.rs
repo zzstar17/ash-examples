@@ -1,14 +1,17 @@
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use vkobjects::{
-  errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed, ManuallyDestroyed,
+  errors::OutOfMemoryError, fill_destroyable_array_with_expression, utility::OnErr,
+  DeviceManuallyDestroyed, ManuallyDestroyed,
 };
 
 use crate::{
-  compute::gpu_data::ComputeGPUData,
+  compute::{gpu_data::ComputeGPUData, sync_renderer::COMPUTE_FRAMES_IN_FLIGHT},
   render::{
-    command_pools::ComputeCommandBufferPool, descriptor_sets::ComputeDescriptorPool,
-    pipelines::ComputePipeline, InitializationError,
+    command_pools::{ComputeCommandBufferPool, ComputeTransferCommandBufferPool},
+    descriptor_sets::ComputeDescriptorPool,
+    pipelines::ComputePipeline,
+    InitializationError,
   },
 };
 
@@ -21,7 +24,8 @@ pub struct ComputeRenderer {
   pub descriptor_sets: ComputeDescriptorPool,
   pub pipeline: ComputePipeline,
 
-  pub command_pool: ComputeCommandBufferPool,
+  pub transfer_pool: ComputeTransferCommandBufferPool,
+  pub command_pools: [ComputeCommandBufferPool; COMPUTE_FRAMES_IN_FLIGHT],
 }
 
 impl ComputeRenderer {
@@ -47,13 +51,30 @@ impl ComputeRenderer {
         gpu_data.destroy_self(&device);
       })?;
 
-    let command_pool = ComputeCommandBufferPool::new(
+    let transfer_pool = ComputeTransferCommandBufferPool::new(
       &device,
-      queues.compute.family_index,
+      &queues,
       #[cfg(feature = "vl")]
       marker,
     )
     .on_err(|_err| unsafe {
+      pipeline.destroy_self(&device);
+      descriptor_pool.destroy_self(&device);
+      gpu_data.destroy_self(&device);
+    })?;
+
+    let command_pools = fill_destroyable_array_with_expression!(
+      &device,
+      ComputeCommandBufferPool::new(
+        &device,
+        queues.compute.family_index,
+        #[cfg(feature = "vl")]
+        marker,
+      ),
+      COMPUTE_FRAMES_IN_FLIGHT
+    )
+    .on_err(|_err| unsafe {
+      transfer_pool.destroy_self(&device);
       pipeline.destroy_self(&device);
       descriptor_pool.destroy_self(&device);
       gpu_data.destroy_self(&device);
@@ -66,14 +87,27 @@ impl ComputeRenderer {
       gpu_data,
       descriptor_sets: descriptor_pool,
       pipeline,
-      command_pool,
+      transfer_pool,
+      command_pools,
     })
   }
 
-  pub unsafe fn record_initialization(&self) -> Result<(), OutOfMemoryError> {
-    self
-      .command_pool
-      .record_main(&self.device, &self.gpu_data, self.gpu_data.particles_size)
+  pub unsafe fn record_main(
+    &mut self,
+    read_i: usize,
+    write_i: usize,
+  ) -> Result<(), OutOfMemoryError> {
+    self.command_pools[write_i].reset(&self.device)?;
+    self.command_pools[write_i].record_main(
+      read_i,
+      write_i,
+      &self.device,
+      &self.queues,
+      &self.gpu_data,
+      &self.descriptor_sets,
+      &self.pipeline,
+    )?;
+    Ok(())
   }
 }
 
@@ -82,7 +116,8 @@ impl ManuallyDestroyed for ComputeRenderer {
     log::debug!("Destroying ComputeRenderer");
     unsafe {
       let device = &self.device;
-      self.command_pool.destroy_self(device);
+      self.transfer_pool.destroy_self(device);
+      self.command_pools.destroy_self(device);
       self.pipeline.destroy_self(device);
       self.descriptor_sets.destroy_self(device);
       self.gpu_data.destroy_self(device);

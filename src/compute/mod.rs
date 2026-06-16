@@ -124,6 +124,10 @@ pub fn start_compute(
             log::error!("Main thread disconnected");
             break;
           }
+          err => {
+            log::error!("{}", err);
+            break;
+          }
         }
       }
     }

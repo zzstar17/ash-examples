@@ -6,8 +6,8 @@ use ash::vk;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, Default)]
 pub struct Particle {
-  pos: [f32; 2],
-  vel: [f32; 2],
+  pub pos: [f32; 2],
+  pub vel: [f32; 2],
 }
 
 // impl instance vertex for Particle

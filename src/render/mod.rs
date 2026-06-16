@@ -14,7 +14,7 @@ mod screenshot_buffer;
 mod shaders;
 mod swapchain;
 mod sync_renderer;
-mod vertices;
+pub mod vertices;
 
 use ash::vk;
 use vkobjects::const_flag_bitor;

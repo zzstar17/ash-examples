@@ -7,18 +7,7 @@ use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroye
 
 use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 
-use crate::render::{create_objs::create_buffer, GPUDataAllocationError};
-
-const INITIAL_CAPACITY: u64 = 100;
-const INITIAL_SIZE: u64 = INITIAL_CAPACITY * size_of::<Particle>() as u64;
-
-// size and alignment: 4
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
-pub struct Particle {
-  pos: [f32; 2],
-  vel: [f32; 2],
-}
+use crate::render::{create_objs::create_buffer, vertices::Particle, GPUDataAllocationError};
 
 #[derive(Debug)]
 pub struct ComputeGPUData {
@@ -30,12 +19,14 @@ pub struct ComputeGPUData {
   pub particles_graphics: [vk::Buffer; 2],
   // read from cpu
   pub particles_from_cpu_read: MappedHostBuffer<Particle>,
+  pub particles_from_cpu_read_cur_size: u64,
   // write to cpu
   pub from_cpu_write: MappedHostBuffer<u8>,
 
-  pub particles_size: u64,
-  pub particles_capacity: u64,
-  pub particles_len: u64,
+  pub particles_buffer_size: u64,
+  pub particles_capacity: u32,
+  pub particles_len: u32,
+  pub particles_copying: u32,
 
   memories: Vec<DetailedMemory>,
 }
@@ -59,13 +50,16 @@ impl DeviceManuallyDestroyed for Buffers {
 }
 
 impl ComputeGPUData {
+  pub const INITIAL_CAPACITY: usize = 100;
+  pub const INITIAL_SIZE: u64 = (Self::INITIAL_CAPACITY * size_of::<Particle>()) as u64;
+
   fn create_buffers(
     device: &Device,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Buffers, OutOfMemoryError> {
     let particles_compute_0 = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::STORAGE_BUFFER
         .bitor(vk::BufferUsageFlags::TRANSFER_SRC)
         .bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -76,7 +70,7 @@ impl ComputeGPUData {
     )?;
     let particles_compute_1 = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::STORAGE_BUFFER
         .bitor(vk::BufferUsageFlags::TRANSFER_SRC)
         .bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -90,7 +84,7 @@ impl ComputeGPUData {
 
     let particles_new = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
       #[cfg(feature = "vl")]
       marker,
@@ -101,7 +95,7 @@ impl ComputeGPUData {
 
     let particles_graphics_0 = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
       #[cfg(feature = "vl")]
       marker,
@@ -114,7 +108,7 @@ impl ComputeGPUData {
     })?;
     let particles_graphics_1 = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
       #[cfg(feature = "vl")]
       marker,
@@ -130,7 +124,7 @@ impl ComputeGPUData {
 
     let particles_cpu_read = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::TRANSFER_SRC,
       #[cfg(feature = "vl")]
       marker,
@@ -144,7 +138,7 @@ impl ComputeGPUData {
     })?;
     let cpu_write = create_buffer(
       device,
-      INITIAL_SIZE,
+      Self::INITIAL_SIZE,
       vk::BufferUsageFlags::TRANSFER_DST,
       #[cfg(feature = "vl")]
       marker,
@@ -241,16 +235,37 @@ impl ComputeGPUData {
       particles_from_cpu_read,
       from_cpu_write,
       memories,
-      particles_size: INITIAL_SIZE,
-      particles_capacity: INITIAL_CAPACITY,
-      particles_len: INITIAL_CAPACITY,
+      particles_buffer_size: Self::INITIAL_SIZE,
+      particles_capacity: Self::INITIAL_CAPACITY as u32,
+      particles_len: 0,
+      particles_copying: 0,
+      particles_from_cpu_read_cur_size: Self::INITIAL_SIZE,
     })
   }
 
-  pub fn initialize_particles_compute(&self, device: &Device) -> Result<(), HostMemorySyncError> {
-    let mut particles = Vec::with_capacity(INITIAL_CAPACITY as usize);
-    let mut rng = rand::rng();
-    for _ in 0..INITIAL_CAPACITY {
+  pub fn current_buffer_size(&self) -> u64 {
+    self.particles_len as u64 * size_of::<Particle>() as u64
+  }
+
+  pub fn current_new_particles_size(&self) -> u64 {
+    self.particles_copying as u64 * size_of::<Particle>() as u64
+  }
+
+  pub fn write_particles_to_from_cpu_read(
+    &mut self,
+    device: &Device,
+    new_count: usize,
+  ) -> Result<(), HostMemorySyncError> {
+    // divide adding new particles somehow?
+    assert!(new_count * size_of::<Particle>() <= self.particles_from_cpu_read_cur_size as usize);
+    if self.particles_len + new_count as u32 > self.particles_capacity {
+      // expand buffer
+      todo!();
+    }
+
+    let mut particles = Vec::with_capacity(new_count);
+    let mut rng: rand::prelude::ThreadRng = rand::rng();
+    for _ in 0..new_count {
       particles.push(Particle {
         pos: rng.random(),
         vel: [0.0, 0.0],
@@ -264,7 +279,14 @@ impl ComputeGPUData {
       self.particles_from_cpu_read.flush_memory_range(device)?;
     };
 
+    self.particles_copying = new_count as u32;
+
     Ok(())
+  }
+
+  pub fn commit_new_particles(&mut self) {
+    self.particles_len += self.particles_copying;
+    self.particles_copying = 0;
   }
 }
 
