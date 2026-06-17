@@ -59,6 +59,8 @@ impl ComputeCommandBufferPool {
     data: &ComputeGPUData,
     descriptors: &ComputeDescriptorPool,
     pipeline: &ComputePipeline,
+
+    write_to_cpu: bool,
   ) -> Result<(), OutOfMemoryError> {
     let cb = self.cb;
     let begin_info =
@@ -106,7 +108,7 @@ impl ComputeCommandBufferPool {
     }
 
     // wait previous dispatch
-    let cur_buffer_size = data.current_buffer_size();
+    let cur_buffer_size = data.current_particles_size();
     if cur_buffer_size > 0 {
       let read_wait = vk::BufferMemoryBarrier2 {
         src_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::SHADER_READ),
@@ -119,9 +121,15 @@ impl ComputeCommandBufferPool {
         ..Default::default()
       };
       let write_wait = vk::BufferMemoryBarrier2 {
-        dst_access_mask: vk::AccessFlags2::SHADER_WRITE,
+        src_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::SHADER_READ),
+        dst_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::TRANSFER_READ),
+        src_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+        dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
+          .bitor(vk::PipelineStageFlags2::TRANSFER),
         buffer: data.particles_compute[write_i],
-        ..read_wait
+        offset: 0,
+        size: cur_buffer_size,
+        ..Default::default()
       };
       device.cmd_pipeline_barrier2(
         cb,
@@ -162,6 +170,46 @@ impl ComputeCommandBufferPool {
       // todo
       let group_count = 64;
       device.cmd_dispatch(cb, group_count, 1, 1);
+    }
+
+    if write_to_cpu {
+      let region = vk::BufferCopy {
+        src_offset: 0,
+        dst_offset: 0,
+        size: cur_buffer_size,
+      };
+      device.cmd_copy_buffer(
+        cb,
+        data.particles_compute[read_i],
+        data.to_cpu_write.buffer,
+        &[region],
+      );
+
+      let flush_to_host = vk::BufferMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+        dst_access_mask: vk::AccessFlags2::HOST_READ,
+        src_stage_mask: vk::PipelineStageFlags2::COPY,
+        dst_stage_mask: vk::PipelineStageFlags2::HOST,
+        buffer: data.to_cpu_write.buffer,
+        offset: 0,
+        size: cur_buffer_size,
+        ..Default::default()
+      };
+      // sync with next same write
+      let flush_to_next_copy_write = vk::BufferMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+        dst_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::COPY,
+        dst_stage_mask: vk::PipelineStageFlags2::COPY,
+        buffer: data.to_cpu_write.buffer,
+        offset: 0,
+        size: cur_buffer_size,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(
+        cb,
+        &super::dependency_info(&[], &[flush_to_host, flush_to_next_copy_write], &[]),
+      );
     }
 
     device.end_command_buffer(cb)?;

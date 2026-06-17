@@ -96,6 +96,7 @@ impl ComputeRenderer {
     &mut self,
     read_i: usize,
     write_i: usize,
+    write_to_cpu: bool,
   ) -> Result<(), OutOfMemoryError> {
     self.command_pools[write_i].reset(&self.device)?;
     self.command_pools[write_i].record_main(
@@ -106,6 +107,7 @@ impl ComputeRenderer {
       &self.gpu_data,
       &self.descriptor_sets,
       &self.pipeline,
+      write_to_cpu,
     )?;
     Ok(())
   }

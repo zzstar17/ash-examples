@@ -45,7 +45,7 @@ void main() {
 
   Particle p_out;
   p_out.vel = p_in.vel;
-  p_out.pos = p_in.pos;
+  p_out.pos = p_in.pos - vec2(0.01, 0.01);
 
   data_out.particles[i] = p_out;
 }

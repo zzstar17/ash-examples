@@ -18,10 +18,10 @@ pub struct ComputeGPUData {
   // copied to graphics
   pub particles_graphics: [vk::Buffer; 2],
   // read from cpu
-  pub particles_from_cpu_read: MappedHostBuffer<Particle>,
+  pub from_cpu_read: MappedHostBuffer<Particle>,
   pub particles_from_cpu_read_cur_size: u64,
   // write to cpu
-  pub from_cpu_write: MappedHostBuffer<u8>,
+  pub to_cpu_write: MappedHostBuffer<Particle>,
 
   pub particles_buffer_size: u64,
   pub particles_capacity: u32,
@@ -35,8 +35,8 @@ struct Buffers {
   pub particles_compute: [vk::Buffer; 2],
   pub particles_new: vk::Buffer,
   pub particles_graphics: [vk::Buffer; 2],
-  pub particles_from_cpu_read: vk::Buffer,
-  pub from_cpu_write: vk::Buffer,
+  pub from_cpu_read: vk::Buffer,
+  pub to_cpu_write: vk::Buffer,
 }
 
 impl DeviceManuallyDestroyed for Buffers {
@@ -44,8 +44,8 @@ impl DeviceManuallyDestroyed for Buffers {
     self.particles_compute.destroy_self(device);
     self.particles_new.destroy_self(device);
     self.particles_graphics.destroy_self(device);
-    self.particles_from_cpu_read.destroy_self(device);
-    self.from_cpu_write.destroy_self(device);
+    self.from_cpu_read.destroy_self(device);
+    self.to_cpu_write.destroy_self(device);
   }
 }
 
@@ -156,8 +156,8 @@ impl ComputeGPUData {
       particles_compute,
       particles_new,
       particles_graphics,
-      particles_from_cpu_read: particles_cpu_read,
-      from_cpu_write: cpu_write,
+      from_cpu_read: particles_cpu_read,
+      to_cpu_write: cpu_write,
     })
   }
 
@@ -208,7 +208,7 @@ impl ComputeGPUData {
         vk::MemoryPropertyFlags::HOST_VISIBLE.bitor(vk::MemoryPropertyFlags::HOST_CACHED),
         vk::MemoryPropertyFlags::HOST_VISIBLE,
       ],
-      [&buffers.particles_from_cpu_read, &buffers.from_cpu_write],
+      [&buffers.from_cpu_read, &buffers.to_cpu_write],
       0.5,
       #[cfg(feature = "log_alloc")]
       Some(["Particles CPU read", "CPU write"]),
@@ -225,15 +225,15 @@ impl ComputeGPUData {
     memories.extend_from_slice(device_alloc.get_memories());
     memories.extend_from_slice(host_map_alloc.get_memories());
 
-    let particles_from_cpu_read = mapped_host_objs[0].into_buffer();
-    let from_cpu_write = mapped_host_objs[1].into_buffer();
+    let from_cpu_read = mapped_host_objs[0].into_buffer();
+    let to_cpu_write = mapped_host_objs[1].into_buffer();
 
     Ok(Self {
       particles_compute: buffers.particles_compute,
       particles_new: buffers.particles_new,
       particles_graphics: buffers.particles_graphics,
-      particles_from_cpu_read,
-      from_cpu_write,
+      from_cpu_read,
+      to_cpu_write,
       memories,
       particles_buffer_size: Self::INITIAL_SIZE,
       particles_capacity: Self::INITIAL_CAPACITY as u32,
@@ -243,7 +243,7 @@ impl ComputeGPUData {
     })
   }
 
-  pub fn current_buffer_size(&self) -> u64 {
+  pub fn current_particles_size(&self) -> u64 {
     self.particles_len as u64 * size_of::<Particle>() as u64
   }
 
@@ -273,10 +273,8 @@ impl ComputeGPUData {
     }
 
     unsafe {
-      self
-        .particles_from_cpu_read
-        .copy_to_buffer_memory(&particles);
-      self.particles_from_cpu_read.flush_memory_range(device)?;
+      self.from_cpu_read.copy_to_buffer_memory(&particles);
+      self.from_cpu_read.flush_memory_range(device)?;
     };
 
     self.particles_copying = new_count as u32;
@@ -296,8 +294,8 @@ impl DeviceManuallyDestroyed for ComputeGPUData {
     self.particles_new.destroy_self(device);
     self.particles_graphics.destroy_self(device);
 
-    self.particles_from_cpu_read.destroy_self(device);
-    self.from_cpu_write.destroy_self(device);
+    self.from_cpu_read.destroy_self(device);
+    self.to_cpu_write.destroy_self(device);
 
     self.memories.destroy_self(device);
   }

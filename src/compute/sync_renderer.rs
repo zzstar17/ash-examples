@@ -19,6 +19,8 @@ use super::ferris::Ferris;
 pub const COMPUTE_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct ComputeSyncRenderer {
+  tick_i: usize,
+
   ferris: Ferris,
 
   compute_result_sender: mpsc::SyncSender<RenderPosition>,
@@ -29,6 +31,9 @@ pub struct ComputeSyncRenderer {
   frame_fences: [vk::Fence; COMPUTE_FRAMES_IN_FLIGHT],
 
   transfer_finished: vk::Semaphore,
+
+  save_gpu_contents_next_frame: bool,
+  saving_gpu_contents: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -128,12 +133,15 @@ impl ComputeSyncRenderer {
     }
 
     Ok(Self {
+      tick_i: 0,
       renderer,
       ferris,
       compute_result_sender,
       transfer_finished,
       frame_fences,
       last_write_i: COMPUTE_FRAMES_IN_FLIGHT - 1,
+      save_gpu_contents_next_frame: true,
+      saving_gpu_contents: None,
     })
   }
 
@@ -153,18 +161,48 @@ impl ComputeSyncRenderer {
         .wait_for_fences(&[self.frame_fences[cur_write_i]], true, u64::MAX)?;
     }
 
+    if self.tick_i < 10 {
+      self.save_gpu_contents_next_frame = true;
+      log::warn!(
+        "[Tick {}] Particle count: {}, new particles: {}",
+        self.tick_i,
+        self.renderer.gpu_data.particles_len,
+        self.renderer.gpu_data.particles_copying
+      );
+    }
+
+    if let Some(count) = self.saving_gpu_contents {
+      let contents = unsafe {
+        self
+          .renderer
+          .gpu_data
+          .to_cpu_write
+          .read_to_box(count as usize)
+      };
+      log::warn!(
+        "[Tick {}] Compute contents: {:?} * {}",
+        self.tick_i,
+        contents[0],
+        contents.len()
+      );
+    }
+    self.saving_gpu_contents = None;
+
+    if self.renderer.gpu_data.particles_len == 0 {
+      self.save_gpu_contents_next_frame = false;
+    }
+    unsafe {
+      self
+        .renderer
+        .record_main(cur_read_i, cur_write_i, self.save_gpu_contents_next_frame)?;
+    }
+
     unsafe {
       // only reset after making sure the fence is going to be signalled again
       self
         .renderer
         .device
         .reset_fences(&[self.frame_fences[cur_write_i]])?;
-    }
-
-    // actual rendering
-
-    unsafe {
-      self.renderer.record_main(cur_read_i, cur_write_i)?;
     }
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
@@ -193,6 +231,13 @@ impl ComputeSyncRenderer {
         &[submit_info],
         self.frame_fences[cur_write_i],
       )?;
+    }
+    self.tick_i += 1;
+
+    if self.save_gpu_contents_next_frame {
+      // before commit
+      self.saving_gpu_contents = Some(self.renderer.gpu_data.particles_len);
+      self.save_gpu_contents_next_frame = false;
     }
 
     if self.renderer.gpu_data.particles_copying > 0 {

@@ -62,12 +62,7 @@ impl ComputeTransferCommandBufferPool {
         dst_offset: 0,
         size: new_particles_size,
       };
-      device.cmd_copy_buffer(
-        cb,
-        data.particles_from_cpu_read.buffer,
-        data.particles_new,
-        &[region],
-      );
+      device.cmd_copy_buffer(cb, data.from_cpu_read.buffer, data.particles_new, &[region]);
     }
 
     if queues.transfer.family_index != queues.compute.family_index {
