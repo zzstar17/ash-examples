@@ -1,9 +1,12 @@
 pub mod ferris;
 mod gpu_data;
+mod particle_buffers;
 mod renderer;
 mod sync_renderer;
 
 pub use gpu_data::ComputeGPUData;
+pub use particle_buffers::ParticleBuffers;
+use vkobjects::errors::OutOfMemoryError;
 
 use std::{
   sync::mpsc::{self},
@@ -29,22 +32,18 @@ pub enum ComputeToGraphicsEvent {
   InitializationComplete,
 }
 
-pub struct ComputeThread {
-  pub handle: thread::JoinHandle<()>,
-  pub result_receiver: mpsc::Receiver<RenderPosition>,
-  pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
-  pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
+#[derive(Debug, Clone, Copy)]
+pub struct ComputeResult {
+  pub ferris_position: RenderPosition,
+  pub particle_buffer_i: usize,
 }
 
-impl ComputeThread {
-  pub fn terminate_and_wait(self) {
-    if let Err(_err) = self.event_sender.send(GraphicsToComputeEvent::Terminate) {
-      log::warn!("Failed to send termination event to compute thread. Receiver is disconnected.")
-    }
-    if let Err(_err) = self.handle.join() {
-      log::error!("Compute thread panicked.");
-    }
-  }
+pub struct ComputeThread {
+  pub handle: thread::JoinHandle<()>,
+  pub result_receiver: mpsc::Receiver<ComputeResult>,
+  pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
+  pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
+  pub particle_buffers: ParticleBuffers,
 }
 
 pub fn start_compute(
@@ -52,37 +51,50 @@ pub fn start_compute(
   physical_device: PhysicalDevice,
   queues: SingleQueues,
   #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
-) -> ComputeThread {
+) -> Result<ComputeThread, OutOfMemoryError> {
   let (data_sender, data_receiver) = mpsc::sync_channel(1);
   // events from compute queue
   let (compute_event_sender, compute_event_receiver) = mpsc::channel();
   // events from graphics queue
   let (graphics_event_sender, graphics_event_receiver) = mpsc::channel();
 
+  let particle_buffers = ParticleBuffers::new(
+    &*device,
+    #[cfg(feature = "vl")]
+    &marker,
+  )?;
+  let particle_buffers_to_compute = particle_buffers.clone();
+
   let handle = thread::spawn(move || {
     log::info!("Starting compute thread");
 
-    let mut sync_renderer =
-      match ComputeSyncRenderer::new(device, physical_device, queues, data_sender, &marker) {
-        Ok(v) => {
-          if let Err(_err) =
-            compute_event_sender.send(Ok(ComputeToGraphicsEvent::InitializationComplete))
-          {
-            log::error!("Main thread disconnected during initialization");
-            return;
-          }
-          v
-        }
-        Err(err) => {
-          match compute_event_sender.send(Err(err)) {
-            Ok(()) => {}
-            Err(_err) => {
-              log::error!("Main thread disconnected during initialization");
-            }
-          }
+    let mut sync_renderer = match ComputeSyncRenderer::new(
+      device,
+      physical_device,
+      queues,
+      data_sender,
+      particle_buffers_to_compute,
+      &marker,
+    ) {
+      Ok(v) => {
+        if let Err(_err) =
+          compute_event_sender.send(Ok(ComputeToGraphicsEvent::InitializationComplete))
+        {
+          log::error!("Main thread disconnected during initialization");
           return;
         }
-      };
+        v
+      }
+      Err(err) => {
+        match compute_event_sender.send(Err(err)) {
+          Ok(()) => {}
+          Err(_err) => {
+            log::error!("Main thread disconnected during initialization");
+          }
+        }
+        return;
+      }
+    };
 
     let mut last_update = Instant::now();
     let mut time_since_last_ups_print = Duration::ZERO;
@@ -135,10 +147,11 @@ pub fn start_compute(
     log::info!("Compute thead: Exiting");
   });
 
-  ComputeThread {
+  Ok(ComputeThread {
     handle,
     result_receiver: data_receiver,
     event_sender: graphics_event_sender,
     event_receiver: compute_event_receiver,
-  }
+    particle_buffers,
+  })
 }

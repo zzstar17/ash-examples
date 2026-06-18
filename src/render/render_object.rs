@@ -31,6 +31,7 @@ pub static QUAD_INDICES_SIZE: u64 = (size_of::<u16>() * QUAD_INDICES.len()) as u
 
 // represents a position of the object that will be rendered
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct RenderPosition {
   position: [f32; 2],
   ratio: [f32; 2], // width and height in relation to the surface

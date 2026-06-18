@@ -1,12 +1,16 @@
-use std::{marker::PhantomData, ptr, sync::mpsc};
+use std::{
+  marker::PhantomData,
+  ptr,
+  sync::{atomic::Ordering, mpsc},
+};
 
 use ash::vk;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
 use winit::window::Window;
 
 use crate::{
-  render::{create_objs::create_fence, RenderPosition},
-  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
+  compute::ComputeResult, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO,
+  SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
@@ -23,6 +27,8 @@ pub struct SyncRenderer {
 
   // swapchain image available in this frame
   image_available: [vk::Semaphore; FRAMES_IN_FLIGHT],
+
+  in_use_particle_buffers_by_frame: [Option<usize>; FRAMES_IN_FLIGHT],
 
   // will have the new window size
   recreate_swapchain_next_frame: bool,
@@ -64,6 +70,7 @@ impl SyncRenderer {
       renderer,
       last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
       frame_fences,
+      in_use_particle_buffers_by_frame: [None; FRAMES_IN_FLIGHT],
 
       image_available,
       recreate_swapchain_next_frame: false,
@@ -83,7 +90,7 @@ impl SyncRenderer {
   pub fn render_next_frame(
     &mut self,
     cur_total_frame: usize,
-    compute_message_rcv: &mpsc::Receiver<RenderPosition>,
+    compute_message_rcv: &mpsc::Receiver<ComputeResult>,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
@@ -95,6 +102,9 @@ impl SyncRenderer {
         true,
         u64::MAX,
       )?;
+    }
+    if let Some(buffer_i) = self.in_use_particle_buffers_by_frame[cur_frame_i] {
+      self.renderer.particle_buffers.in_use_by_graphics[buffer_i].store(false, Ordering::Release);
     }
 
     // current frame resources are now safe to use as they are not being used by the GPU
@@ -179,7 +189,10 @@ impl SyncRenderer {
 
     // get compute data
 
-    let ferris_render_position = compute_message_rcv
+    let ComputeResult {
+      ferris_position,
+      particle_buffer_i,
+    } = compute_message_rcv
       .recv()
       .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
 
@@ -192,13 +205,22 @@ impl SyncRenderer {
         self.saving_frame = Some((cur_frame_i, self.renderer.render_format()));
         record_screenshot = true;
       }
-      self.renderer.record_graphics(
-        cur_frame_i,
-        cur_image_i as usize,
-        &ferris_render_position,
-        record_screenshot,
-      )?;
+      self
+        .renderer
+        .record_graphics(
+          cur_frame_i,
+          cur_image_i as usize,
+          &ferris_position,
+          record_screenshot,
+        )
+        .on_err(|_err| {
+          self.renderer.particle_buffers.in_use_by_graphics[particle_buffer_i]
+            .store(false, Ordering::Release);
+        })?;
     }
+
+    // commit in_use_by_graphics
+    self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particle_buffer_i);
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
       .command_buffer(self.renderer.command_pools[cur_frame_i].main)];

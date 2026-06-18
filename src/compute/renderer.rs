@@ -6,7 +6,7 @@ use vkobjects::{
 };
 
 use crate::{
-  compute::{gpu_data::ComputeGPUData, sync_renderer::COMPUTE_FRAMES_IN_FLIGHT},
+  compute::{gpu_data::ComputeGPUData, sync_renderer::COMPUTE_FRAMES_IN_FLIGHT, ParticleBuffers},
   render::{
     command_pools::{ComputeCommandBufferPool, ComputeTransferCommandBufferPool},
     descriptor_sets::ComputeDescriptorPool,
@@ -33,9 +33,10 @@ impl ComputeRenderer {
     device: Device,
     physical_device: PhysicalDevice,
     queues: SingleQueues,
+    particle_buffers: [vk::Buffer; ParticleBuffers::BUFFER_COUNT],
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
-    let gpu_data = ComputeGPUData::new(&device, &physical_device, &queues, marker)?;
+    let gpu_data = ComputeGPUData::new(&device, &physical_device, particle_buffers, marker)?;
     let descriptor_pool = ComputeDescriptorPool::new(&device).on_err(|_err| unsafe {
       gpu_data.destroy_self(&device);
     })?;
