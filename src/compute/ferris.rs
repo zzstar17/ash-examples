@@ -96,8 +96,8 @@ impl Ferris {
       ((self.position[1] * 2.0) - window_size_float.height) / window_size_float.height,
     ];
     let ratio = [
-      Ferris::WIDTH as f32 / window_size_float.width,
-      Ferris::HEIGHT as f32 / window_size_float.height,
+      (Ferris::WIDTH as f32 / window_size_float.width) * 0.1,
+      (Ferris::HEIGHT as f32 / window_size_float.height) * 0.1,
     ];
     RenderPosition::new(normal_pos, ratio)
   }

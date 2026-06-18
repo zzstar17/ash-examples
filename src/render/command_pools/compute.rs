@@ -60,6 +60,7 @@ impl ComputeCommandBufferPool {
     descriptors: &ComputeDescriptorPool,
     pipeline: &ComputePipeline,
 
+    particle_buffer_i_opt: Option<usize>,
     write_to_cpu: bool,
   ) -> Result<(), OutOfMemoryError> {
     let cb = self.cb;
@@ -140,6 +141,7 @@ impl ComputeCommandBufferPool {
     // shader dispatch
     {
       let new_particles_descriptor = if new_particles_count > 0 {
+        log::debug!("Binding particles new");
         descriptors.particles_new
       } else {
         descriptors.particles_compute[read_i]
@@ -168,11 +170,61 @@ impl ComputeCommandBufferPool {
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::COMPUTE, pipeline.main);
 
       // todo
-      let group_count = 64;
+      let group_count = ComputeGPUData::INITIAL_CAPACITY as u32;
       device.cmd_dispatch(cb, group_count, 1, 1);
     }
 
+    if let Some(particle_buffer_i) = particle_buffer_i_opt {
+      // in case previous write was last frame
+      let wait_previous_write = vk::BufferMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+        dst_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::COPY,
+        dst_stage_mask: vk::PipelineStageFlags2::COPY,
+        buffer: data.particles_graphics[particle_buffer_i],
+        offset: 0,
+        size: cur_buffer_size,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(
+        cb,
+        &super::dependency_info(&[], &[wait_previous_write], &[]),
+      );
+
+      let region = vk::BufferCopy {
+        src_offset: 0,
+        dst_offset: 0,
+        size: cur_buffer_size,
+      };
+      device.cmd_copy_buffer(
+        cb,
+        data.particles_compute[read_i],
+        data.particles_graphics[particle_buffer_i],
+        &[region],
+      );
+
+      if queues.compute.family_index != queues.graphics.family_index {
+        let release_to_graphics = vk::BufferMemoryBarrier2 {
+          src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+          dst_access_mask: vk::AccessFlags2::empty(), // ownership release
+          src_stage_mask: vk::PipelineStageFlags2::COPY,
+          dst_stage_mask: vk::PipelineStageFlags2::empty(), // ownership release
+          src_queue_family_index: queues.compute.family_index,
+          dst_queue_family_index: queues.graphics.family_index,
+          buffer: data.particles_graphics[particle_buffer_i],
+          offset: 0,
+          size: cur_buffer_size,
+          ..Default::default()
+        };
+        device.cmd_pipeline_barrier2(
+          cb,
+          &super::dependency_info(&[], &[release_to_graphics], &[]),
+        );
+      }
+    }
+
     if write_to_cpu {
+      log::debug!("Command buffer compute writing to cpu");
       let region = vk::BufferCopy {
         src_offset: 0,
         dst_offset: 0,

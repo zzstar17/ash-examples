@@ -51,7 +51,7 @@ impl DeviceManuallyDestroyed for Buffers {
 }
 
 impl ComputeGPUData {
-  pub const INITIAL_CAPACITY: usize = 100;
+  pub const INITIAL_CAPACITY: usize = 64 * 2000;
   pub const INITIAL_SIZE: u64 = (Self::INITIAL_CAPACITY * size_of::<Particle>()) as u64;
 
   fn create_buffers(
@@ -86,7 +86,9 @@ impl ComputeGPUData {
     let particles_new = create_buffer(
       device,
       Self::INITIAL_SIZE,
-      vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      vk::BufferUsageFlags::STORAGE_BUFFER
+        .bitor(vk::BufferUsageFlags::TRANSFER_DST)
+        .bitor(vk::BufferUsageFlags::TRANSFER_SRC),
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
@@ -157,6 +159,7 @@ impl ComputeGPUData {
         &particles_graphics[0],
         &particles_graphics[1],
         &particles_graphics[2],
+        &particles_graphics[3],
       ],
       0.7,
       false,
@@ -168,6 +171,7 @@ impl ComputeGPUData {
         "Particles graphics 0",
         "Particles graphics 1",
         "Particles graphics 2",
+        "Particles graphics 3",
       ]),
       #[cfg(feature = "log_alloc")]
       "Compute data",
@@ -228,6 +232,12 @@ impl ComputeGPUData {
     self.particles_copying as u64 * size_of::<Particle>() as u64
   }
 
+  fn vel_rng(init: f32) -> f32 {
+    let mut shifted = (init - 0.5) * 1.6;
+    shifted += 0.1 - shifted / 10.0;
+    shifted
+  }
+
   pub fn write_particles_to_from_cpu_read(
     &mut self,
     device: &Device,
@@ -244,8 +254,14 @@ impl ComputeGPUData {
     let mut rng: rand::prelude::ThreadRng = rand::rng();
     for _ in 0..new_count {
       particles.push(Particle {
-        pos: rng.random(),
-        vel: [0.0, 0.0],
+        pos: [
+          rng.random::<f32>() - 428.0 * 0.0225,
+          rng.random::<f32>() - 283.0 * 0.0225,
+        ],
+        vel: [
+          Self::vel_rng(rng.random::<f32>()),
+          Self::vel_rng(rng.random::<f32>()),
+        ],
       });
     }
 

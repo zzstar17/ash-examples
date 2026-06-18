@@ -12,7 +12,7 @@ use crate::{
     descriptor_sets::DescriptorPool,
     render_object::RenderPosition,
     shaders::{self, Shader},
-    vertices::Vertex,
+    vertices::{Particle, Vertex},
   },
   vertex_input_state_create_info,
 };
@@ -138,7 +138,7 @@ impl GraphicsPipeline {
   ) -> Result<vk::Pipeline, PipelineCreationError> {
     let shader_stages = shader.get_pipeline_shader_creation_info();
 
-    let vertex_input_state = vertex_input_state_create_info!(Vertex);
+    let vertex_input_state = vertex_input_state_create_info!(Vertex, Particle);
     let vertex_input_state = vertex_input_state.get();
 
     let input_assembly_state = triangle_input_assembly_state();
