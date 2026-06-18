@@ -4,6 +4,7 @@ mod particle_buffers;
 mod renderer;
 mod sync_renderer;
 
+use ash::vk;
 pub use gpu_data::ComputeGPUData;
 pub use particle_buffers::ParticleBuffers;
 use vkobjects::errors::OutOfMemoryError;
@@ -35,7 +36,15 @@ pub enum ComputeToGraphicsEvent {
 #[derive(Debug, Clone, Copy)]
 pub struct ComputeResult {
   pub ferris_position: RenderPosition,
-  pub particle_buffer_i: usize,
+  pub particles_draw: Option<ParticlesDraw>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParticlesDraw {
+  pub buffer: vk::Buffer,
+  pub buffer_i: usize,
+  pub buffer_size: u64,
+  pub count: u32,
 }
 
 pub struct ComputeThread {

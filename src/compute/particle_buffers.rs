@@ -170,7 +170,7 @@ impl ParticleBuffers {
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"Particles graphics 2",
+      c"Particles graphics 3",
     )
     .on_err(|_| unsafe {
       buffer_0.destroy_self(device);

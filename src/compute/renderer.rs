@@ -43,7 +43,7 @@ impl ComputeRenderer {
     descriptor_pool.update_initial_sets(
       &device,
       gpu_data.particles_compute,
-      gpu_data.particles_compute[1],
+      gpu_data.particles_new,
     );
 
     let pipeline = ComputePipeline::new(&device, vk::PipelineCache::null(), &descriptor_pool)
@@ -97,6 +97,7 @@ impl ComputeRenderer {
     &mut self,
     read_i: usize,
     write_i: usize,
+    particle_buffer_i: Option<usize>,
     write_to_cpu: bool,
   ) -> Result<(), OutOfMemoryError> {
     self.command_pools[write_i].reset(&self.device)?;
@@ -108,6 +109,7 @@ impl ComputeRenderer {
       &self.gpu_data,
       &self.descriptor_sets,
       &self.pipeline,
+      particle_buffer_i,
       write_to_cpu,
     )?;
     Ok(())

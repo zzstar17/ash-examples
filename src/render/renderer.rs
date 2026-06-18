@@ -6,7 +6,7 @@ use vkobjects::{
 };
 
 use crate::{
-  compute::ParticleBuffers,
+  compute::{ParticleBuffers, ParticlesDraw},
   destructor::Destructor,
   render::{gpu_data::GPUDataAllocationError, PostWindowInit},
   RESOLUTION, SCREENSHOT_SAVE_FILE,
@@ -245,12 +245,14 @@ impl Renderer {
     frame_i: usize,
     image_i: usize,
     position: &RenderPosition,
+    particles_draw_opt: Option<ParticlesDraw>,
     save_to_screenshot_buffer: bool,
   ) -> Result<(), OutOfMemoryError> {
     self.command_pools[frame_i].reset(&self.init.device)?;
     self.command_pools[frame_i].record_main(
       frame_i,
       &self.init.device,
+      &self.init.queues,
       self.render_pass,
       &self.render_targets,
       self.swapchains.get_images()[image_i],
@@ -258,6 +260,7 @@ impl Renderer {
       &self.pipeline,
       &self.descriptor_pool,
       &self.data,
+      particles_draw_opt,
       position,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)

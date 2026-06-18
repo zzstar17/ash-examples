@@ -1,10 +1,11 @@
 use std::{cmp::Ordering, marker::PhantomData, ptr};
 
 use ash::vk;
-use vkinitialization::device::QueueFamilies;
+use vkinitialization::device::{QueueFamilies, SingleQueues};
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
+  compute::ParticlesDraw,
   render::{
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
@@ -65,6 +66,7 @@ impl GraphicsCommandBufferPool {
     &mut self,
     frame_i: usize,
     device: &ash::Device,
+    queues: &SingleQueues,
 
     render_pass: vk::RenderPass,
     render_targets: &RenderTargets,
@@ -76,6 +78,7 @@ impl GraphicsCommandBufferPool {
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
+    particles_draw_opt: Option<ParticlesDraw>,
     position: &RenderPosition, // Ferris's position
 
     screenshot_buffer: Option<vk::Buffer>,
@@ -93,6 +96,40 @@ impl GraphicsCommandBufferPool {
     // do a copy operation instead of blit if true
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
       || (render_height == swapchain_height && swapchain_width >= render_width);
+
+    if let Some(particles_draw) = particles_draw_opt {
+      if queues.graphics.family_index != queues.compute.family_index {
+        let acquire = vk::BufferMemoryBarrier2 {
+          src_access_mask: vk::AccessFlags2::empty(), // ownership acquire
+          dst_access_mask: vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
+          src_stage_mask: vk::PipelineStageFlags2::empty(), // ownership acquire
+          dst_stage_mask: vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
+          src_queue_family_index: queues.compute.family_index,
+          dst_queue_family_index: queues.graphics.family_index,
+          buffer: particles_draw.buffer,
+          offset: 0,
+          size: particles_draw.buffer_size,
+          ..Default::default()
+        };
+        device.cmd_pipeline_barrier2(cb, &super::dependency_info(&[], &[acquire], &[]));
+      } else {
+        let copy_wait = vk::BufferMemoryBarrier2 {
+          src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+          dst_access_mask: vk::AccessFlags2::VERTEX_ATTRIBUTE_READ,
+          src_stage_mask: vk::PipelineStageFlags2::COPY,
+          dst_stage_mask: vk::PipelineStageFlags2::VERTEX_ATTRIBUTE_INPUT,
+          src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+          dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+          buffer: particles_draw.buffer,
+          offset: 0,
+          size: particles_draw.buffer_size,
+          ..Default::default()
+        };
+        device.cmd_pipeline_barrier2(cb, &super::dependency_info(&[], &[copy_wait], &[]));
+      }
+    }
+
+    let particles_draw = particles_draw_opt.unwrap();
 
     // in this case the render pass takes care of all internal queue synchronization
     {
@@ -131,9 +168,9 @@ impl GraphicsCommandBufferPool {
         utility::any_as_u8_slice(position),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer], &[0]);
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer, particles_draw.buffer], &[0, 0]);
       device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
-      device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+      device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, particles_draw.count, 0, 0, 0);
 
       device.cmd_end_render_pass(cb);
     }

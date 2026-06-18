@@ -1,5 +1,5 @@
 #version 460
-layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 128000, local_size_y = 1, local_size_z = 1) in;
 
 struct Particle {
   vec2 pos;
@@ -9,8 +9,8 @@ struct Particle {
 layout(push_constant) uniform PushConstantData {
   vec2 player_pos;
 
-  uint new_particle_count;
   uint particle_count;
+  uint new_particle_count;
 } pc;
 
 layout(set = 0, binding = 0) restrict readonly buffer DataIn {
@@ -45,7 +45,7 @@ void main() {
 
   Particle p_out;
   p_out.vel = p_in.vel;
-  p_out.pos = p_in.pos - vec2(0.01, 0.01);
+  p_out.pos = p_in.pos + p_in.vel * 0.01;
 
   data_out.particles[i] = p_out;
 }

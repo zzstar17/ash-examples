@@ -191,7 +191,7 @@ impl SyncRenderer {
 
     let ComputeResult {
       ferris_position,
-      particle_buffer_i,
+      particles_draw: particles_draw_opt,
     } = compute_message_rcv
       .recv()
       .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
@@ -211,16 +211,21 @@ impl SyncRenderer {
           cur_frame_i,
           cur_image_i as usize,
           &ferris_position,
+          particles_draw_opt,
           record_screenshot,
         )
         .on_err(|_err| {
-          self.renderer.particle_buffers.in_use_by_graphics[particle_buffer_i]
-            .store(false, Ordering::Release);
+          if let Some(particles_draw) = particles_draw_opt {
+            self.renderer.particle_buffers.in_use_by_graphics[particles_draw.buffer_i]
+              .store(false, Ordering::Release);
+          }
         })?;
     }
 
-    // commit in_use_by_graphics
-    self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particle_buffer_i);
+    if let Some(particles_draw) = particles_draw_opt {
+      // commit in_use_by_graphics
+      self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
+    }
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
       .command_buffer(self.renderer.command_pools[cur_frame_i].main)];

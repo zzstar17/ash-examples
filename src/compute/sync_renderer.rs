@@ -10,7 +10,7 @@ use winit::dpi::PhysicalSize;
 use crate::{
   compute::{
     particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeGPUData, ComputeResult,
-    ParticleBuffers,
+    ParticleBuffers, ParticlesDraw,
   },
   render::{
     create_objs::{create_fence, create_semaphore},
@@ -175,6 +175,9 @@ impl ComputeSyncRenderer {
     // (as long as it is not being used by graphics)
     self.particle_manager.compute_finished();
 
+    let this_frame_particles_count = self.renderer.gpu_data.particles_len;
+    let this_frame_particles_buffer_size = self.renderer.gpu_data.current_particles_size();
+
     if self.tick_i < 10 {
       self.save_gpu_contents_next_frame = true;
       log::warn!(
@@ -199,10 +202,9 @@ impl ComputeSyncRenderer {
           .read_to_box(count as usize)
       };
       log::warn!(
-        "[Tick {}] Compute contents: {:?} * {}",
+        "[Tick {}] Compute contents: {:?}",
         self.tick_i,
-        contents[0],
-        contents.len()
+        &contents[0..(contents.len().min(10))],
       );
     }
     self.saving_gpu_contents = None;
@@ -211,7 +213,12 @@ impl ComputeSyncRenderer {
       self.save_gpu_contents_next_frame = false;
     }
 
-    let particles_write_i = self.particle_manager.get_next_compute_i();
+    // todo: remove conditional
+    let particles_write_i = if self.renderer.gpu_data.particles_len > 0 {
+      Some(self.particle_manager.get_next_compute_i())
+    } else {
+      None
+    };
 
     if self.tick_i < 10 {
       log::warn!(
@@ -222,9 +229,12 @@ impl ComputeSyncRenderer {
     }
 
     unsafe {
-      self
-        .renderer
-        .record_main(cur_read_i, cur_write_i, self.save_gpu_contents_next_frame)
+      self.renderer.record_main(
+        cur_read_i,
+        cur_write_i,
+        particles_write_i,
+        self.save_gpu_contents_next_frame,
+      )
     }
     .on_err(|_err| self.particle_manager.compute_fail())?;
 
@@ -274,6 +284,7 @@ impl ComputeSyncRenderer {
     }
 
     if self.renderer.gpu_data.particles_copying > 0 {
+      log::debug!("Commit new particles");
       self.renderer.gpu_data.commit_new_particles();
     }
 
@@ -285,31 +296,38 @@ impl ComputeSyncRenderer {
       },
     );
 
-    // todo: unmark this when send is full
-    let graphics_buffer_read_i_opt = self.particle_manager.get_and_mark_next_graphics();
+    let graphics_buffer_read_i = self.particle_manager.get_and_mark_next_graphics();
 
-    if let Some(graphics_buffer_read_i) = graphics_buffer_read_i_opt {
-      let render_position = self.ferris.get_render_position(PhysicalSize {
-        width: RENDER_EXTENT.width,
-        height: RENDER_EXTENT.height,
-      });
+    // todo
+    if graphics_buffer_read_i.is_none() {
+      return Ok(());
+    }
 
-      let compute_result = ComputeResult {
-        ferris_position: render_position,
-        particle_buffer_i: graphics_buffer_read_i,
-      };
+    let render_position = self.ferris.get_render_position(PhysicalSize {
+      width: RENDER_EXTENT.width,
+      height: RENDER_EXTENT.height,
+    });
 
-      match self.compute_result_sender.try_send(compute_result) {
-        Ok(()) => {}
-        Err(err) => {
-          self
-            .particle_manager
-            .unmark_graphics(graphics_buffer_read_i);
-          match err {
-            mpsc::TrySendError::Full(_) => {}
-            mpsc::TrySendError::Disconnected(_) => {
-              return Err(ComputeFrameRenderError::SenderDisconnected);
-            }
+    let compute_result = ComputeResult {
+      ferris_position: render_position,
+      particles_draw: graphics_buffer_read_i.map(|i| ParticlesDraw {
+        buffer: self.renderer.gpu_data.particles_graphics[i],
+        buffer_i: i,
+        buffer_size: this_frame_particles_buffer_size,
+        count: this_frame_particles_count,
+      }),
+    };
+
+    match self.compute_result_sender.try_send(compute_result) {
+      Ok(()) => {}
+      Err(err) => {
+        if let Some(i) = graphics_buffer_read_i {
+          self.particle_manager.unmark_graphics(i);
+        }
+        match err {
+          mpsc::TrySendError::Full(_) => {}
+          mpsc::TrySendError::Disconnected(_) => {
+            return Err(ComputeFrameRenderError::SenderDisconnected);
           }
         }
       }
