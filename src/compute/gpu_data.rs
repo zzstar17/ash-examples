@@ -2,21 +2,24 @@ use std::ops::BitOr;
 
 use ash::vk;
 use rand::RngExt;
-use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
+use vkinitialization::device::{Device, PhysicalDevice};
 use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
 use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 
-use crate::render::{create_objs::create_buffer, vertices::Particle, GPUDataAllocationError};
+use crate::{
+  compute::{sync_renderer::COMPUTE_FRAMES_IN_FLIGHT, ParticleBuffers},
+  render::{create_objs::create_buffer, vertices::Particle, GPUDataAllocationError},
+};
 
 #[derive(Debug)]
 pub struct ComputeGPUData {
   // fully owned by compute
-  pub particles_compute: [vk::Buffer; 2],
+  pub particles_compute: [vk::Buffer; COMPUTE_FRAMES_IN_FLIGHT],
   // fully owned by compute
   pub particles_new: vk::Buffer,
   // copied to graphics
-  pub particles_graphics: [vk::Buffer; 2],
+  pub particles_graphics: [vk::Buffer; ParticleBuffers::BUFFER_COUNT],
   // read from cpu
   pub from_cpu_read: MappedHostBuffer<Particle>,
   pub particles_from_cpu_read_cur_size: u64,
@@ -32,9 +35,8 @@ pub struct ComputeGPUData {
 }
 
 struct Buffers {
-  pub particles_compute: [vk::Buffer; 2],
+  pub particles_compute: [vk::Buffer; COMPUTE_FRAMES_IN_FLIGHT],
   pub particles_new: vk::Buffer,
-  pub particles_graphics: [vk::Buffer; 2],
   pub from_cpu_read: vk::Buffer,
   pub to_cpu_write: vk::Buffer,
 }
@@ -43,7 +45,6 @@ impl DeviceManuallyDestroyed for Buffers {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.particles_compute.destroy_self(device);
     self.particles_new.destroy_self(device);
-    self.particles_graphics.destroy_self(device);
     self.from_cpu_read.destroy_self(device);
     self.to_cpu_write.destroy_self(device);
   }
@@ -93,35 +94,6 @@ impl ComputeGPUData {
     )
     .on_err(|_| unsafe { particles_compute.destroy_self(device) })?;
 
-    let particles_graphics_0 = create_buffer(
-      device,
-      Self::INITIAL_SIZE,
-      vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
-      #[cfg(feature = "vl")]
-      marker,
-      #[cfg(feature = "vl")]
-      c"Particles graphics 0",
-    )
-    .on_err(|_| unsafe {
-      particles_new.destroy_self(device);
-      particles_compute.destroy_self(device)
-    })?;
-    let particles_graphics_1 = create_buffer(
-      device,
-      Self::INITIAL_SIZE,
-      vk::BufferUsageFlags::STORAGE_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
-      #[cfg(feature = "vl")]
-      marker,
-      #[cfg(feature = "vl")]
-      c"Particles graphics 1",
-    )
-    .on_err(|_| unsafe {
-      particles_compute.destroy_self(device);
-      particles_new.destroy_self(device);
-      particles_graphics_0.destroy_self(device)
-    })?;
-    let particles_graphics = [particles_graphics_0, particles_graphics_1];
-
     let particles_cpu_read = create_buffer(
       device,
       Self::INITIAL_SIZE,
@@ -134,7 +106,6 @@ impl ComputeGPUData {
     .on_err(|_| unsafe {
       particles_compute.destroy_self(device);
       particles_new.destroy_self(device);
-      particles_graphics.destroy_self(device)
     })?;
     let cpu_write = create_buffer(
       device,
@@ -148,14 +119,12 @@ impl ComputeGPUData {
     .on_err(|_| unsafe {
       particles_compute.destroy_self(device);
       particles_new.destroy_self(device);
-      particles_graphics.destroy_self(device);
       particles_cpu_read.destroy_self(device);
     })?;
 
     Ok(Buffers {
       particles_compute,
       particles_new,
-      particles_graphics,
       from_cpu_read: particles_cpu_read,
       to_cpu_write: cpu_write,
     })
@@ -164,14 +133,18 @@ impl ComputeGPUData {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    _queues: &SingleQueues,
+    // gets owned by this struct
+    particles_graphics: [vk::Buffer; ParticleBuffers::BUFFER_COUNT],
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let buffers = Self::create_buffers(
       device,
       #[cfg(feature = "vl")]
       marker,
-    )?;
+    )
+    .on_err(|_| unsafe {
+      particles_graphics.destroy_self(device);
+    })?;
 
     let device_alloc = vkallocator::allocate_and_bind_memory(
       device,
@@ -181,8 +154,9 @@ impl ComputeGPUData {
         &buffers.particles_compute[0],
         &buffers.particles_compute[1],
         &buffers.particles_new,
-        &buffers.particles_graphics[0],
-        &buffers.particles_graphics[1],
+        &particles_graphics[0],
+        &particles_graphics[1],
+        &particles_graphics[2],
       ],
       0.7,
       false,
@@ -193,11 +167,13 @@ impl ComputeGPUData {
         "Particles new",
         "Particles graphics 0",
         "Particles graphics 1",
+        "Particles graphics 2",
       ]),
       #[cfg(feature = "log_alloc")]
       "Compute data",
     )
     .on_err(|_| unsafe {
+      particles_graphics.destroy_self(device);
       buffers.destroy_self(device);
     })?;
 
@@ -216,6 +192,7 @@ impl ComputeGPUData {
       "Compute data host mapped",
     )
     .on_err(|_| unsafe {
+      particles_graphics.destroy_self(device);
       buffers.destroy_self(device);
       device_alloc.destroy_self(device);
     })?;
@@ -231,7 +208,7 @@ impl ComputeGPUData {
     Ok(Self {
       particles_compute: buffers.particles_compute,
       particles_new: buffers.particles_new,
-      particles_graphics: buffers.particles_graphics,
+      particles_graphics,
       from_cpu_read,
       to_cpu_write,
       memories,

@@ -60,7 +60,7 @@ const PRINT_UPS_EVERY: Duration = Duration::from_millis(1000);
 const KEEP_FRAME_DURATION_COUNT_FPS: usize = 16;
 const KEEP_FRAME_DURATION_COUNT_UPS: usize = KEEP_FRAME_DURATION_COUNT_FPS;
 
-const MAX_UPS: f64 = 4200.0;
+const MAX_UPS: f64 = 400.0;
 
 const START_PAUSED: bool = false; // start application in a paused state
 

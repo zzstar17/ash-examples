@@ -1,13 +1,33 @@
+use std::{sync::mpsc, thread};
+
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  compute::{ComputeThread, ComputeToGraphicsEvent},
+  compute::{ComputeResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
   render::{FrameRenderError, InitializationError, PostWindowInit, Renderer, SyncRenderer},
 };
 
+pub struct ComputeThreadData {
+  pub handle: thread::JoinHandle<()>,
+  pub result_receiver: mpsc::Receiver<ComputeResult>,
+  pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
+  pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
+}
+
+impl ComputeThreadData {
+  pub fn terminate_and_wait(self) {
+    if let Err(_err) = self.event_sender.send(GraphicsToComputeEvent::Terminate) {
+      log::warn!("Failed to send termination event to compute thread. Receiver is disconnected.")
+    }
+    if let Err(_err) = self.handle.join() {
+      log::error!("Compute thread panicked.");
+    }
+  }
+}
+
 pub struct ThreadsManager {
   // none if thread has terminated
-  compute_thread: Option<ComputeThread>,
+  compute_thread_data: Option<ComputeThreadData>,
 
   pub graphics_render: SyncRenderer,
 }
@@ -24,12 +44,20 @@ impl ThreadsManager {
       post_window_init.physical_device.clone(),
       post_window_init.queues.clone(),
       post_window_init.debug_utils_marker.clone(),
-    );
+    )?;
 
-    let renderer = Renderer::initialize(post_window_init)?;
+    let compute_thread_data = ComputeThreadData {
+      handle: compute_thread.handle,
+      result_receiver: compute_thread.result_receiver,
+      event_sender: compute_thread.event_sender,
+      event_receiver: compute_thread.event_receiver,
+    };
+    let particle_buffers = compute_thread.particle_buffers;
+
+    let renderer = Renderer::initialize(post_window_init, particle_buffers)?;
     let mut sync_renderer = SyncRenderer::new(renderer)?;
 
-    let receiver_res = compute_thread.event_receiver.recv();
+    let receiver_res = compute_thread_data.event_receiver.recv();
     let mut compute_initialized = false;
     match receiver_res {
       Ok(event_res) => match event_res {
@@ -54,13 +82,14 @@ impl ThreadsManager {
     }
 
     Ok(Self {
-      compute_thread: Some(compute_thread),
+      compute_thread_data: Some(compute_thread_data),
       graphics_render: sync_renderer,
     })
   }
 
   pub fn render_next_frame(&mut self, cur_total_frame: usize) -> Result<(), FrameRenderError> {
-    let compute_message_rcv = &self.compute_thread.as_ref().unwrap().result_receiver;
+    let compute_thread = self.compute_thread_data.as_ref().unwrap();
+    let compute_message_rcv = &compute_thread.result_receiver;
 
     self
       .graphics_render
@@ -84,7 +113,7 @@ impl ThreadsManager {
 
 impl Drop for ThreadsManager {
   fn drop(&mut self) {
-    let compute_thread = self.compute_thread.take();
+    let compute_thread = self.compute_thread_data.take();
     compute_thread.unwrap().terminate_and_wait();
 
     unsafe {

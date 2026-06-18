@@ -6,6 +6,7 @@ use vkobjects::{
 };
 
 use crate::{
+  compute::ParticleBuffers,
   destructor::Destructor,
   render::{gpu_data::GPUDataAllocationError, PostWindowInit},
   RESOLUTION, SCREENSHOT_SAVE_FILE,
@@ -53,6 +54,7 @@ pub struct Renderer {
   pipeline: GraphicsPipeline,
   pub command_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
 
+  pub particle_buffers: ParticleBuffers, // not owned
   data: GPUData,
   descriptor_pool: DescriptorPool,
 
@@ -60,7 +62,10 @@ pub struct Renderer {
 }
 
 impl Renderer {
-  pub fn initialize(post_window: PostWindowInit) -> Result<Self, InitializationError> {
+  pub fn initialize(
+    post_window: PostWindowInit,
+    particle_buffers: ParticleBuffers,
+  ) -> Result<Self, InitializationError> {
     let mut destructor: Destructor<11> = Destructor::new();
 
     let swapchains = Swapchains::new(
@@ -231,6 +236,7 @@ impl Renderer {
       descriptor_pool,
       render_targets,
       screenshot_buffer,
+      particle_buffers,
     })
   }
 

@@ -2,14 +2,19 @@ use std::{ptr, sync::mpsc, time::Duration};
 
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
-use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed, ManuallyDestroyed};
+use vkobjects::{
+  errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed, ManuallyDestroyed,
+};
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  compute::{renderer::ComputeRenderer, ComputeGPUData},
+  compute::{
+    particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeGPUData, ComputeResult,
+    ParticleBuffers,
+  },
   render::{
     create_objs::{create_fence, create_semaphore},
-    InitializationError, RenderPosition, RENDER_EXTENT,
+    InitializationError, RENDER_EXTENT,
   },
   RESOLUTION,
 };
@@ -23,7 +28,8 @@ pub struct ComputeSyncRenderer {
 
   ferris: Ferris,
 
-  compute_result_sender: mpsc::SyncSender<RenderPosition>,
+  compute_result_sender: mpsc::SyncSender<ComputeResult>,
+  particle_manager: ParticleManager,
 
   renderer: ComputeRenderer,
 
@@ -65,7 +71,8 @@ impl ComputeSyncRenderer {
     device: Device,
     physical_device: PhysicalDevice,
     queues: SingleQueues,
-    compute_result_sender: mpsc::SyncSender<RenderPosition>,
+    compute_result_sender: mpsc::SyncSender<ComputeResult>,
+    particle_buffers: ParticleBuffers,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([0.2, 0.0], true, true);
@@ -75,6 +82,7 @@ impl ComputeSyncRenderer {
       device,
       physical_device,
       queues,
+      particle_buffers.buffers,
       #[cfg(feature = "vl")]
       marker,
     )?;
@@ -132,6 +140,8 @@ impl ComputeSyncRenderer {
         .queue_submit(queues.transfer.handle, &[submit_info], vk::Fence::null())?;
     }
 
+    let particle_manager = ParticleManager::new(particle_buffers.in_use_by_graphics);
+
     Ok(Self {
       tick_i: 0,
       renderer,
@@ -142,6 +152,7 @@ impl ComputeSyncRenderer {
       last_write_i: COMPUTE_FRAMES_IN_FLIGHT - 1,
       save_gpu_contents_next_frame: true,
       saving_gpu_contents: None,
+      particle_manager,
     })
   }
 
@@ -160,6 +171,9 @@ impl ComputeSyncRenderer {
         .device
         .wait_for_fences(&[self.frame_fences[cur_write_i]], true, u64::MAX)?;
     }
+    // particles buffer can be written to again even if it was written to last compute frame
+    // (as long as it is not being used by graphics)
+    self.particle_manager.compute_finished();
 
     if self.tick_i < 10 {
       self.save_gpu_contents_next_frame = true;
@@ -168,6 +182,11 @@ impl ComputeSyncRenderer {
         self.tick_i,
         self.renderer.gpu_data.particles_len,
         self.renderer.gpu_data.particles_copying
+      );
+      log::warn!(
+        "[Tick {}]\nParticles: {:?}",
+        self.tick_i,
+        self.particle_manager
       );
     }
 
@@ -191,19 +210,32 @@ impl ComputeSyncRenderer {
     if self.renderer.gpu_data.particles_len == 0 {
       self.save_gpu_contents_next_frame = false;
     }
+
+    let particles_write_i = self.particle_manager.get_next_compute_i();
+
+    if self.tick_i < 10 {
+      log::warn!(
+        "[Tick {}]\nParticles: {:?}",
+        self.tick_i,
+        self.particle_manager
+      );
+    }
+
     unsafe {
       self
         .renderer
-        .record_main(cur_read_i, cur_write_i, self.save_gpu_contents_next_frame)?;
+        .record_main(cur_read_i, cur_write_i, self.save_gpu_contents_next_frame)
     }
+    .on_err(|_err| self.particle_manager.compute_fail())?;
 
     unsafe {
       // only reset after making sure the fence is going to be signalled again
       self
         .renderer
         .device
-        .reset_fences(&[self.frame_fences[cur_write_i]])?;
+        .reset_fences(&[self.frame_fences[cur_write_i]])
     }
+    .on_err(|_err| self.particle_manager.compute_fail())?;
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
       .command_buffer(self.renderer.command_pools[cur_write_i].cb)];
@@ -230,8 +262,9 @@ impl ComputeSyncRenderer {
         self.renderer.queues.compute.handle,
         &[submit_info],
         self.frame_fences[cur_write_i],
-      )?;
+      )
     }
+    .on_err(|_err| self.particle_manager.compute_fail())?;
     self.tick_i += 1;
 
     if self.save_gpu_contents_next_frame {
@@ -252,19 +285,34 @@ impl ComputeSyncRenderer {
       },
     );
 
-    let render_position = self.ferris.get_render_position(PhysicalSize {
-      width: RENDER_EXTENT.width,
-      height: RENDER_EXTENT.height,
-    });
+    // todo: unmark this when send is full
+    let graphics_buffer_read_i_opt = self.particle_manager.get_and_mark_next_graphics();
 
-    match self.compute_result_sender.try_send(render_position) {
-      Ok(()) => {}
-      Err(err) => match err {
-        mpsc::TrySendError::Full(_) => {}
-        mpsc::TrySendError::Disconnected(_) => {
-          return Err(ComputeFrameRenderError::SenderDisconnected);
+    if let Some(graphics_buffer_read_i) = graphics_buffer_read_i_opt {
+      let render_position = self.ferris.get_render_position(PhysicalSize {
+        width: RENDER_EXTENT.width,
+        height: RENDER_EXTENT.height,
+      });
+
+      let compute_result = ComputeResult {
+        ferris_position: render_position,
+        particle_buffer_i: graphics_buffer_read_i,
+      };
+
+      match self.compute_result_sender.try_send(compute_result) {
+        Ok(()) => {}
+        Err(err) => {
+          self
+            .particle_manager
+            .unmark_graphics(graphics_buffer_read_i);
+          match err {
+            mpsc::TrySendError::Full(_) => {}
+            mpsc::TrySendError::Disconnected(_) => {
+              return Err(ComputeFrameRenderError::SenderDisconnected);
+            }
+          }
         }
-      },
+      }
     }
 
     Ok(())
