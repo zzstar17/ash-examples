@@ -5,7 +5,7 @@ layout(push_constant) uniform PushConstantData {
 } pc;
 
 //     vertex
-// 0.0 to 2.0
+// -1.0 to 1.0
 layout(location = 0) in vec2 vertex_pos;
 layout(location = 1) in vec2 tex_coords;
 
@@ -32,8 +32,7 @@ void main() {
     out_tex_coords = tex_coords * particle_size + particle_tex_offset;
   }
 
-  vec2 final_pos = (vertex_pos * ratio) + instance_pos;
-  final_pos = (final_pos - 0.5) * 2; // offset so that it's in the -1.0 to 1.0 range
+  vec2 final_pos = (vertex_pos * ratio) + ((instance_pos - 0.5) * 2);
 
   gl_Position = vec4(final_pos.x, final_pos.y, 1.0, 1.0);
 }

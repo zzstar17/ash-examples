@@ -5,17 +5,17 @@ use super::vertices::Vertex;
 pub static VERTICES: [Vertex; 4] = [
   // top left
   Vertex {
-    pos: [0.0, 0.0],
+    pos: [-1.0, -1.0],
     tex_coords: [0.0, 0.0],
   },
   // bottom left
   Vertex {
-    pos: [1.0, 0.0],
+    pos: [1.0, -1.0],
     tex_coords: [1.0, 0.0],
   },
   // top right
   Vertex {
-    pos: [0.0, 1.0],
+    pos: [-1.0, 1.0],
     tex_coords: [0.0, 1.0],
   },
   // bottom right

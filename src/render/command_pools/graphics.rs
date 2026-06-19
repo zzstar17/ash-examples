@@ -5,9 +5,16 @@ use vkinitialization::device::{QueueFamilies, SingleQueues};
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
-  BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR, RESOLUTION, compute::ParticlesDraw, render::{
-    RENDER_EXTENT, descriptor_sets::DescriptorPool, gpu_data::GPUData, pipelines::{GraphicsPipeline, GraphicsPushConstants}, render_object::QUAD_INDICES, render_targets::RenderTargets
-  }
+  compute::ParticlesDraw,
+  render::{
+    descriptor_sets::DescriptorPool,
+    gpu_data::GPUData,
+    pipelines::{GraphicsPipeline, GraphicsPushConstants},
+    render_object::QUAD_INDICES,
+    render_targets::RenderTargets,
+    RENDER_EXTENT,
+  },
+  BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR, RESOLUTION,
 };
 
 use super::dependency_info;
@@ -153,7 +160,7 @@ impl GraphicsCommandBufferPool {
         &[],
       );
       let push_constants = GraphicsPushConstants {
-        render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32]
+        render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
       };
       device.cmd_push_constants(
         cb,

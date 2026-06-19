@@ -52,7 +52,7 @@ impl DeviceManuallyDestroyed for Buffers {
 }
 
 impl ComputeGPUData {
-  pub const INITIAL_CAPACITY: usize = 640;
+  pub const INITIAL_CAPACITY: usize = 32000;
   pub const INITIAL_SIZE: u64 = (Self::INITIAL_CAPACITY * size_of::<Particle>()) as u64;
 
   fn create_buffers(
