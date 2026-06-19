@@ -210,7 +210,6 @@ impl SyncRenderer {
         .record_graphics(
           cur_frame_i,
           cur_image_i as usize,
-          &ferris_position,
           particles_draw_opt,
           record_screenshot,
         )

@@ -5,12 +5,11 @@ use vkinitialization::device::SingleQueues;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
-  compute::ComputeGPUData,
-  render::{
+  RESOLUTION, compute::ComputeGPUData, render::{
     descriptor_sets::ComputeDescriptorPool,
     pipelines::{ComputePipeline, ComputePushConstants},
     vertices::Particle,
-  },
+  }
 };
 
 pub struct ComputeCommandBufferPool {
@@ -70,6 +69,7 @@ impl ComputeCommandBufferPool {
 
     let new_particles_count = data.particles_copying;
     let push_constants = ComputePushConstants {
+      render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
       player_pos: [0.0, 0.0],
       particle_count: data.particles_len as u32,
       new_particle_count: new_particles_count,

@@ -4,7 +4,7 @@ mod graphics;
 
 pub use cache::{create_pipeline_cache, save_pipeline_cache, PipelineCacheError};
 pub use compute::{ComputePipeline, ComputePushConstants};
-pub use graphics::GraphicsPipeline;
+pub use graphics::{GraphicsPipeline, GraphicsPushConstants};
 use vkobjects::errors::OutOfMemoryError;
 
 use crate::render::shaders::ShaderError;

@@ -5,16 +5,9 @@ use vkinitialization::device::{QueueFamilies, SingleQueues};
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
-  compute::ParticlesDraw,
-  render::{
-    descriptor_sets::DescriptorPool,
-    gpu_data::GPUData,
-    pipelines::GraphicsPipeline,
-    render_object::{RenderPosition, QUAD_INDICES},
-    render_targets::RenderTargets,
-    RENDER_EXTENT,
-  },
-  BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
+  BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR, RESOLUTION, compute::ParticlesDraw, render::{
+    RENDER_EXTENT, descriptor_sets::DescriptorPool, gpu_data::GPUData, pipelines::{GraphicsPipeline, GraphicsPushConstants}, render_object::QUAD_INDICES, render_targets::RenderTargets
+  }
 };
 
 use super::dependency_info;
@@ -79,7 +72,6 @@ impl GraphicsCommandBufferPool {
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
     particles_draw_opt: Option<ParticlesDraw>,
-    position: &RenderPosition, // Ferris's position
 
     screenshot_buffer: Option<vk::Buffer>,
   ) -> Result<(), OutOfMemoryError> {
@@ -160,12 +152,15 @@ impl GraphicsCommandBufferPool {
         &[descriptor_pool.texture_set],
         &[],
       );
+      let push_constants = GraphicsPushConstants {
+        render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32]
+      };
       device.cmd_push_constants(
         cb,
         pipeline.layout,
         vk::ShaderStageFlags::VERTEX,
         0,
-        utility::any_as_u8_slice(position),
+        utility::any_as_u8_slice(&push_constants),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
       device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer, particles_draw.buffer], &[0, 0]);

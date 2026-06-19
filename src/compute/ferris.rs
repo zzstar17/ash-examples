@@ -11,8 +11,8 @@ pub struct Ferris {
 }
 
 impl Ferris {
-  const TEXTURE_DIMENSIONS: [f32; 2] = [428.0, 283.0]; // saved texture dimensions
-  const TEXTURE_TO_SIZE_RATIO: f32 = 0.3;
+  const TEXTURE_DIMENSIONS: [f32; 2] = [120.0, 80.0]; // saved texture dimensions
+  const TEXTURE_TO_SIZE_RATIO: f32 = 1.0;
   // size in pixels
   pub const WIDTH: u32 = (Self::TEXTURE_DIMENSIONS[0] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
   pub const HEIGHT: u32 = (Self::TEXTURE_DIMENSIONS[1] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
@@ -96,8 +96,8 @@ impl Ferris {
       ((self.position[1] * 2.0) - window_size_float.height) / window_size_float.height,
     ];
     let ratio = [
-      (Ferris::WIDTH as f32 / window_size_float.width) * 0.1,
-      (Ferris::HEIGHT as f32 / window_size_float.height) * 0.1,
+      (Ferris::WIDTH as f32 / window_size_float.width),
+      (Ferris::HEIGHT as f32 / window_size_float.height),
     ];
     RenderPosition::new(normal_pos, ratio)
   }
