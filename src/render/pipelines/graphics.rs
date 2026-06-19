@@ -29,7 +29,7 @@ pub struct GraphicsPipeline {
 
 #[repr(C)]
 pub struct GraphicsPushConstants {
-  pub render_dimensions: [f32; 2]
+  pub render_dimensions: [f32; 2],
 }
 
 impl GraphicsPipeline {
