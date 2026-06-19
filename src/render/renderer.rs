@@ -20,7 +20,6 @@ use super::{
   gpu_data::GPUData,
   initialization::{self},
   pipelines::{self, GraphicsPipeline},
-  render_object::RenderPosition,
   render_pass::create_render_pass,
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
@@ -28,7 +27,7 @@ use super::{
   FRAMES_IN_FLIGHT, RENDER_EXTENT, SWAPCHAIN_IMAGE_USAGES,
 };
 
-const TEXTURE_PATH: &str = "./ferris.png";
+const TEXTURE_PATH: &str = "./sprites.png";
 
 fn read_texture_bytes_as_rgba8() -> Result<(u32, u32, Vec<u8>), image::ImageError> {
   let img = image::ImageReader::open(TEXTURE_PATH)?
@@ -244,7 +243,6 @@ impl Renderer {
     &mut self,
     frame_i: usize,
     image_i: usize,
-    position: &RenderPosition,
     particles_draw_opt: Option<ParticlesDraw>,
     save_to_screenshot_buffer: bool,
   ) -> Result<(), OutOfMemoryError> {
@@ -261,7 +259,6 @@ impl Renderer {
       &self.descriptor_pool,
       &self.data,
       particles_draw_opt,
-      position,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)
       } else {

@@ -11,6 +11,7 @@ use super::PipelineCreationError;
 #[repr(C)]
 #[derive(Debug, Default)]
 pub struct ComputePushConstants {
+  pub render_dimensions: [f32; 2],
   pub player_pos: [f32; 2],
 
   pub particle_count: u32,

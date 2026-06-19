@@ -180,13 +180,13 @@ impl ComputeSyncRenderer {
 
     if self.tick_i < 10 {
       self.save_gpu_contents_next_frame = true;
-      log::warn!(
+      log::debug!(
         "[Tick {}] Particle count: {}, new particles: {}",
         self.tick_i,
         self.renderer.gpu_data.particles_len,
         self.renderer.gpu_data.particles_copying
       );
-      log::warn!(
+      log::debug!(
         "[Tick {}]\nParticles: {:?}",
         self.tick_i,
         self.particle_manager
@@ -201,7 +201,7 @@ impl ComputeSyncRenderer {
           .to_cpu_write
           .read_to_box(count as usize)
       };
-      log::warn!(
+      log::debug!(
         "[Tick {}] Compute contents: {:?}",
         self.tick_i,
         &contents[0..(contents.len().min(10))],
@@ -221,7 +221,7 @@ impl ComputeSyncRenderer {
     };
 
     if self.tick_i < 10 {
-      log::warn!(
+      log::debug!(
         "[Tick {}]\nParticles: {:?}",
         self.tick_i,
         self.particle_manager

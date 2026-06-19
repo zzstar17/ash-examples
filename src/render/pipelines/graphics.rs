@@ -10,7 +10,6 @@ use ash::vk::{self, Handle};
 use crate::{
   render::{
     descriptor_sets::DescriptorPool,
-    render_object::RenderPosition,
     shaders::{self, Shader},
     vertices::{Particle, Vertex},
   },
@@ -26,6 +25,11 @@ pub struct GraphicsPipeline {
 
   shader: Shader,
   old: Option<vk::Pipeline>,
+}
+
+#[repr(C)]
+pub struct GraphicsPushConstants {
+  pub render_dimensions: [f32; 2]
 }
 
 impl GraphicsPipeline {
@@ -111,7 +115,7 @@ impl GraphicsPipeline {
     let push_constant_range = vk::PushConstantRange {
       stage_flags: vk::ShaderStageFlags::VERTEX,
       offset: 0,
-      size: size_of::<RenderPosition>() as u32,
+      size: size_of::<GraphicsPushConstants>() as u32,
     };
     let layout_create_info = vk::PipelineLayoutCreateInfo {
       s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,

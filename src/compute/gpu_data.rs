@@ -10,6 +10,7 @@ use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 use crate::{
   compute::{sync_renderer::COMPUTE_FRAMES_IN_FLIGHT, ParticleBuffers},
   render::{create_objs::create_buffer, vertices::Particle, GPUDataAllocationError},
+  RESOLUTION,
 };
 
 #[derive(Debug)]
@@ -51,7 +52,7 @@ impl DeviceManuallyDestroyed for Buffers {
 }
 
 impl ComputeGPUData {
-  pub const INITIAL_CAPACITY: usize = 64 * 2000;
+  pub const INITIAL_CAPACITY: usize = 640;
   pub const INITIAL_SIZE: u64 = (Self::INITIAL_CAPACITY * size_of::<Particle>()) as u64;
 
   fn create_buffers(
@@ -233,8 +234,8 @@ impl ComputeGPUData {
   }
 
   fn vel_rng(init: f32) -> f32 {
-    let mut shifted = (init - 0.5) * 1.6;
-    shifted += 0.1 - shifted / 10.0;
+    let mut shifted = (init - 0.5) * 0.1;
+    // shifted += 0.1 - shifted / 10.0;
     shifted
   }
 
@@ -255,14 +256,18 @@ impl ComputeGPUData {
     for _ in 0..new_count {
       particles.push(Particle {
         pos: [
-          rng.random::<f32>() - 428.0 * 0.0225,
-          rng.random::<f32>() - 283.0 * 0.0225,
+          rng.random::<f32>() / ((RESOLUTION[0] - 11) as f32 / RESOLUTION[0] as f32),
+          rng.random::<f32>() / ((RESOLUTION[0] - 11) as f32 / RESOLUTION[0] as f32),
         ],
         vel: [
           Self::vel_rng(rng.random::<f32>()),
           Self::vel_rng(rng.random::<f32>()),
         ],
       });
+      // particles.push(Particle {
+      //   pos: [-1.0, 0.0],
+      //   vel: [0.0, 0.0],
+      // });
     }
 
     unsafe {
