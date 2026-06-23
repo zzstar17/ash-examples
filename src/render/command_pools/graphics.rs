@@ -78,7 +78,7 @@ impl GraphicsCommandBufferPool {
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
-    particles_draw_opt: Option<ParticlesDraw>,
+    particles_draw: ParticlesDraw,
 
     screenshot_buffer: Option<vk::Buffer>,
   ) -> Result<(), OutOfMemoryError> {
@@ -96,7 +96,7 @@ impl GraphicsCommandBufferPool {
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
       || (render_height == swapchain_height && swapchain_width >= render_width);
 
-    if let Some(particles_draw) = particles_draw_opt {
+    {
       if queues.graphics.family_index != queues.compute.family_index {
         let acquire = vk::BufferMemoryBarrier2 {
           src_access_mask: vk::AccessFlags2::empty(), // ownership acquire
@@ -127,8 +127,6 @@ impl GraphicsCommandBufferPool {
         device.cmd_pipeline_barrier2(cb, &super::dependency_info(&[], &[copy_wait], &[]));
       }
     }
-
-    let particles_draw = particles_draw_opt.unwrap();
 
     // in this case the render pass takes care of all internal queue synchronization
     {

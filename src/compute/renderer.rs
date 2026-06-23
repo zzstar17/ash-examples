@@ -99,6 +99,7 @@ impl ComputeRenderer {
     write_i: usize,
     particle_buffer_i: Option<usize>,
     write_to_cpu: bool,
+    ferris_position: [f32; 2],
   ) -> Result<(), OutOfMemoryError> {
     self.command_pools[write_i].reset(&self.device)?;
     self.command_pools[write_i].record_main(
@@ -111,6 +112,7 @@ impl ComputeRenderer {
       &self.pipeline,
       particle_buffer_i,
       write_to_cpu,
+      ferris_position,
     )?;
     Ok(())
   }

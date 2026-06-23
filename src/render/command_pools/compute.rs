@@ -63,6 +63,8 @@ impl ComputeCommandBufferPool {
 
     particle_buffer_i_opt: Option<usize>,
     write_to_cpu: bool,
+
+    ferris_position: [f32; 2],
   ) -> Result<(), OutOfMemoryError> {
     let cb = self.cb;
     let begin_info =
@@ -72,7 +74,7 @@ impl ComputeCommandBufferPool {
     let new_particles_count = data.particles_copying;
     let push_constants = ComputePushConstants {
       render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
-      player_pos: [0.0, 0.0],
+      ferris_pos: ferris_position,
       particle_count: data.particles_len as u32,
       new_particle_count: new_particles_count,
     };

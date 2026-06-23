@@ -9,7 +9,7 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::window::Window;
 
 use crate::{
-  compute::ComputeResult, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO,
+  compute::ComputeFrameResult, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO,
   SCREENSHOT_SAVE_FILE,
 };
 
@@ -90,7 +90,7 @@ impl SyncRenderer {
   pub fn render_next_frame(
     &mut self,
     cur_total_frame: usize,
-    compute_message_rcv: &mpsc::Receiver<ComputeResult>,
+    compute_message_rcv: &mpsc::Receiver<ComputeFrameResult>,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
@@ -189,10 +189,7 @@ impl SyncRenderer {
 
     // get compute data
 
-    let ComputeResult {
-      ferris_position,
-      particles_draw: particles_draw_opt,
-    } = compute_message_rcv
+    let ComputeFrameResult { particles_draw } = compute_message_rcv
       .recv()
       .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
 
@@ -210,21 +207,17 @@ impl SyncRenderer {
         .record_graphics(
           cur_frame_i,
           cur_image_i as usize,
-          particles_draw_opt,
+          particles_draw,
           record_screenshot,
         )
         .on_err(|_err| {
-          if let Some(particles_draw) = particles_draw_opt {
-            self.renderer.particle_buffers.in_use_by_graphics[particles_draw.buffer_i]
-              .store(false, Ordering::Release);
-          }
+          self.renderer.particle_buffers.in_use_by_graphics[particles_draw.buffer_i]
+            .store(false, Ordering::Release);
         })?;
     }
 
-    if let Some(particles_draw) = particles_draw_opt {
-      // commit in_use_by_graphics
-      self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
-    }
+    // commit in_use_by_graphics
+    self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
       .command_buffer(self.renderer.command_pools[cur_frame_i].main)];

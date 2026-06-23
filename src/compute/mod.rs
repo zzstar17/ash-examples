@@ -19,10 +19,8 @@ pub use sync_renderer::ComputeSyncRenderer;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 use crate::{
-  compute::sync_renderer::ComputeFrameRenderError,
-  last_frames_durations::LastFramesDurations,
-  render::{InitializationError, RenderPosition},
-  KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
+  compute::sync_renderer::ComputeFrameRenderError, last_frames_durations::LastFramesDurations,
+  render::InitializationError, KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
 
 pub enum GraphicsToComputeEvent {
@@ -34,9 +32,8 @@ pub enum ComputeToGraphicsEvent {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct ComputeResult {
-  pub ferris_position: RenderPosition,
-  pub particles_draw: Option<ParticlesDraw>,
+pub struct ComputeFrameResult {
+  pub particles_draw: ParticlesDraw,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,7 +46,7 @@ pub struct ParticlesDraw {
 
 pub struct ComputeThread {
   pub handle: thread::JoinHandle<()>,
-  pub result_receiver: mpsc::Receiver<ComputeResult>,
+  pub result_receiver: mpsc::Receiver<ComputeFrameResult>,
   pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
   pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
   pub particle_buffers: ParticleBuffers,

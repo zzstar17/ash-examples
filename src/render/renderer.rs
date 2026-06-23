@@ -243,7 +243,7 @@ impl Renderer {
     &mut self,
     frame_i: usize,
     image_i: usize,
-    particles_draw_opt: Option<ParticlesDraw>,
+    particles_draw: ParticlesDraw,
     save_to_screenshot_buffer: bool,
   ) -> Result<(), OutOfMemoryError> {
     self.command_pools[frame_i].reset(&self.init.device)?;
@@ -258,7 +258,7 @@ impl Renderer {
       &self.pipeline,
       &self.descriptor_pool,
       &self.data,
-      particles_draw_opt,
+      particles_draw,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)
       } else {

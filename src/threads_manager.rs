@@ -3,13 +3,13 @@ use std::{sync::mpsc, thread};
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  compute::{ComputeResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
+  compute::{ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
   render::{FrameRenderError, InitializationError, PostWindowInit, Renderer, SyncRenderer},
 };
 
 pub struct ComputeThreadData {
   pub handle: thread::JoinHandle<()>,
-  pub result_receiver: mpsc::Receiver<ComputeResult>,
+  pub result_receiver: mpsc::Receiver<ComputeFrameResult>,
   pub event_sender: mpsc::Sender<GraphicsToComputeEvent>,
   pub event_receiver: mpsc::Receiver<Result<ComputeToGraphicsEvent, InitializationError>>,
 }
