@@ -186,7 +186,7 @@ impl App {
       },
     };
 
-    let ferris = Ferris::new([0.2, 0.0], true, true);
+    let ferris = Ferris::new([0.2, 0.0], [80.0, 80.0]);
 
     let last_update = Instant::now();
     let time_since_last_fps_print = Duration::ZERO;
