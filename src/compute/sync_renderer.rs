@@ -9,8 +9,8 @@ use winit::dpi::PhysicalSize;
 
 use crate::{
   compute::{
-    particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeGPUData, ComputeResult,
-    ParticleBuffers, ParticlesDraw,
+    particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeFrameResult,
+    ComputeGPUData, ParticleBuffers, ParticlesDraw,
   },
   render::{
     create_objs::{create_fence, create_semaphore},
@@ -28,7 +28,7 @@ pub struct ComputeSyncRenderer {
 
   ferris: Ferris,
 
-  compute_result_sender: mpsc::SyncSender<ComputeResult>,
+  compute_result_sender: mpsc::SyncSender<ComputeFrameResult>,
   particle_manager: ParticleManager,
 
   renderer: ComputeRenderer,
@@ -71,11 +71,11 @@ impl ComputeSyncRenderer {
     device: Device,
     physical_device: PhysicalDevice,
     queues: SingleQueues,
-    compute_result_sender: mpsc::SyncSender<ComputeResult>,
+    compute_result_sender: mpsc::SyncSender<ComputeFrameResult>,
     particle_buffers: ParticleBuffers,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
-    let ferris = Ferris::new([0.2, 0.0], true, true);
+    let ferris = Ferris::new([500.0, 400.0]);
 
     // todo: write all on errors
     let mut renderer = ComputeRenderer::new(
@@ -164,6 +164,18 @@ impl ComputeSyncRenderer {
     let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
     self.last_write_i = cur_write_i;
 
+    self.ferris.update(
+      time_since_last_update,
+      PhysicalSize {
+        width: RESOLUTION[0],
+        height: RESOLUTION[1],
+      },
+    );
+    let ferris_position = self.ferris.get_render_position(PhysicalSize {
+      width: RENDER_EXTENT.width,
+      height: RENDER_EXTENT.height,
+    });
+
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     unsafe {
       self
@@ -234,6 +246,7 @@ impl ComputeSyncRenderer {
         cur_write_i,
         particles_write_i,
         self.save_gpu_contents_next_frame,
+        ferris_position,
       )
     }
     .on_err(|_err| self.particle_manager.compute_fail())?;
@@ -288,34 +301,21 @@ impl ComputeSyncRenderer {
       self.renderer.gpu_data.commit_new_particles();
     }
 
-    self.ferris.update(
-      time_since_last_update,
-      PhysicalSize {
-        width: RESOLUTION[0],
-        height: RESOLUTION[1],
-      },
-    );
-
     let graphics_buffer_read_i = self.particle_manager.get_and_mark_next_graphics();
 
-    // todo
+    //skip
     if graphics_buffer_read_i.is_none() {
       return Ok(());
     }
 
-    let render_position = self.ferris.get_render_position(PhysicalSize {
-      width: RENDER_EXTENT.width,
-      height: RENDER_EXTENT.height,
-    });
-
-    let compute_result = ComputeResult {
-      ferris_position: render_position,
-      particles_draw: graphics_buffer_read_i.map(|i| ParticlesDraw {
-        buffer: self.renderer.gpu_data.particles_graphics[i],
-        buffer_i: i,
+    let graphics_buffer_i = graphics_buffer_read_i.unwrap();
+    let compute_result = ComputeFrameResult {
+      particles_draw: ParticlesDraw {
+        buffer: self.renderer.gpu_data.particles_graphics[graphics_buffer_i],
+        buffer_i: graphics_buffer_i,
         buffer_size: this_frame_particles_buffer_size,
         count: this_frame_particles_count,
-      }),
+      },
     };
 
     match self.compute_result_sender.try_send(compute_result) {

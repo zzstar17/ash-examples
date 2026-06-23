@@ -9,7 +9,11 @@ use vkinitialization::{
   Surface, SurfaceError,
 };
 
-use crate::render::{format_conversions::KNOWN_FORMATS, RenderPosition, TARGET_API_VERSION};
+use crate::render::{
+  format_conversions::KNOWN_FORMATS,
+  pipelines::{ComputePushConstants, GraphicsPushConstants},
+  TARGET_API_VERSION,
+};
 
 fn supports_swapchain(device: vk::PhysicalDevice, surface: &Surface) -> Result<bool, SurfaceError> {
   let formats = unsafe { surface.get_formats(device) }?;
@@ -55,9 +59,9 @@ fn check_physical_device_capabilities(
   }
 
   if (selection.properties.p10.limits.max_push_constants_size as usize)
-    < size_of::<RenderPosition>()
+    < size_of::<GraphicsPushConstants>().max(size_of::<ComputePushConstants>())
   {
-    log::warn!("Skipped physical device: Device does not support required push constant size");
+    log::error!("Skipped physical device: Device does not support required push constant size");
     return Ok(false);
   }
 

@@ -12,7 +12,7 @@ layout(push_constant) uniform PushConstantData {
   // unnormalized starting from 0.0
   vec2 render_dimensions;
   // 0.0 to 1.0
-  vec2 player_pos;
+  vec2 ferris_pos;
 
   uint particle_count;
   uint new_particle_count;
@@ -72,6 +72,14 @@ void calculate_new_position(
 void main() {
   uint i = gl_GlobalInvocationID.x;
   Particle p_in;
+  Particle p_out;
+
+  // special case for ferris
+  if (i == 0) {
+    p_out.pos = pc.ferris_pos;
+    data_out.particles[i] = p_out;
+    return;
+  }
 
   if (i >= pc.particle_count) {
     uint new_particle_i = i - pc.particle_count;
@@ -84,36 +92,29 @@ void main() {
     p_in = data_in.particles[i];
   }
 
-  Particle p_out;
-
   // 0.0 to 1.0
-  vec2 normalized_size;
-  if (i > 0) {
-    normalized_size = particle_size / pc.render_dimensions;
-  } else {
-    normalized_size = ferris_size / pc.render_dimensions;
-  }
+  vec2 normalized_size = particle_size / pc.render_dimensions;
 
   p_out.pos = p_in.pos;
   p_out.vel = p_in.vel;
 
-  // todo: don't treat ferris like a particle
-  if (pc.particle_count > 0 && i > 0) {
-    Particle ferris = data_in.particles[0];
+  // increase velocity to the direction opposite to ferris
+  // far
+  float dist = distance(pc.ferris_pos, p_out.pos);
+  float clamped_far = min(dist * dist, 10);
+  vec2 vec_far =  p_out.pos - pc.ferris_pos;
+  p_out.vel += normalize(vec_far) * (10 - clamped_far)  * 0.00000003;
 
-    float dist = distance(ferris.pos, p_out.pos);
-    float clamped_far = min(dist * dist, 10);
-    vec2 vec_far =  p_out.pos - ferris.pos;
-    p_out.vel += normalize(vec_far) * (10 - clamped_far)  * 0.00000003;
-
-    float clamped_near = min(dist * dist, 0.004);
-    vec2 vec_near =  p_out.pos - ferris.pos;
-    p_out.vel += normalize(vec_near) * (0.004 - clamped_near)  * max(20.0 * length(ferris.vel), 0.2);
-  }
-
+  // near
+  float clamped_near = min(dist * dist, 0.004);
+  vec2 vec_near =  p_out.pos - pc.ferris_pos;
+  p_out.vel += normalize(vec_near) * (0.004 - clamped_near);  // * max(20.0 * length(ferris.vel), 0.2);
+  
+  // add velocity and calculate bounce
   calculate_new_position(p_out.pos.x, p_out.vel.x, normalized_size.x);
   calculate_new_position(p_out.pos.y, p_out.vel.y, normalized_size.y);
 
+  // drag
   float vel_len = length(p_out.vel);
   float drag_strength = 1 - min(vel_len * vel_len * 1000, 0.1);
   p_out.vel *= vec2(drag_strength, drag_strength);

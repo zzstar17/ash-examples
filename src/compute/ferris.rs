@@ -2,12 +2,9 @@ use std::time::Duration;
 
 use winit::dpi::PhysicalSize;
 
-use crate::render::RenderPosition;
-
 pub struct Ferris {
-  pub position: [f32; 2],
-  pub going_right: bool,
-  pub going_down: bool,
+  pub pos: [f32; 2],
+  pub vel: [f32; 2],
 }
 
 impl Ferris {
@@ -17,88 +14,92 @@ impl Ferris {
   pub const WIDTH: u32 = (Self::TEXTURE_DIMENSIONS[0] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
   pub const HEIGHT: u32 = (Self::TEXTURE_DIMENSIONS[1] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
 
-  const SPEED_X: f32 = 80.0; // speed in pixels per second
-  const SPEED_Y: f32 = 80.0;
+  const INITIAL_VEL: [f32; 2] = [80.0, 80.0]; // speed in pixels per second
 
-  pub fn new(position: [f32; 2], going_right: bool, going_down: bool) -> Self {
+  pub fn new(pos: [f32; 2]) -> Self {
     Self {
-      position,
-      going_right,
-      going_down,
+      pos,
+      vel: Self::INITIAL_VEL,
     }
   }
 
-  pub fn update(&mut self, time_since_last_update: Duration, window_size: PhysicalSize<u32>) {
+  pub fn update(&mut self, time_since_last_update: Duration, render_size: PhysicalSize<u32>) {
     let secs_f32 = time_since_last_update.as_secs_f32();
-    let delta_pos_x = secs_f32 * Self::SPEED_X;
-    let delta_pos_y = secs_f32 * Self::SPEED_Y;
-    let window_width = (window_size.width - Self::WIDTH) as f32;
-    let window_height = (window_size.height - Self::HEIGHT) as f32;
+    let delta_pos_x = secs_f32 * self.vel[0];
+    let delta_pos_y = secs_f32 * self.vel[1];
 
     let (new_x, x_dir_changed) = Self::calculate_position(
-      self.position[0],
+      self.pos[0],
       delta_pos_x,
-      window_width,
-      self.going_right,
+      Self::TEXTURE_DIMENSIONS[0],
+      render_size.width as f32,
     );
-    self.position[0] = new_x.min(window_width);
     if x_dir_changed {
-      self.going_right = !self.going_right;
+      self.vel[0] = -self.vel[0];
     }
 
     let (new_y, y_dir_changed) = Self::calculate_position(
-      self.position[1],
+      self.pos[1],
       delta_pos_y,
-      window_height,
-      self.going_down,
+      Self::TEXTURE_DIMENSIONS[1],
+      render_size.height as f32,
     );
-    self.position[1] = new_y.min(window_height);
     if y_dir_changed {
-      self.going_down = !self.going_down;
+      self.vel[1] = -self.vel[1];
     }
+
+    self.pos = [new_x, new_y];
   }
 
   // calculates position after some time passed
   // returns new position and a boolean that indicates if direction changed
   fn calculate_position(
-    initial: f32,
+    pos: f32,
     mut delta: f32,
-    size: f32, // size of the window subtracting sprite size
-    positive_direction: bool,
+    sprite_size: f32,
+    render_size: f32,
   ) -> (f32, bool) {
-    delta %= size * 2.0; // remove double bounces
-    let mut new = initial;
-    if positive_direction {
-      new += delta;
-      let overflow = new - size;
-      if overflow > 0.0 {
-        new -= overflow;
-        return (new, true);
-      }
-    } else {
-      new -= delta;
-      if new < 0.0 {
-        new = -new;
-        return (new, true);
-      }
+    let traversable_length = render_size - sprite_size;
+
+    // subtract double bounces
+    let double_size = traversable_length * 2.0;
+    if delta > double_size {
+      // how many times traversable_length * 2 fits in delta
+      let delta_times = (delta / double_size) as usize;
+      delta -= delta_times as f32 * double_size;
     }
-    (new, false)
+
+    let half_sprite_size = sprite_size / 2.0;
+    let upper_limit = render_size - half_sprite_size;
+    let lower_limit = half_sprite_size;
+
+    let mut new_pos = pos + delta;
+    let mut direction_changed = false;
+    if new_pos > upper_limit {
+      let overflow = new_pos - upper_limit;
+
+      new_pos -= overflow * 2.0;
+      direction_changed = true;
+    } else if new_pos < lower_limit {
+      let overflow = new_pos - lower_limit;
+
+      new_pos -= overflow * 2.0;
+      direction_changed = true;
+    }
+
+    (new_pos, direction_changed)
   }
 
-  pub fn get_render_position(&self, window_size: PhysicalSize<u32>) -> RenderPosition {
-    let window_size_float = PhysicalSize {
-      width: window_size.width as f32,
-      height: window_size.height as f32,
+  pub fn get_render_position(&self, render_dimensions: PhysicalSize<u32>) -> [f32; 2] {
+    let render_dimensions_f = PhysicalSize {
+      width: render_dimensions.width as f32,
+      height: render_dimensions.height as f32,
     };
 
     let normal_pos = [
-      ((self.position[0] * 2.0) - window_size_float.width) / window_size_float.width,
-      ((self.position[1] * 2.0) - window_size_float.height) / window_size_float.height,
+      self.pos[0] / render_dimensions_f.width,
+      self.pos[1] / render_dimensions_f.height,
     ];
-    let ratio = [
-      (Ferris::WIDTH as f32 / window_size_float.width),
-      (Ferris::HEIGHT as f32 / window_size_float.height),
-    ];
-    RenderPosition::new(normal_pos, ratio)
+    normal_pos
   }
 }
