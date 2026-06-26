@@ -8,20 +8,18 @@ use vkobjects::{
 use winit::dpi::PhysicalSize;
 
 use crate::{
-  compute::{
-    particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeFrameResult,
-    ComputeGPUData, ParticleBuffers, ParticlesDraw,
-  },
   render::{
+    compute::{
+      particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeFrameResult,
+      ComputeGPUData, ParticleBuffers, ParticlesDraw,
+    },
     create_objs::{create_fence, create_semaphore},
-    InitializationError, RENDER_EXTENT,
+    InitializationError, COMPUTE_FRAMES_IN_FLIGHT, RENDER_EXTENT,
   },
   RESOLUTION,
 };
 
 use super::ferris::Ferris;
-
-pub const COMPUTE_FRAMES_IN_FLIGHT: usize = 2;
 
 pub struct ComputeSyncRenderer {
   tick_i: usize,

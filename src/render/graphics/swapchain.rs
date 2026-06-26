@@ -16,13 +16,12 @@ use winit::dpi::PhysicalSize;
 
 use crate::{
   render::{
-    create_objs::{create_fence, create_semaphore},
+    create_objs::{create_fence, create_image_view, create_semaphore},
     errors::error_chain_fmt,
+    SWAPCHAIN_PREFERRED_IMAGE_FORMAT,
   },
   PREFERRED_PRESENTATION_METHOD,
 };
-
-use super::create_objs::create_image_view;
 
 // VK_ERROR_NATIVE_WINDOW_IN_USE_KHR shouldn't happen unless some other program somehow hijacks
 //    the created window other API
@@ -664,7 +663,7 @@ fn select_swapchain_image_format(
   let formats = unsafe { surface.get_formats(physical_device) }?;
   for available_format in formats.iter() {
     // commonly available
-    if available_format.format == super::SWAPCHAIN_PREFERRED_IMAGE_FORMAT
+    if available_format.format == SWAPCHAIN_PREFERRED_IMAGE_FORMAT
       && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
     {
       return Ok(*available_format);

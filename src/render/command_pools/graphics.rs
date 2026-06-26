@@ -5,13 +5,12 @@ use vkinitialization::device::{QueueFamilies, SingleQueues};
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
-  compute::ParticlesDraw,
   render::{
+    compute::ParticlesDraw,
     descriptor_sets::DescriptorPool,
-    gpu_data::GPUData,
+    graphics::{GPUData, RenderTargets},
     pipelines::{GraphicsPipeline, GraphicsPushConstants},
-    render_object::QUAD_INDICES,
-    render_targets::RenderTargets,
+    vertices::QUAD_INDICES,
     RENDER_EXTENT,
   },
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR, RESOLUTION,

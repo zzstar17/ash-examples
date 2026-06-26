@@ -7,8 +7,7 @@ use vkobjects::{destroy, utility::OnErr, ManuallyDestroyed};
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  compute::ferris::Ferris,
-  render::{initialization, InitializationError},
+  render::{compute::ferris::Ferris, initialization, InitializationError},
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, WINDOW_TITLE,
 };
 

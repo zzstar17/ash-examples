@@ -1,13 +1,10 @@
-mod compute;
 mod destructor;
 mod last_frames_durations;
 mod render;
 mod threads_manager;
 
 use ash::vk;
-use render::{
-  AcquireNextImageError, FrameRenderError, InitializationError, PreWindowInit, PreWindowInitError,
-};
+use render::{FrameRenderError, InitializationError, PreWindowInit, PreWindowInitError};
 use std::{
   ffi::CStr,
   time::{Duration, Instant},
@@ -21,7 +18,10 @@ use winit::{
   keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::{last_frames_durations::LastFramesDurations, threads_manager::ThreadsManager};
+use crate::{
+  last_frames_durations::LastFramesDurations, render::AcquireNextImageError,
+  threads_manager::ThreadsManager,
+};
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);

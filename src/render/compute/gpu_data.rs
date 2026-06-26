@@ -8,8 +8,10 @@ use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroye
 use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 
 use crate::{
-  compute::{sync_renderer::COMPUTE_FRAMES_IN_FLIGHT, ParticleBuffers},
-  render::{create_objs::create_buffer, vertices::Particle, GPUDataAllocationError},
+  render::{
+    compute::ParticleBuffers, create_objs::create_buffer, errors::GPUDataAllocationError,
+    vertices::Particle, COMPUTE_FRAMES_IN_FLIGHT,
+  },
   RESOLUTION,
 };
 

@@ -6,25 +6,27 @@ use vkobjects::{
 };
 
 use crate::{
-  compute::{ParticleBuffers, ParticlesDraw},
   destructor::Destructor,
-  render::{gpu_data::GPUDataAllocationError, PostWindowInit},
+  render::{
+    command_pools::GraphicsCommandBufferPool,
+    compute::{ParticleBuffers, ParticlesDraw},
+    descriptor_sets::DescriptorPool,
+    errors::{GPUDataAllocationError, ImageError, SwapchainRecreationError},
+    format_conversions::{self, KNOWN_FORMATS},
+    initialization,
+    pipelines::{self, GraphicsPipeline},
+    InitializationError, PostWindowInit, GRAPHICS_FRAMES_IN_FLIGHT, RENDER_EXTENT,
+    SWAPCHAIN_IMAGE_USAGES,
+  },
   RESOLUTION, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
-  command_pools::GraphicsCommandBufferPool,
-  descriptor_sets::DescriptorPool,
-  errors::{ImageError, InitializationError, SwapchainRecreationError},
-  format_conversions::{self, KNOWN_FORMATS},
   gpu_data::GPUData,
-  initialization::{self},
-  pipelines::{self, GraphicsPipeline},
   render_pass::create_render_pass,
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
-  FRAMES_IN_FLIGHT, RENDER_EXTENT, SWAPCHAIN_IMAGE_USAGES,
 };
 
 const TEXTURE_PATH: &str = "./sprites.png";
@@ -51,7 +53,7 @@ pub struct Renderer {
 
   pipeline_cache: vk::PipelineCache,
   pipeline: GraphicsPipeline,
-  pub command_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
+  pub command_pools: [GraphicsCommandBufferPool; GRAPHICS_FRAMES_IN_FLIGHT],
 
   pub particle_buffers: ParticleBuffers, // not owned
   data: GPUData,
@@ -196,7 +198,7 @@ impl Renderer {
         #[cfg(feature = "vl")]
         &post_window.debug_utils_marker
       ),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe {
       destructor.fire(&post_window.device);
@@ -277,7 +279,7 @@ impl Renderer {
     // it is possible to use more than two frames in flight, but it would require having more than one old swapchain and pipeline
     #[allow(clippy::assertions_on_constants)]
     {
-      assert!(FRAMES_IN_FLIGHT == 2);
+      assert!(GRAPHICS_FRAMES_IN_FLIGHT == 2);
     }
 
     // old swapchain becomes retired

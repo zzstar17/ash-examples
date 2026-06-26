@@ -3,21 +3,16 @@ use std::ops::BitOr;
 use crate::render::{
   command_pools::{self, initialization::PendingInitialization},
   create_objs::{create_buffer, create_image, create_image_view},
-  render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
+  errors::GPUDataAllocationError,
+  vertices::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
 };
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use vkobjects::{
-  const_flag_bitor, destroy,
-  errors::{OutOfMemoryError, QueueSubmitError},
-  utility::OnErr,
-  DeviceManuallyDestroyed,
+  const_flag_bitor, destroy, errors::QueueSubmitError, utility::OnErr, DeviceManuallyDestroyed,
 };
 
-use vkallocator::{
-  AllocationError, DetailedMemory, DeviceMemoryInitializationError, HostAllocationError,
-  SingleUseStagingBuffers,
-};
+use vkallocator::{DetailedMemory, SingleUseStagingBuffers};
 
 pub const TEXTURE_USAGES: vk::ImageUsageFlags = const_flag_bitor!(
   vk::ImageUsageFlags =>
@@ -29,20 +24,6 @@ pub const TEXTURE_FORMAT_FEATURES: vk::FormatFeatureFlags = const_flag_bitor!(
   vk::FormatFeatureFlags::TRANSFER_DST,
   vk::FormatFeatureFlags::SAMPLED_IMAGE
 );
-
-#[derive(Debug, thiserror::Error)]
-pub enum GPUDataAllocationError {
-  #[error(transparent)]
-  StagingBufferError(#[from] DeviceMemoryInitializationError),
-  #[error("Failed to allocate one of the main device memory objects.\n{0}")]
-  AllocationError(#[from] AllocationError),
-  #[error("Failed to allocate one of the main host memory objects.\n{0}")]
-  HostAllocationError(#[from] HostAllocationError),
-  #[error(transparent)]
-  OutOfMemory(#[from] OutOfMemoryError),
-  #[error("Failed to submit allocation workload to a queue: {0}")]
-  QueueSubmitError(#[from] QueueSubmitError),
-}
 
 #[derive(Debug)]
 pub struct GPUData {

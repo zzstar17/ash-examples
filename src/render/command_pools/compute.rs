@@ -5,8 +5,8 @@ use vkinitialization::device::SingleQueues;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
-  compute::ComputeGPUData,
   render::{
+    compute::ComputeGPUData,
     descriptor_sets::ComputeDescriptorPool,
     pipelines::{ComputePipeline, ComputePushConstants},
     vertices::Particle,

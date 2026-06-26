@@ -2,9 +2,9 @@ use std::{sync::mpsc, thread};
 
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
-use crate::{
-  compute::{ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
-  render::{FrameRenderError, InitializationError, PostWindowInit, Renderer, SyncRenderer},
+use crate::render::{
+  compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
+  graphics, FrameRenderError, InitializationError, PostWindowInit,
 };
 
 pub struct ComputeThreadData {
@@ -29,7 +29,7 @@ pub struct ThreadsManager {
   // none if thread has terminated
   compute_thread_data: Option<ComputeThreadData>,
 
-  pub graphics_render: SyncRenderer,
+  pub graphics_render: graphics::SyncRenderer,
 }
 
 impl ThreadsManager {
@@ -39,7 +39,7 @@ impl ThreadsManager {
   ) -> Result<Self, InitializationError> {
     let post_window_init = PostWindowInit::initialize(pre_window, event_loop)?;
 
-    let compute_thread = crate::compute::start_compute(
+    let compute_thread = compute::start_compute(
       post_window_init.device.clone(),
       post_window_init.physical_device.clone(),
       post_window_init.queues.clone(),
@@ -54,8 +54,8 @@ impl ThreadsManager {
     };
     let particle_buffers = compute_thread.particle_buffers;
 
-    let renderer = Renderer::initialize(post_window_init, particle_buffers)?;
-    let mut sync_renderer = SyncRenderer::new(renderer)?;
+    let renderer = graphics::Renderer::initialize(post_window_init, particle_buffers)?;
+    let mut sync_renderer = graphics::SyncRenderer::new(renderer)?;
 
     let receiver_res = compute_thread_data.event_receiver.recv();
     let mut compute_initialized = false;

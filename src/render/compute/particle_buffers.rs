@@ -9,7 +9,7 @@ use std::{
 use ash::vk;
 use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
-use crate::{compute::ComputeGPUData, render::create_objs::create_buffer};
+use crate::render::{compute::ComputeGPUData, create_objs::create_buffer};
 
 // at most 3 buffers owned by graphics and 1 by compute
 const BUFFER_COUNT: usize = 4;
