@@ -13,9 +13,9 @@ use std::{
 };
 use winit::{
   application::ApplicationHandler,
-  dpi::PhysicalSize,
+  dpi::{PhysicalPosition, PhysicalSize},
   error::EventLoopError,
-  event::WindowEvent,
+  event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
   event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
 };
@@ -80,8 +80,72 @@ enum RenderStatus {
   Started(StartedStatus),
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy)]
+struct RenderAreaDimensions {
+  pub render_size: [u32; 2],
+  pub apparent_size: [u32; 2],
+  pub apparent_ratio: f32,
+  pub render_area_window_offset: [u32; 2],
+  pub window_size: [u32; 2],
+}
+
+impl RenderAreaDimensions {
+  pub fn new(window_dimensions: PhysicalSize<u32>) -> Self {
+    let window_size = [window_dimensions.width, window_dimensions.height];
+    let apparent_ratio = Self::calculate_render_ratio(
+      RESOLUTION[0] as f32,
+      RESOLUTION[1] as f32,
+      window_size[0] as f32,
+      window_size[1] as f32,
+    );
+    let apparent_size = [
+      (RESOLUTION[0] as f32 * apparent_ratio) as u32,
+      (RESOLUTION[1] as f32 * apparent_ratio) as u32,
+    ];
+    let render_area_window_offset = [
+      (window_size[0] - apparent_size[0]) / 2,
+      (window_size[1] - apparent_size[1]) / 2,
+    ];
+
+    RenderAreaDimensions {
+      render_size: RESOLUTION,
+      apparent_size,
+      apparent_ratio,
+      render_area_window_offset,
+      window_size,
+    }
+  }
+
+  pub fn into_apparent_coordinates(&self, window_coordinates: [f32; 2]) -> [f32; 2] {
+    let offsetted_x = window_coordinates[0] - self.render_area_window_offset[0] as f32;
+    let offsetted_y = window_coordinates[1] - self.render_area_window_offset[1] as f32;
+    let apparent_x = offsetted_x / self.apparent_ratio;
+    let apparent_y = offsetted_y / self.apparent_ratio;
+    [apparent_x, apparent_y]
+  }
+
+  fn calculate_render_ratio(
+    render_width: f32,
+    render_height: f32,
+    window_width: f32,
+    window_height: f32,
+  ) -> f32 {
+    let width_diff = window_width - render_width;
+    let height_diff = window_height - render_height;
+    if width_diff > height_diff {
+      // clamped to height
+      window_height / render_height
+    } else {
+      // clamped to width
+      window_width / render_width
+    }
+  }
+}
+
 struct StartedStatus {
   pub renderer: SyncRenderer,
+  pub render_dimensions: RenderAreaDimensions,
   pub paused: bool,
   pub occluded: bool,
   pub suspended: bool,
@@ -91,7 +155,10 @@ struct StartedStatus {
 struct App {
   status: RenderStatus,
   window_resize_handler: WindowResizeHandler,
+  mouse_position: PhysicalPosition<f64>,
+  mouse_in_window: bool,
   ferris: Ferris,
+  ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
   time_since_last_fps_print: Duration,
   frame_i: usize,
@@ -150,12 +217,15 @@ impl RenderStatus {
     match self {
       RenderStatus::Initialized(init) => {
         let renderer = init.start(event_loop)?;
+
+        let window_dimensions = renderer.window().inner_size();
         Ok(Self::Started(StartedStatus {
           renderer,
           paused: START_PAUSED,
           occluded: false,
           suspended: false,
           waiting_for_window_events: false,
+          render_dimensions: RenderAreaDimensions::new(window_dimensions),
         }))
       }
       _ => panic!("Render started multiple times"),
@@ -200,6 +270,9 @@ impl App {
       last_update,
       time_since_last_fps_print,
       frame_i,
+      mouse_position: PhysicalPosition { x: 0.0, y: 0.0 },
+      ferris_drag_mouse_pos: None,
+      mouse_in_window: true,
     }
   }
 }
@@ -219,6 +292,26 @@ impl ApplicationHandler for App {
       let status = self.status.unwrap_started();
       log::debug!("Application resumed");
       status.set_suspended(event_loop, false);
+    }
+  }
+
+  fn device_event(
+    &mut self,
+    _event_loop: &ActiveEventLoop,
+    _device_id: winit::event::DeviceId,
+    event: winit::event::DeviceEvent,
+  ) {
+    match event {
+      DeviceEvent::MouseMotion { delta } => {
+        // try to keep track of the mouse outside the window
+        if !self.mouse_in_window {
+          if let Some(pos) = self.ferris_drag_mouse_pos.as_mut() {
+            pos[0] += delta.0;
+            pos[1] += delta.1;
+          }
+        }
+      }
+      _ => {}
     }
   }
 
@@ -264,6 +357,12 @@ impl ApplicationHandler for App {
               width: RESOLUTION[0],
               height: RESOLUTION[1],
             },
+            self.ferris_drag_mouse_pos.map(|mouse_coors| {
+              let mouse_coors = [mouse_coors[0] as f32, mouse_coors[1] as f32];
+              status
+                .render_dimensions
+                .into_apparent_coordinates(mouse_coors)
+            }),
           );
 
           if let Err(err) = status
@@ -306,6 +405,7 @@ impl ApplicationHandler for App {
           let size_delta = width_delta.max(height_delta);
 
           if size_delta > FORCE_WINDOW_RESIZE_SIZE_THRESHOLD {
+            status.render_dimensions = RenderAreaDimensions::new(new_size);
             status.renderer.window_resized();
 
             if self.window_resize_handler.active {
@@ -324,9 +424,47 @@ impl ApplicationHandler for App {
             self.window_resize_handler.last_activation_size = new_size;
           }
         } else {
+          status.render_dimensions = RenderAreaDimensions::new(new_size);
           status.renderer.window_resized();
         }
         status.renderer.window().request_redraw();
+      }
+      WindowEvent::CursorMoved { position, .. } => {
+        self.mouse_position = position;
+        if let Some(drag) = self.ferris_drag_mouse_pos.as_mut() {
+          *drag = [position.x, position.y];
+        }
+      }
+      WindowEvent::CursorEntered { .. } => {
+        self.mouse_in_window = true;
+      }
+      WindowEvent::CursorLeft { .. } => {
+        self.mouse_in_window = false;
+      }
+      WindowEvent::MouseInput { state, button, .. } => {
+        if let MouseButton::Left = button {
+          match state {
+            ElementState::Pressed => {
+              let real_mouse_coors = self
+                .status
+                .unwrap_started()
+                .render_dimensions
+                .into_apparent_coordinates([
+                  self.mouse_position.x as f32,
+                  self.mouse_position.y as f32,
+                ]);
+              let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
+              let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
+              let squares = dist_x * dist_x + dist_y * dist_y;
+              if squares < 120.0 * 120.0 {
+                self.ferris_drag_mouse_pos = Some([self.mouse_position.x, self.mouse_position.y]);
+              }
+            }
+            ElementState::Released => {
+              self.ferris_drag_mouse_pos = None;
+            }
+          }
+        }
       }
       WindowEvent::KeyboardInput { event, .. } => {
         let pressed = event.state.is_pressed();

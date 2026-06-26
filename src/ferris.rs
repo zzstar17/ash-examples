@@ -10,6 +10,10 @@ pub struct Ferris {
   pub vel: [f32; 2],
 }
 
+fn len_squared(vec: [f32; 2]) -> f32 {
+  vec[0] * vec[0] + vec[1] * vec[1]
+}
+
 impl Ferris {
   const TEXTURE_DIMENSIONS: [f32; 2] = [120.0, 80.0]; // saved texture dimensions
   const TEXTURE_TO_SIZE_RATIO: f32 = 1.0;
@@ -17,12 +21,48 @@ impl Ferris {
   pub const WIDTH: u32 = (Self::TEXTURE_DIMENSIONS[0] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
   pub const HEIGHT: u32 = (Self::TEXTURE_DIMENSIONS[1] * Self::TEXTURE_TO_SIZE_RATIO) as u32;
 
+  // reduce ferris's speed if going more than this pixels per second
+  const DRAG_RESISTANCE_THRESHOLD_SPEED: f32 = 120.0;
+  const DRAG_COEFFICIENT: f32 = 2000000.0;
+
+  const MOUSE_DRAG_MULTIPLIER: f32 = 42.0;
+
   pub fn new(pos: [f32; 2], vel: [f32; 2]) -> Self {
     Self { pos, vel }
   }
 
-  pub fn update(&mut self, time_since_last_update: Duration, render_size: PhysicalSize<u32>) {
+  pub fn update(
+    &mut self,
+    time_since_last_update: Duration,
+    render_size: PhysicalSize<u32>,
+    drag_to_pos: Option<[f32; 2]>,
+  ) {
     let secs_f32 = time_since_last_update.as_secs_f32();
+    let speed_sqr = len_squared(self.vel);
+    let drag_threshold =
+      Self::DRAG_RESISTANCE_THRESHOLD_SPEED * Self::DRAG_RESISTANCE_THRESHOLD_SPEED;
+
+    if let Some(drag) = drag_to_pos {
+      let dist_vec = [drag[0] - self.pos[0], drag[1] - self.pos[1]];
+      let len_sqr = len_squared(dist_vec);
+      self.vel[0] += dist_vec[0] * secs_f32 * Self::MOUSE_DRAG_MULTIPLIER;
+      self.vel[1] += dist_vec[1] * secs_f32 * Self::MOUSE_DRAG_MULTIPLIER;
+
+      if len_sqr < 80.0 * 80.0 && speed_sqr < drag_threshold * 400.0 {
+        let reduce_ratio =
+          1.0 - (0.5f32).min((speed_sqr * secs_f32 * 60.0) / Self::DRAG_COEFFICIENT);
+        self.vel[0] *= reduce_ratio;
+        self.vel[1] *= reduce_ratio;
+      }
+    } else {
+      if speed_sqr > drag_threshold {
+        // does not calculate time properly
+        let reduce_ratio = 1.0 - (0.5f32).min((speed_sqr * secs_f32) / Self::DRAG_COEFFICIENT);
+        self.vel[0] *= reduce_ratio;
+        self.vel[1] *= reduce_ratio;
+      }
+    }
+
     let delta_pos_x = secs_f32 * self.vel[0];
     let delta_pos_y = secs_f32 * self.vel[1];
 
