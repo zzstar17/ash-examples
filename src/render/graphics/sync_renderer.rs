@@ -9,26 +9,25 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::window::Window;
 
 use crate::{
-  compute::ComputeFrameResult, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO,
-  SCREENSHOT_SAVE_FILE,
-};
-
-use super::{
-  create_objs::create_semaphore, errors::InitializationError, renderer::Renderer, FrameRenderError,
-  FRAMES_IN_FLIGHT,
+  render::{
+    compute::ComputeFrameResult,
+    create_objs::{create_fence, create_semaphore},
+    graphics, FrameRenderError, InitializationError, GRAPHICS_FRAMES_IN_FLIGHT,
+  },
+  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 pub struct SyncRenderer {
-  pub renderer: Renderer,
+  pub renderer: graphics::Renderer,
 
   last_frame_i: usize,
   // frame resources are free
-  frame_fences: [vk::Fence; FRAMES_IN_FLIGHT],
+  frame_fences: [vk::Fence; GRAPHICS_FRAMES_IN_FLIGHT],
 
   // swapchain image available in this frame
-  image_available: [vk::Semaphore; FRAMES_IN_FLIGHT],
+  image_available: [vk::Semaphore; GRAPHICS_FRAMES_IN_FLIGHT],
 
-  in_use_particle_buffers_by_frame: [Option<usize>; FRAMES_IN_FLIGHT],
+  in_use_particle_buffers_by_frame: [Option<usize>; GRAPHICS_FRAMES_IN_FLIGHT],
 
   // will have the new window size
   recreate_swapchain_next_frame: bool,
@@ -38,7 +37,7 @@ pub struct SyncRenderer {
 }
 
 impl SyncRenderer {
-  pub fn new(renderer: Renderer) -> Result<Self, InitializationError> {
+  pub fn new(renderer: graphics::Renderer) -> Result<Self, InitializationError> {
     let device = &renderer.init.device;
     let frame_fences = fill_destroyable_array_with_expression!(
       device,
@@ -50,7 +49,7 @@ impl SyncRenderer {
         #[cfg(feature = "vl")]
         c"frame fence"
       ),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )?;
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -62,15 +61,15 @@ impl SyncRenderer {
         #[cfg(feature = "vl")]
         c"image available"
       ),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { frame_fences.destroy_self(device) })?;
 
     Ok(Self {
       renderer,
-      last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
+      last_frame_i: GRAPHICS_FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
       frame_fences,
-      in_use_particle_buffers_by_frame: [None; FRAMES_IN_FLIGHT],
+      in_use_particle_buffers_by_frame: [None; GRAPHICS_FRAMES_IN_FLIGHT],
 
       image_available,
       recreate_swapchain_next_frame: false,
@@ -92,7 +91,7 @@ impl SyncRenderer {
     cur_total_frame: usize,
     compute_message_rcv: &mpsc::Receiver<ComputeFrameResult>,
   ) -> Result<(), FrameRenderError> {
-    let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
+    let cur_frame_i = (self.last_frame_i + 1) % GRAPHICS_FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering

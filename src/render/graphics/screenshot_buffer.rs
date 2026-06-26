@@ -4,7 +4,7 @@ use vkinitialization::device::{Device, PhysicalDevice};
 use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::render::{
-  create_objs::create_buffer, gpu_data::GPUDataAllocationError, IMAGE_WITH_RESOLUTION_MINIMAL_SIZE,
+  create_objs::create_buffer, errors::GPUDataAllocationError, IMAGE_WITH_RESOLUTION_MINIMAL_SIZE,
 };
 
 pub struct ScreenshotBuffer {

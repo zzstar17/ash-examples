@@ -2,7 +2,7 @@ use ash::vk;
 use vkinitialization::device::SingleQueues;
 use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
-use crate::compute::ComputeGPUData;
+use crate::render::compute::ComputeGPUData;
 
 pub struct ComputeTransferCommandBufferPool {
   pool: vk::CommandPool,

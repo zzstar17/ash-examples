@@ -8,20 +8,21 @@ use vkobjects::{
   utility::OnErr, DeviceManuallyDestroyed,
 };
 
-use super::{
+use crate::render::{
   create_objs::{create_image, create_image_view},
-  render_pass::create_framebuffer,
-  FRAMES_IN_FLIGHT, RENDER_EXTENT,
+  GRAPHICS_FRAMES_IN_FLIGHT, RENDER_EXTENT,
 };
+
+use super::render_pass::create_framebuffer;
 
 // images that the main graphics pipeline draws to
 // these are then copied to the swapchain image
 #[derive(Debug)]
 pub struct RenderTargets {
-  pub images: [vk::Image; FRAMES_IN_FLIGHT],
+  pub images: [vk::Image; GRAPHICS_FRAMES_IN_FLIGHT],
   pub memories: Box<[DetailedMemory]>,
-  pub image_views: [vk::ImageView; FRAMES_IN_FLIGHT],
-  pub framebuffers: [vk::Framebuffer; FRAMES_IN_FLIGHT],
+  pub image_views: [vk::ImageView; GRAPHICS_FRAMES_IN_FLIGHT],
+  pub framebuffers: [vk::Framebuffer; GRAPHICS_FRAMES_IN_FLIGHT],
 }
 
 impl RenderTargets {
@@ -34,7 +35,7 @@ impl RenderTargets {
     render_format: vk::Format,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, AllocationError> {
-    let images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
+    let images: [vk::Image; GRAPHICS_FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
       device,
       create_image(
         device,
@@ -49,12 +50,12 @@ impl RenderTargets {
         #[cfg(feature = "vl")]
         c"Frames"
       ),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )?;
 
     let images_trait = {
-      let mut temp = [&images[0] as &dyn MemoryBound; FRAMES_IN_FLIGHT];
-      for i in 0..FRAMES_IN_FLIGHT {
+      let mut temp = [&images[0] as &dyn MemoryBound; GRAPHICS_FRAMES_IN_FLIGHT];
+      for i in 0..GRAPHICS_FRAMES_IN_FLIGHT {
         temp[i] = &images[i] as &dyn MemoryBound;
       }
       temp
@@ -81,7 +82,7 @@ impl RenderTargets {
       images
         .iter()
         .map(|image| create_image_view(device, *image, render_format)),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destroy!(device => images.as_ref(), &alloc) })?;
 
@@ -90,7 +91,7 @@ impl RenderTargets {
       image_views
         .iter()
         .map(|view| create_framebuffer(device, render_pass, *view, RENDER_EXTENT)),
-      FRAMES_IN_FLIGHT
+      GRAPHICS_FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destroy!(device => image_views.as_ref(), images.as_ref(), &alloc) })?;
 

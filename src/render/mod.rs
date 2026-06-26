@@ -1,34 +1,27 @@
-pub mod command_pools;
-pub mod create_objs;
-pub mod descriptor_sets;
+mod command_pools;
+pub mod compute;
+mod create_objs;
+mod descriptor_sets;
 mod errors;
 mod format_conversions;
-mod gpu_data;
+pub mod graphics;
 mod initialization;
-pub mod pipelines;
-mod render_object;
-mod render_pass;
-mod render_targets;
-mod renderer;
-mod screenshot_buffer;
+mod pipelines;
 mod shaders;
-mod swapchain;
-mod sync_renderer;
-pub mod vertices;
+mod vertices;
 
 use ash::vk;
 use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
-pub use gpu_data::GPUDataAllocationError;
+pub use graphics::AcquireNextImageError;
 pub use initialization::{PostWindowInit, PreWindowInit, PreWindowInitError};
-pub use renderer::Renderer;
-pub use swapchain::AcquireNextImageError;
-pub use sync_renderer::SyncRenderer;
 
 use crate::RESOLUTION;
 
-const FRAMES_IN_FLIGHT: usize = 2;
+// only programmed for 2
+const GRAPHICS_FRAMES_IN_FLIGHT: usize = 2;
+const COMPUTE_FRAMES_IN_FLIGHT: usize = 2;
 
 const TARGET_API_VERSION: u32 = vk::API_VERSION_1_3;
 

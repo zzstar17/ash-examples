@@ -5,14 +5,12 @@ use vkobjects::{
   DeviceManuallyDestroyed, ManuallyDestroyed,
 };
 
-use crate::{
-  compute::{gpu_data::ComputeGPUData, sync_renderer::COMPUTE_FRAMES_IN_FLIGHT, ParticleBuffers},
-  render::{
-    command_pools::{ComputeCommandBufferPool, ComputeTransferCommandBufferPool},
-    descriptor_sets::ComputeDescriptorPool,
-    pipelines::ComputePipeline,
-    InitializationError,
-  },
+use crate::render::{
+  command_pools::{ComputeCommandBufferPool, ComputeTransferCommandBufferPool},
+  compute::{gpu_data::ComputeGPUData, ParticleBuffers},
+  descriptor_sets::ComputeDescriptorPool,
+  pipelines::ComputePipeline,
+  InitializationError, COMPUTE_FRAMES_IN_FLIGHT,
 };
 
 pub struct ComputeRenderer {

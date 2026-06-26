@@ -11,7 +11,7 @@ pub use post_window_init::PostWindowInit;
 pub use pre_window_init::{PreWindowInit, PreWindowInitError};
 
 use crate::{
-  render::{gpu_data::TEXTURE_FORMAT_FEATURES, TARGET_API_VERSION},
+  render::{graphics::TEXTURE_FORMAT_FEATURES, TARGET_API_VERSION},
   APPLICATION_NAME, APPLICATION_VERSION,
 };
 

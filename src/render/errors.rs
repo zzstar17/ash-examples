@@ -1,17 +1,17 @@
 use ash::vk;
 use raw_window_handle::HandleError;
-use vkallocator::{AllocationError, HostMemorySyncError};
+use vkallocator::{
+  AllocationError, DeviceMemoryInitializationError, HostAllocationError, HostMemorySyncError,
+};
 use vkinitialization::{
   device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
   InstanceCreationError,
 };
 use vkobjects::errors::{DeviceIsLost, OutOfMemoryError, QueueSubmitError};
 
-use crate::render::gpu_data::GPUDataAllocationError;
-
 use super::{
+  graphics::swapchain::{AcquireNextImageError, SwapchainCreationError},
   pipelines::{PipelineCacheError, PipelineCreationError},
-  swapchain::{AcquireNextImageError, SwapchainCreationError},
 };
 
 pub fn error_chain_fmt(
@@ -184,4 +184,18 @@ impl std::fmt::Debug for ImageError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     error_chain_fmt(self, f)
   }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GPUDataAllocationError {
+  #[error(transparent)]
+  StagingBufferError(#[from] DeviceMemoryInitializationError),
+  #[error("Failed to allocate one of the main device memory objects.\n{0}")]
+  AllocationError(#[from] AllocationError),
+  #[error("Failed to allocate one of the main host memory objects.\n{0}")]
+  HostAllocationError(#[from] HostAllocationError),
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+  #[error("Failed to submit allocation workload to a queue: {0}")]
+  QueueSubmitError(#[from] QueueSubmitError),
 }

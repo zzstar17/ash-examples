@@ -19,8 +19,9 @@ pub use sync_renderer::ComputeSyncRenderer;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 use crate::{
-  compute::sync_renderer::ComputeFrameRenderError, last_frames_durations::LastFramesDurations,
-  render::InitializationError, KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
+  last_frames_durations::LastFramesDurations,
+  render::{compute::sync_renderer::ComputeFrameRenderError, InitializationError},
+  KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
 
 pub enum GraphicsToComputeEvent {
