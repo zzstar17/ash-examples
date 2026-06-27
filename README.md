@@ -1,53 +1,53 @@
 # Instance creation
 
-This example covers creating an instance and passing a list of instance extensions and layers. This also includes creating a Debug Messenger which can pass down messages from validation layers when they are enabled.
+This example covers creating an entry to the Vulkan library and initializing an Vulkan instance with a set of extensions and layers. This also includes the functionality of enabling/disabling validation layers with the help of a Debug Messenger.
 
 This example uses ash version `0.38`.
 
 You can run this example with:
 
-`RUST_LOG=debug cargo run`
+`cargo run`
 
-## Beforehand
+## Helpful resources
 
-If you are new to Vulkan, read the initial part of the [Vulkan Guide](https://docs.vulkan.org/guide/latest/what_is_vulkan.html) and everything in the [Vulkan Tutorial](https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/00_Setup/01_Instance.html) up until the instance chapter. If you don't mind reading the specification, then also read [Fundamentals](https://docs.vulkan.org/spec/latest/chapters/fundamentals.html) and the [Initialization](https://docs.vulkan.org/spec/latest/chapters/initialization.html) chapter.
+If you are new to Vulkan, consider reading the initial part of the [Vulkan Guide](https://docs.vulkan.org/guide/latest/what_is_vulkan.html) and the [Vulkan Tutorial](https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/00_Setup/01_Instance.html) up until the instance chapter. If you don't mind reading the specification, then also read [Fundamentals](https://docs.vulkan.org/spec/latest/chapters/fundamentals.html), [Initialization](https://docs.vulkan.org/spec/latest/chapters/initialization.html) and possibly also [Debugging](https://docs.vulkan.org/spec/latest/chapters/debugging.html#debugging-debug-messengers).
 
-## Covered contents in a nutshell
+### Ash Entry
 
-### API Versions
+Ash contains an [Entry struct](https://docs.rs/ash/latest/ash/struct.Entry.html) that aids in linking / loading the main Vulkan library and serves as the starting point for initializing all other Vulkan objects. Linking is infallible but makes it so that the resulting binary cannot start in environments that do not support Vulkan.
 
-Vulkan major versions may introduce new functionality that may not be backwards compatible or supported in some environments. An implementation (most commonly known as the graphics driver) may only support Vulkan up to a specific version. Creating an instance requires passing a specific version that your application wants to target and it has to be equal or lower to what is supported by the implementation.
+### API Versions, extensions and layers
 
-For example, imagine your application wants to use functionality from the 1.2 version. In order to do that, you have to:
+Most of Vulkan's functionality is included in the Core 1.0 version. This functionality can extended with the use of newer API versions and extensions, however it is not guaranteed that these will always be supported by the machine's driver or the Vulkan device (like the GPU). Some extensions are also sometimes "promoted" into newer API versions, so targeting that version will include that extension by default.
 
- - Query the version supported by the implementation, and check if it is higher or equal to 1.2.
- - Create an instance and pass the desired target version.
- - Query the version supported by one's physical device (for example one specific GPU), and check if it is also higher or equal to 1.2. Some users may have multiple devices with different versions and in some cases they may still be lower than what is supported by the implementation because the device just doesn't have the necessary capabilities.
+While reading the reference for some Vulkan command, make sure it is provided by the API version your application targets or, if the command was introduced by some extension, that extension is actually enabled.
 
-Application may fallback to using older functionality if the newer one is not supported.
+Vulkan is a layered API, with the core functionality being at the lowest layer. Additional layers can for example intercept core function calls and add their own functionality (like profiling, debugging, tracing or validation), which makes them somewhat more powerful than extensions. These layers must be installed separately (although some also come with the Vulkan SDK) and must also be explicitly enabled.
+
+Vulkan by default comes with almost no validation, and so validation layers should always be enabled during development to make sure the application performs valid usage with no undefined behavior or other errors, although this is not infallible. The main validation layer is `VK_LAYER_KHRONOS_validation`, which is also used in this example.
+
+LunarG has tool called the [Vulkan Configurator](https://vulkan.lunarg.com/doc/view/1.4.350.0/windows/vkconfig.html) (vkconfig) which helps configure and enable layers using different presets, instead of having to do it programmatically.
 
 ### Instance creation
 
-An instance stores Vulkan application state and is used in most API calls that are not related to any specific device. 
+An instance stores Vulkan application state and is used in most API calls that are not related to any specific device.
 
 Creating an instance takes the following parameters:
 
- - An API version: The desired target version that is supported by the implementation, as was explained in the previous subchapter. 
- - A `vk::ApplicationInfo`: Some implementations may use this information to label your application as belonging to a specific class.
- - A list of global extensions: Some functionality can only be called if an particular extension is enabled (which can only be done if the execution environment supports it). The list of extensions passed in instance creation are global, meaning they enable functionality that is not specific to any device.
- - A list of layers: These are external libraries that can be inserted in between the Vulkan loader. They usually don't directly affect the core functionality, and instead add separated logging, tracing and validation that can be easily toggled (for example to only be present in debug builds). Some layers also allow the application to be able to use some extensions that are not natively supported, but in turn are simulated by the layer.
+- An API version: The desired target API version. Subsequent Vulkan commands may only be used if they are supported by this version.
+- A `vk::ApplicationInfo`: This contains the desired target API version, as well as some other not that important information about the application like name and engine version. Vulkan commands may only be used if they are supported by the provided API version version.
+- A list of instance extensions: These extensions are related to the instance, meaning they mostly depend on the implementation of the Vulkan driver and not the actual Vulkan devices like installed graphics cards. These extensions must actually be supported by the execution system to be able to be enabled.
+- A list of layers: Layers can be enabled as long as they are installed. These are usually only enabled during debug builds, and we provide an example by only enabling the main validation layer when the `vl` cargo feature is enabled.
 
 ### Enabling validation layers
 
-Vulkan by design doesn't check for undefined behavior like missuses of the API or out of bounds memory accesses, or other performance and memory issues. In order to mitigate that, validation layers can be enabled in some builds to detect and communicate those issues to you. These layers are not part of the Vulkan API and may have to be installed separately, but in turn allows you to download and enable any more specific validation layers in a more customizable way.
+As said before, Vulkan by design doesn't check for undefined behavior like missuses of the API or out of bounds memory accesses, or other performance and memory issues. In order to mitigate that, validation layers can be enabled in some builds to detect and log errors and other smaller issues. These layers are not part of the Vulkan API and may have to be installed separately, but in return allows you to customize when and what validation is enabled.
 
-Validation can be performance heavy, so generally only a subset of its functionality is enabled at a time. For example, some synchronization bugs can only occur in environments that are as fast as release builds because of timing issues, where in that case only the part of validation that is required to catch those specific bugs can be enabled. In release builds the validation layers can be completely disabled. 
+Validation can be performance heavy, so generally only a subset of its functionality is enabled at a time. For example, some synchronization bugs can only occur in environments that are as fast as release builds because of timing issues, where in that case only the part of validation that is required to catch those specific bugs will be enabled. In release builds the validation layers can be completely disabled.
 
 The `VK_LAYER_KHRONOS_validation` layer is Vulkan's main validation layer and it can validate input and detect malpractices and other missuses of the API. It also contains some features related to debugging shader code and detecting synchronization issues. See https://docs.vulkan.org/guide/latest/development_tools.html#_vulkan_layers for more information and other info about other related validation layers.
 
-This application configures some of `VK_LAYER_KHRONOS_validation` features programmatically, by passing an `vk::ValidationFeaturesEXT` struct during instance creation. However, it is easier to configure it using using the [Vulkan Configurator](https://vulkan.lunarg.com/doc/view/1.3.275.0/windows/vkconfig.html) (see [https://vulkan.lunarg.com/doc/view/1.3.275.0/windows/layer_configuration.html](https://vulkan.lunarg.com/doc/view/1.3.275.0/windows/layer_configuration.html)), where you can override the normal behavior by toggling checkboxes in a GUI instead.
-
-This example uses a `vk::DebugUtilsMessengerEXT` object that can receive and parse messages from validation. It takes a callback function which in this example formats the messages and logs them using Rust's `log` crate. In order for messages to be received during instance creation, this object's creation info is also passed in the instance creation info `p_next` chain.
+The actual layer does not actually print the errors to stdout, so we enable a [special extension](https://docs.vulkan.org/samples/latest/samples/extensions/debug_utils/README.html) that enables the use of a `vk::DebugUtilsMessengerEXT` object. This object enables us to receive, parse and forward messages from validation to this example's logging library. In order for messages to also be received during instance creation, this object's creation info is also passed to the instance creation info in the `p_next` chain.
 
 ## Some code explanations
 
@@ -187,6 +187,3 @@ This example implements the following cargo features:
 For example:
 
 `cargo run --release --no-default-features --features link`
-
-For more information about linking and loading check
-[https://docs.rs/ash/latest/ash/struct.Entry.html](https://docs.rs/ash/latest/ash/struct.Entry.html).
