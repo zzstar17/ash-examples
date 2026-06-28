@@ -2,7 +2,7 @@
 
 This example draws Ferris the crab bouncing around the screen.
 
-In relation to previous examples it introduces rendering to window surfaces with a swapchain as well as loading images to be used as combined samplers (equivalent to textures). 
+It introduces rendering to window surfaces with a swapchain together with loading images to be used as combined samplers (equivalent to textures). 
 
 You can run this example with:
 
@@ -37,31 +37,40 @@ You can use any windowing library other than Winit as long as you can retrieve t
 Winit uses a concept of a event loop:
 
 ```rust
- event_loop
-  .run(move |event, target| match event {
-    Event::AboutToWait => {
-      // the application has finished processing all other events
-    }
-    Event::WindowEvent { event, .. } => match event {
+fn main() {
+  let event_loop = EventLoop::new().unwrap();
+  let mut app = App::default();
+  event_loop.run_app(&mut app);
+}
+
+struct App {
+  window: Option<Window>,
+}
+
+
+impl ApplicationHandler for App {
+  fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+    self.window = Some(event_loop.create_window(Window::default_attributes()).unwrap());
+  }
+
+  fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+    match event {
       WindowEvent::CloseRequested => {
-        // the user tried closing the window
-      }
+        event_loop.exit();
+      },
       WindowEvent::RedrawRequested => {
-        // the OS or some other source requested the window to be redrawn
+        // perform vulkan draw calls here
+        self.window.as_ref().unwrap().request_redraw();
       }
-      WindowEvent::Resized(new_size) => {
-        // the window has been resized
-      }
-      _ => {}
-    },
-    _ => (),
-  })
-  .expect("Failed to run event loop")
+      _ => (),
+    }
+  }
+}
 ```
 
-The loop receives different events that can be processed and calls rendering continuously or only when specified.
+The loop receives different events that can be processed and calls for redrawing continuously or only when specified. These events can then be handled by implementing the respective functions inside the application struct.
 
-WindowEvent::RedrawRequested is useful for applications that render irregularly or to only some parts of the screen (for example GUI applications). For other software that renders continuously it is better to do all rendering in Event::AboutToWait and synchronize internally (the case for this example). This is facilitated by `event_loop.set_control_flow(ControlFlow::Poll)`, which makes sure the AboutToWait is received continuously. 
+Take a look at the [Winit documentation](https://docs.rs/winit/latest/winit/) for a list of possible events.
 
 ## Initialization
 
@@ -71,7 +80,7 @@ The `ash_window` create makes it easy to create an `vk::Surface` once the window
 
 When selecting the physical device, the device is checked for any formats or queues that can used in presentation to that specific surface, and most presentation operations are handled independently from others like graphics.
 
-The swapchain is the main object that hold the images to be queued and presented in order. Using it requires enabling the `VK_KHR_swapchain` device extension. Once it is created, its holds some internally created images (can also be added externally) that can be acquired, rendered to and presented to appear on screen. Once the image is acquired it works as just any other image, so all the operations in between are no different than in offline rendering used for example in rendering the [triangle image](https://github.com/ZakStar17/ash-by-example/tree/main/triangle_image). The only thing needed is for the final layout of the image to be `PRESENT_SRC_KHR` to be usable in presentation.
+The swapchain is the main object that hold the images to be queued and presented in order. Using it requires enabling the `VK_KHR_swapchain` device extension. Once it is created, its holds some internally created images (can also be added externally) that can be acquired, rendered to and presented to appear on screen. Once the image is acquired it works as just any other image, so all the operations in between are no different than in offline rendering used for example in rendering the [triangle image](https://github.com/zzstar17/ash-by-example/tree/main/triangle_image). The only thing needed is for the final layout of the image to be `PRESENT_SRC_KHR` to be usable in presentation.
 
 The swapchain has the concept of [present modes](https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html), that can, for example, make the GPU wait for vertical synchronization or present the image immediately. Even so, rendering and presenting don't have an intrinsic order and can happen at the same time, so synchronization objects (like semaphores) need to be used to not allow any data races.
 
