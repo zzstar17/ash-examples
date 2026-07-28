@@ -286,6 +286,7 @@ impl Renderer {
     let (changes, destroyed_old) = self.swapchains.recreate(
       &self.init.physical_device,
       &self.init.device,
+      self.init.queues.graphics.handle,
       cur_total_frame,
       &self.init.surface,
       self.init.window.inner_size(),

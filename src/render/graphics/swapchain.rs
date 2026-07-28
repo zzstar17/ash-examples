@@ -213,6 +213,7 @@ impl Swapchains {
     &mut self,
     physical_device: &PhysicalDevice,
     device: &Device,
+    presentation_queue: vk::Queue,
     cur_total_frame: usize,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
@@ -235,9 +236,9 @@ impl Swapchains {
         }
       } else {
         unsafe {
-          device
-            .device_wait_idle()
-            .expect("Failed to wait for device idle during swapchain destruction");
+          device.queue_wait_idle(presentation_queue).expect(
+            "Failed to wait for presentation queue to become idle during swapchain destruction",
+          );
         }
       }
       unsafe {

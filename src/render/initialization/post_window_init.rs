@@ -50,29 +50,36 @@ impl PostWindowInit {
     #[cfg(not(feature = "vl"))]
     let (entry, instance) = pre_window.deconstruct();
 
-    let destroy_instance = || unsafe {
-      #[cfg(feature = "vl")]
-      destroy!(&debug_utils);
-      destroy!(&instance);
-    };
-
     let surface = Surface::new(
       &entry,
       &instance,
       event_loop.display_handle()?,
       window.window_handle()?,
     )
-    .on_err(|_| destroy_instance())?;
+    .on_err(|_| unsafe {
+      #[cfg(feature = "vl")]
+      destroy!(&debug_utils);
+      destroy!(&instance);
+    })?;
+
+    let destroy_previous = || unsafe {
+      destroy!(&surface);
+
+      #[cfg(feature = "vl")]
+      destroy!(&debug_utils);
+      destroy!(&instance);
+    };
 
     // can return an error and can also return no devices
     let physical_device_creation = match unsafe {
       PhysicalDevice::select(&instance, &surface, initialization::select_physical_device)
     }
-    .on_err(|_| destroy_instance())?
-    {
+    .on_err(|_| {
+      destroy_previous();
+    })? {
       Some(tu) => tu,
       None => {
-        destroy_instance();
+        destroy_previous();
         return Err(InitializationError::NoCompatibleDevices);
       }
     };
@@ -100,7 +107,14 @@ impl PostWindowInit {
         ..Default::default()
       },
     )
-    .on_err(|_| destroy_instance())?;
+    .on_err(|_| destroy_previous())?;
+
+    if queues.compute.handle == queues.graphics.handle {
+      // todo: accessing graphics and compute queues at the same time
+      log::error!("Device contains only one queue, for which case is currently unimplemented");
+      destroy_previous();
+      return Err(InitializationError::NoCompatibleDevices);
+    }
 
     let physical_device = physical_device_creation.physical_device;
 
