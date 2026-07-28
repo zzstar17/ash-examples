@@ -68,6 +68,7 @@ const RENDER_UNTIL_FRAME: usize = usize::MAX;
 // const RENDER_UNTIL_FRAME: usize = 120;
 
 const DEBUG_PRINT_FRAME_INFO: bool = false;
+const LOG_SWAPCHAIN_WARNINGS: bool = false;
 
 // This application doesn't use dynamic pipeline size, so resizing is expensive
 // If a small resize happens (for example while resizing with the mouse) this usually means that

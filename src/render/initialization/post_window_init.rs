@@ -87,7 +87,8 @@ impl PostWindowInit {
       DeviceExtensions {
         memory_priority: true,
         pageable_device_local_memory: true,
-        swapchain_maintenance1: true,
+        // reseting and waiting for fences is at least here more expensive than just waiting for queue idle
+        swapchain_maintenance1: false,
         ..Default::default()
       },
       DeviceFeatures {
@@ -95,7 +96,7 @@ impl PostWindowInit {
         ..Default::default()
       },
       DeviceFeatures {
-        swapchain_maintenance1: true,
+        swapchain_maintenance1: false,
         ..Default::default()
       },
     )

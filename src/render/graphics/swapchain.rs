@@ -20,7 +20,7 @@ use crate::{
     errors::error_chain_fmt,
     SWAPCHAIN_PREFERRED_IMAGE_FORMAT,
   },
-  PREFERRED_PRESENTATION_METHOD,
+  LOG_SWAPCHAIN_WARNINGS, PREFERRED_PRESENTATION_METHOD,
 };
 
 // VK_ERROR_NATIVE_WINDOW_IN_USE_KHR shouldn't happen unless some other program somehow hijacks
@@ -171,6 +171,9 @@ impl Swapchains {
     ))
   }
 
+  /// Destroy old swapchain if no images are in use
+  /// Returns a boolean indicated if the operation was succesful
+  /// Only works with the swapchain_maintenance1 extension
   pub fn attempt_destroy_old(
     &mut self,
     device: &Device,
@@ -299,6 +302,21 @@ impl Swapchains {
     if let Some(fences) = &self.current.image_finished_presenting_fence {
       let fence = [fences[image_index as usize]];
       unsafe {
+        if LOG_SWAPCHAIN_WARNINGS {
+          if let Err(vkerr) = device.wait_for_fences(&fence, true, 0) {
+            if vkerr == vk::Result::TIMEOUT {
+              log::warn!(
+                "Swapchain image's {} fence is not ready during queue present",
+                image_index
+              );
+              device.wait_for_fences(&fence, true, u64::MAX)?;
+            } else {
+              return Err(AcquireNextImageError::from(vkerr));
+            }
+          }
+        } else {
+          device.wait_for_fences(&fence, true, u64::MAX)?;
+        }
         device.reset_fences(&fence)?;
       }
       fence_present_info.swapchain_count = 1;
@@ -320,6 +338,7 @@ impl Swapchains {
     self.current.extent
   }
 
+  #[allow(dead_code)]
   pub fn get_image_views(&self) -> &[vk::ImageView] {
     &self.current.image_views
   }

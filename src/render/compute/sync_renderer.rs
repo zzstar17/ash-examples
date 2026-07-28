@@ -1,4 +1,4 @@
-use std::{ptr, sync::mpsc, time::Duration};
+use std::{ops::BitOr, ptr, sync::mpsc, time::Duration};
 
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
@@ -263,7 +263,7 @@ impl ComputeSyncRenderer {
 
     let particle_copy_wait = [vk::SemaphoreSubmitInfo {
       semaphore: self.transfer_finished,
-      stage_mask: vk::PipelineStageFlags2::TRANSFER,
+      stage_mask: vk::PipelineStageFlags2::TRANSFER.bitor(vk::PipelineStageFlags2::COMPUTE_SHADER),
       ..Default::default()
     }];
     let empty: [vk::SemaphoreSubmitInfo<'_>; 0] = [];

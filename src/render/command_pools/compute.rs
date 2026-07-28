@@ -121,7 +121,8 @@ impl ComputeCommandBufferPool {
         src_access_mask: vk::AccessFlags2::SHADER_WRITE,
         dst_access_mask: vk::AccessFlags2::SHADER_READ.bitor(vk::AccessFlags2::TRANSFER_READ),
         src_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
-        dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER.bitor(vk::PipelineStageFlags2::TRANSFER),
+        dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
+          .bitor(vk::PipelineStageFlags2::TRANSFER),
         buffer: data.particles_compute[read_i],
         offset: 0,
         size: cur_buffer_size,
