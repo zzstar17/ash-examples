@@ -7,13 +7,14 @@ use ash::vk;
 use render::{FrameRenderError, InitializationError, PreWindowInit, PreWindowInitError};
 use std::{
   ffi::CStr,
+  sync::{Arc, RwLock},
   time::{Duration, Instant},
 };
 use winit::{
   application::ApplicationHandler,
-  dpi::PhysicalSize,
+  dpi::{PhysicalPosition, PhysicalSize},
   error::EventLoopError,
-  event::WindowEvent,
+  event::{DeviceEvent, MouseButton, WindowEvent},
   event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
 };
@@ -91,6 +92,69 @@ enum RenderStatus {
   Started(StartedStatus),
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, Default)]
+struct RenderAreaDimensions {
+  pub render_size: [u32; 2],
+  pub apparent_size: [u32; 2],
+  pub apparent_ratio: f64,
+  pub render_area_window_offset: [u32; 2],
+  pub window_size: [u32; 2],
+}
+
+impl RenderAreaDimensions {
+  pub fn new(window_dimensions: PhysicalSize<u32>) -> Self {
+    let window_size = [window_dimensions.width, window_dimensions.height];
+    let apparent_ratio = Self::calculate_render_ratio(
+      RESOLUTION[0] as f64,
+      RESOLUTION[1] as f64,
+      window_size[0] as f64,
+      window_size[1] as f64,
+    );
+    let apparent_size = [
+      (RESOLUTION[0] as f64 * apparent_ratio) as u32,
+      (RESOLUTION[1] as f64 * apparent_ratio) as u32,
+    ];
+    let render_area_window_offset = [
+      (window_size[0] - apparent_size[0]) / 2,
+      (window_size[1] - apparent_size[1]) / 2,
+    ];
+
+    RenderAreaDimensions {
+      render_size: RESOLUTION,
+      apparent_size,
+      apparent_ratio,
+      render_area_window_offset,
+      window_size,
+    }
+  }
+
+  pub fn into_apparent_coordinates(&self, window_coordinates: PhysicalPosition<f64>) -> [f64; 2] {
+    let offsetted_x = window_coordinates.x - self.render_area_window_offset[0] as f64;
+    let offsetted_y = window_coordinates.y - self.render_area_window_offset[1] as f64;
+    let apparent_x = offsetted_x / self.apparent_ratio;
+    let apparent_y = offsetted_y / self.apparent_ratio;
+    [apparent_x, apparent_y]
+  }
+
+  fn calculate_render_ratio(
+    render_width: f64,
+    render_height: f64,
+    window_width: f64,
+    window_height: f64,
+  ) -> f64 {
+    let width_diff = window_width - render_width;
+    let height_diff = window_height - render_height;
+    if width_diff > height_diff {
+      // clamped to height
+      window_height / render_height
+    } else {
+      // clamped to width
+      window_width / render_width
+    }
+  }
+}
+
 struct StartedStatus {
   pub threads_manager: ThreadsManager,
   pub paused: bool,
@@ -99,9 +163,21 @@ struct StartedStatus {
   pub waiting_for_window_events: bool,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct WindowToComputeInfo {
+  pub initialized: bool,
+  pub mouse_position: PhysicalPosition<f64>,
+  pub render_dimensions: RenderAreaDimensions,
+}
+
 struct App {
   status: RenderStatus,
   window_resize_handler: WindowResizeHandler,
+  // sent to compute thread
+  compute_info: Arc<RwLock<WindowToComputeInfo>>,
+  // same as compute_info
+  mouse_position: PhysicalPosition<f64>,
+  mouse_in_window: bool,
   last_update: Instant,
   time_since_last_fps_print: Duration,
   last_frames_durations: LastFramesDurations<KEEP_FRAME_DURATION_COUNT_FPS>,
@@ -157,10 +233,22 @@ impl RenderStatus {
     Ok(RenderStatus::Initialized(render))
   }
 
-  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<Self, InitializationError> {
+  pub fn start(
+    self,
+    event_loop: &ActiveEventLoop,
+    compute_info: &Arc<RwLock<WindowToComputeInfo>>,
+  ) -> Result<Self, InitializationError> {
     match self {
       RenderStatus::Initialized(init) => {
-        let threads_manager = ThreadsManager::start(init, event_loop)?;
+        let threads_manager = ThreadsManager::start(init, event_loop, compute_info.clone())?;
+
+        let window_dimensions = threads_manager.window().inner_size();
+        {
+          let mut write = compute_info.write().unwrap();
+          write.initialized = true;
+          write.render_dimensions = RenderAreaDimensions::new(window_dimensions);
+        }
+
         Ok(Self::Started(StartedStatus {
           threads_manager,
           paused: START_PAUSED,
@@ -203,6 +291,8 @@ impl App {
 
     let frame_i: usize = 0;
 
+    let compute_info = Arc::new(RwLock::new(WindowToComputeInfo::default()));
+
     Self {
       status,
       window_resize_handler,
@@ -210,6 +300,9 @@ impl App {
       time_since_last_fps_print,
       frame_i,
       last_frames_durations,
+      compute_info,
+      mouse_position: PhysicalPosition::default(),
+      mouse_in_window: false,
     }
   }
 }
@@ -218,17 +311,47 @@ impl ApplicationHandler for App {
   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
     if !self.status.started() {
       log::debug!("Starting application");
-      take_mut::take(&mut self.status, |status| match status.start(event_loop) {
-        Ok(v) => v,
-        Err(err) => {
-          log::error!("Failed to start rendering\n{}", err);
-          std::process::exit(1);
+      take_mut::take(&mut self.status, |status| {
+        match status.start(event_loop, &mut self.compute_info) {
+          Ok(v) => v,
+          Err(err) => {
+            log::error!("Failed to start rendering\n{}", err);
+            std::process::exit(1);
+          }
         }
       });
     } else {
       let status = self.status.unwrap_started();
       log::debug!("Application resumed");
       status.set_suspended(event_loop, false);
+    }
+  }
+
+  fn device_event(
+    &mut self,
+    event_loop: &ActiveEventLoop,
+    _device_id: winit::event::DeviceId,
+    event: winit::event::DeviceEvent,
+  ) {
+    match event {
+      DeviceEvent::MouseMotion { delta } => {
+        // try to keep track of the mouse outside the window
+        if !self.mouse_in_window {
+          let mut write = match self.compute_info.write() {
+            Err(err) => {
+              log::error!("Window device event: Window input is poisoned {:?}", err);
+              event_loop.exit();
+              return;
+            }
+            Ok(v) => v,
+          };
+          write.mouse_position.x += delta.0;
+          write.mouse_position.y += delta.1;
+          self.mouse_position.x += delta.0;
+          self.mouse_position.y += delta.1;
+        }
+      }
+      _ => {}
     }
   }
 
@@ -310,6 +433,10 @@ impl ApplicationHandler for App {
           let size_delta = width_delta.max(height_delta);
 
           if size_delta > FORCE_WINDOW_RESIZE_SIZE_THRESHOLD {
+            {
+              let mut write = self.compute_info.write().unwrap();
+              write.render_dimensions = RenderAreaDimensions::new(new_size);
+            }
             status.threads_manager.window_resized();
 
             if self.window_resize_handler.active {
@@ -328,9 +455,37 @@ impl ApplicationHandler for App {
             self.window_resize_handler.last_activation_size = new_size;
           }
         } else {
+          {
+            let mut write = self.compute_info.write().unwrap();
+            write.render_dimensions = RenderAreaDimensions::new(new_size);
+          }
           status.threads_manager.window_resized();
         }
         status.threads_manager.window().request_redraw();
+      }
+      WindowEvent::CursorMoved { position, .. } => {
+        let mut write = self.compute_info.write().unwrap();
+        write.mouse_position = position;
+        self.mouse_position = position;
+      }
+      WindowEvent::CursorEntered { .. } => {
+        self.mouse_in_window = true;
+      }
+      WindowEvent::CursorLeft { .. } => {
+        self.mouse_in_window = false;
+      }
+      WindowEvent::MouseInput { state, button, .. } => {
+        if let MouseButton::Left = button {
+          if let Err(err) = self
+            .status
+            .unwrap_started()
+            .threads_manager
+            .mouse_click(state, self.mouse_position)
+          {
+            log::error!("Window event: Failed to forward event to compute {:?}", err);
+            event_loop.exit();
+          }
+        }
       }
       WindowEvent::KeyboardInput { event, .. } => {
         let pressed = event.state.is_pressed();

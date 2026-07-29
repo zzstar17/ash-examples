@@ -1,10 +1,18 @@
-use std::{sync::mpsc, thread};
+use std::{
+  sync::{mpsc, Arc, RwLock},
+  thread,
+};
 
-use winit::{event_loop::ActiveEventLoop, window::Window};
+use winit::{
+  dpi::PhysicalPosition, event::ElementState, event_loop::ActiveEventLoop, window::Window,
+};
 
-use crate::render::{
-  compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
-  graphics, FrameRenderError, InitializationError, PostWindowInit,
+use crate::{
+  render::{
+    compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
+    graphics, FrameRenderError, InitializationError, PostWindowInit,
+  },
+  WindowToComputeInfo,
 };
 
 pub struct ComputeThreadData {
@@ -36,6 +44,7 @@ impl ThreadsManager {
   pub fn start(
     pre_window: super::PreWindowInit,
     event_loop: &ActiveEventLoop,
+    window_info: Arc<RwLock<WindowToComputeInfo>>,
   ) -> Result<Self, InitializationError> {
     let post_window_init = PostWindowInit::initialize(pre_window, event_loop)?;
 
@@ -44,6 +53,7 @@ impl ThreadsManager {
       post_window_init.physical_device.clone(),
       post_window_init.queues.clone(),
       post_window_init.debug_utils_marker.clone(),
+      window_info,
     )?;
 
     let compute_thread_data = ComputeThreadData {
@@ -96,6 +106,19 @@ impl ThreadsManager {
       .render_next_frame(cur_total_frame, compute_message_rcv)?;
 
     Ok(())
+  }
+
+  pub fn mouse_click(
+    &self,
+    pressed: ElementState,
+    position: PhysicalPosition<f64>,
+  ) -> Result<(), mpsc::SendError<GraphicsToComputeEvent>> {
+    self
+      .compute_thread_data
+      .as_ref()
+      .unwrap()
+      .event_sender
+      .send(GraphicsToComputeEvent::MouseClick((pressed, position)))
   }
 
   pub fn window(&self) -> &Window {

@@ -8,9 +8,13 @@ use ash::vk;
 pub use gpu_data::ComputeGPUData;
 pub use particle_buffers::ParticleBuffers;
 use vkobjects::errors::OutOfMemoryError;
+use winit::{dpi::PhysicalPosition, event::ElementState};
 
 use std::{
-  sync::mpsc::{self},
+  sync::{
+    mpsc::{self},
+    Arc, RwLock,
+  },
   thread,
   time::{Duration, Instant},
 };
@@ -21,11 +25,12 @@ use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use crate::{
   last_frames_durations::LastFramesDurations,
   render::{compute::sync_renderer::ComputeFrameRenderError, InitializationError},
-  KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
+  WindowToComputeInfo, KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
 
 pub enum GraphicsToComputeEvent {
   Terminate,
+  MouseClick((ElementState, PhysicalPosition<f64>)),
 }
 
 pub enum ComputeToGraphicsEvent {
@@ -58,6 +63,7 @@ pub fn start_compute(
   physical_device: PhysicalDevice,
   queues: SingleQueues,
   #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
+  window_info: Arc<RwLock<WindowToComputeInfo>>,
 ) -> Result<ComputeThread, OutOfMemoryError> {
   let (data_sender, data_receiver) = mpsc::sync_channel(1);
   // events from compute queue
@@ -110,14 +116,6 @@ pub fn start_compute(
     let min_time_between_frames = Duration::from_secs_f64(1.0 / MAX_UPS);
 
     'compute_loop: loop {
-      for event in graphics_event_receiver.try_iter() {
-        match event {
-          GraphicsToComputeEvent::Terminate => {
-            break 'compute_loop;
-          }
-        }
-      }
-
       let mut now = Instant::now();
       let mut time_passed = now - last_update;
       if time_passed < min_time_between_frames {
@@ -137,7 +135,36 @@ pub fn start_compute(
         println!("UPS: {:.4} {:.4} {:.4}", min, max, average);
       }
 
-      if let Err(err) = sync_renderer.next_compute_frame(time_passed) {
+      let window_info = {
+        let read = match window_info.read() {
+          Err(err) => {
+            log::error!("Compute: window info is poisoned, terminating. {:?}", err);
+            break 'compute_loop;
+          }
+          Ok(v) => v,
+        };
+        *read
+      };
+
+      for event in graphics_event_receiver.try_iter() {
+        match event {
+          GraphicsToComputeEvent::Terminate => {
+            break 'compute_loop;
+          }
+          GraphicsToComputeEvent::MouseClick((state, position)) => {
+            println!(
+              "mouse click! {:?}, {:?}",
+              state,
+              window_info
+                .render_dimensions
+                .into_apparent_coordinates(position)
+            );
+            sync_renderer.mouse_click(state, position, &window_info);
+          }
+        }
+      }
+
+      if let Err(err) = sync_renderer.next_compute_frame(time_passed, &window_info) {
         match err {
           ComputeFrameRenderError::SenderDisconnected => {
             log::error!("Main thread disconnected");

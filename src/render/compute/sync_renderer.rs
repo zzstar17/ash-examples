@@ -5,7 +5,10 @@ use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use vkobjects::{
   errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed, ManuallyDestroyed,
 };
-use winit::dpi::PhysicalSize;
+use winit::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  event::ElementState,
+};
 
 use crate::{
   render::{
@@ -16,7 +19,7 @@ use crate::{
     create_objs::{create_fence, create_semaphore},
     InitializationError, COMPUTE_FRAMES_IN_FLIGHT, RENDER_EXTENT,
   },
-  RESOLUTION,
+  WindowToComputeInfo, RESOLUTION,
 };
 
 use super::ferris::Ferris;
@@ -157,11 +160,16 @@ impl ComputeSyncRenderer {
   pub fn next_compute_frame(
     &mut self,
     time_since_last_update: Duration,
+    window_info: &WindowToComputeInfo,
   ) -> Result<(), ComputeFrameRenderError> {
     let cur_read_i = self.last_write_i;
     let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
     self.last_write_i = cur_write_i;
 
+    if let Some(mouse_pos) = self.ferris.drag_mouse_pos.as_mut() {
+      mouse_pos[0] = window_info.mouse_position.x as f32;
+      mouse_pos[1] = window_info.mouse_position.y as f32;
+    }
     self.ferris.update(
       time_since_last_update,
       PhysicalSize {
@@ -332,6 +340,32 @@ impl ComputeSyncRenderer {
     }
 
     Ok(())
+  }
+
+  pub fn mouse_click(
+    &mut self,
+    state: ElementState,
+    position: PhysicalPosition<f64>,
+    window_info: &WindowToComputeInfo,
+  ) {
+    match state {
+      ElementState::Pressed => {
+        let real_mouse_coors = window_info
+          .render_dimensions
+          .into_apparent_coordinates(position);
+        let real_mouse_coors = [real_mouse_coors[0] as f32, real_mouse_coors[1] as f32];
+
+        let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
+        let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
+        let squares = dist_x * dist_x + dist_y * dist_y;
+        if squares < 120.0 * 120.0 {
+          self.ferris.drag_mouse_pos = Some(real_mouse_coors);
+        }
+      }
+      ElementState::Released => {
+        self.ferris.drag_mouse_pos = None;
+      }
+    }
   }
 }
 
