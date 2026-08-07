@@ -28,6 +28,9 @@ vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocato
 # random utilities
 take_mut = "0.2.2"
 itertools = "0.14.0"
+cgmath = "0.18.0"
+harfrust = "0.12.0"
+ttf-parser = "0.25.1"
 
 
 [features]

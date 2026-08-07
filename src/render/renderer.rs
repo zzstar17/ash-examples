@@ -13,7 +13,7 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  ferris::Ferris, render::gpu_data::GPUDataAllocationError, INITIAL_WINDOW_HEIGHT,
+  ferris::Ferris, render::gpu_data::GPUDataAllocationError, slug, INITIAL_WINDOW_HEIGHT,
   INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -224,6 +224,11 @@ impl Renderer {
     let texture_extent = vk::Extent2D { width, height };
     format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
+
+    // todo
+    let result = slug::prepare_text("a", 11);
+    println!("{:#?}", result);
+    return Err(InitializationError::Unknown);
 
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,

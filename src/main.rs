@@ -1,5 +1,6 @@
 mod ferris;
 mod render;
+mod slug;
 
 use ash::vk;
 use ferris::Ferris;
