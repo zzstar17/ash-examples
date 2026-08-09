@@ -1,6 +1,7 @@
+use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
 use harfrust::{script, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
-use std::{collections::HashMap, fmt::Debug, str::FromStr};
+use std::{collections::HashMap, fmt::Debug, mem::offset_of, str::FromStr};
 use ttf_parser::Face;
 
 // Band count is also hardcoded in the shader
@@ -73,7 +74,7 @@ impl QuadCurve {
 }
 
 #[derive(Clone, Debug)]
-struct SlugGlyph {
+pub struct SlugGlyph {
   pub id: u16,
   pub curves: Vec<QuadCurve>,
   pub vertical_bands_curve_indices: [Vec<usize>; BAND_COUNT],
@@ -174,28 +175,39 @@ fn build_glyph_bands(
   let Rect { min, max } = bounding_box;
   let width = max.x - min.x;
   let height = max.y - min.y;
-  assert!(height > 0.0);
-  assert!(width > 0.0);
 
   let mut hbands: [Vec<usize>; BAND_COUNT] = Default::default();
   let mut vbands: [Vec<usize>; BAND_COUNT] = Default::default();
 
+  println!("minmax {:?} {:?} {} {}", min, max, width, height);
+
   for (c_i, curve) in curves.iter().enumerate() {
     let [cxmin, cymin, cxmax, cymax] = curve.bounding_box();
+
+    println!(
+      "{} {:?} {} {} {} {}",
+      c_i, curve, cxmin, cymin, cxmax, cymax
+    );
 
     // horizontal bands
     {
       let b0 = (((cymin - min.y) / height) * BAND_COUNT as f32) as usize;
       let b1 = (((cymax - min.y) / height) * BAND_COUNT as f32) as usize;
+      println!("horizontal {} {}", b0, b1.min(BAND_COUNT - 1));
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         hbands[b].push(c_i);
       }
     }
 
+    // 0 QuadCurve { p0: Point2 [0.0, -25.0], p1: Point2 [212.2517, 733.0696], p2: Point2 [425.0, 1491.0] } 0 -25 425 1491
+    // horizontal 0 8
+    // vertical 0 5
+
     // vertical bands
     {
       let b0 = ((cxmin - min.x) / width * BAND_COUNT as f32) as usize;
       let b1 = ((cxmax - min.x) / width * BAND_COUNT as f32) as usize;
+      println!("vertical {} {}", b0, b1.min(BAND_COUNT - 1));
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         vbands[b].push(c_i);
       }
@@ -205,7 +217,7 @@ fn build_glyph_bands(
   return (hbands, vbands);
 }
 
-const TEX_WIDTH: usize = 4096;
+pub const TEX_WIDTH: usize = 4096;
 
 #[derive(Clone, Debug)]
 struct PackedGlyphData {
@@ -296,15 +308,33 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
 
     // Sort curves: h-bands by descending max x, v-bands by descending max y
     for curve_indices in g.horizontal_bands_curve_indices.iter_mut() {
-      curve_indices.sort_unstable_by(|&a, &b| {
-        let curve1_max_x = g.curves[a].max_x();
-        let curve2_max_x = g.curves[b].max_x();
-        // reverse ordering
-        curve2_max_x.total_cmp(&curve1_max_x)
+      // curve_indices.sort_unstable_by(|&a, &b| {
+      //   let curve1_max_x = g.curves[a].max_x();
+      //   let curve2_max_x = g.curves[b].max_x();
+      //   // reverse ordering
+      //   curve2_max_x.total_cmp(&curve1_max_x)
+      // });
+
+      println!("{:?}", curve_indices);
+      curve_indices.sort_by(|&a, &b| {
+        let curve1_max_x = g.curves[a as usize].max_x();
+        let curve2_max_x = g.curves[b as usize].max_x();
+        println!("{:?} {:?} {} {}", a, b, curve1_max_x, curve2_max_x);
+        if curve1_max_x == curve2_max_x {
+          ::std::cmp::Ordering::Equal
+        } else if curve1_max_x < curve2_max_x {
+          ::std::cmp::Ordering::Greater
+        } else {
+          ::std::cmp::Ordering::Less
+        }
       });
+      println!("{:?}", curve_indices);
+      for i in curve_indices {
+        println!("max_x {}", g.curves[*i].max_x());
+      }
     }
     for curve_indices in g.vertical_bands_curve_indices.iter_mut() {
-      curve_indices.sort_unstable_by(|&a, &b| {
+      curve_indices.sort_by(|&a, &b| {
         let curve1_max_y = g.curves[a].max_y();
         let curve2_max_y = g.curves[b].max_y();
         // reverse ordering
@@ -407,11 +437,65 @@ pub struct SlugVertex {
   pub color: [f32; 4],
 }
 
+impl SlugVertex {
+  const ATTRIBUTE_SIZE: usize = 5;
+
+  pub const fn get_binding_description(binding: u32) -> vk::VertexInputBindingDescription {
+    vk::VertexInputBindingDescription {
+      binding,
+      stride: size_of::<Self>() as u32,
+      input_rate: vk::VertexInputRate::VERTEX,
+    }
+  }
+
+  pub const fn get_attribute_descriptions(
+    offset: u32,
+    binding: u32,
+  ) -> [vk::VertexInputAttributeDescription; Self::ATTRIBUTE_SIZE] {
+    [
+      vk::VertexInputAttributeDescription {
+        location: offset,
+        binding,
+        format: vk::Format::R32G32B32A32_SFLOAT,
+        offset: offset_of!(Self, obj_space_vertex_coords) as u32,
+      },
+      vk::VertexInputAttributeDescription {
+        location: offset + 1,
+        binding,
+        format: vk::Format::R32G32B32A32_SFLOAT,
+        offset: offset_of!(Self, em_space_sample_coords) as u32,
+      },
+      vk::VertexInputAttributeDescription {
+        location: offset + 2,
+        binding,
+        format: vk::Format::R32G32B32A32_SFLOAT,
+        offset: offset_of!(Self, jac) as u32,
+      },
+      vk::VertexInputAttributeDescription {
+        location: offset + 3,
+        binding,
+        format: vk::Format::R32G32B32A32_SFLOAT,
+        offset: offset_of!(Self, band) as u32,
+      },
+      vk::VertexInputAttributeDescription {
+        location: offset + 4,
+        binding,
+        format: vk::Format::R32G32B32A32_SFLOAT,
+        offset: offset_of!(Self, color) as u32,
+      },
+    ]
+  }
+}
+
 #[derive(Clone, Debug)]
 pub struct PrepareTextResult {
-  glyphs: Vec<SlugGlyph>,
-  vertices: Vec<SlugVertex>,
-  indices: Vec<u32>,
+  pub glyphs: Vec<SlugGlyph>,
+  pub vertices: Vec<SlugVertex>,
+  pub indices: Vec<u32>,
+  pub curve_tex_data: Vec<[f32; 4]>,
+  pub band_tex_data: Vec<u32>,
+  pub curve_tex_height: usize,
+  pub band_tex_height: usize,
 }
 
 pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
@@ -575,5 +659,9 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
     glyphs,
     vertices,
     indices,
+    curve_tex_data: packed.curve_tex_data,
+    band_tex_data: packed.band_tex_data,
+    curve_tex_height: packed.curve_tex_height,
+    band_tex_height: packed.band_tex_height,
   }
 }

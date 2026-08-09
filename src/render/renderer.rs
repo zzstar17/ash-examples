@@ -13,8 +13,10 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  ferris::Ferris, render::gpu_data::GPUDataAllocationError, slug, INITIAL_WINDOW_HEIGHT,
-  INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
+  ferris::Ferris,
+  render::{gpu_data::GPUDataAllocationError, pipelines::TextPipeline},
+  slug::{self},
+  INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
 use super::{
@@ -68,6 +70,7 @@ pub struct Renderer {
 
   pipeline_cache: vk::PipelineCache,
   pipeline: GraphicsPipeline,
+  text_pipeline: TextPipeline,
   pub command_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
 
   data: GPUData,
@@ -124,7 +127,7 @@ impl Renderer {
     // .with_resizable(false)
     let window = event_loop.create_window(window_attributes)?;
 
-    let mut destructor: Destructor<16> = Destructor::new();
+    let mut destructor: Destructor<17> = Destructor::new();
 
     #[cfg(feature = "vl")]
     let (entry, instance, debug_utils) = pre_window.deconstruct();
@@ -226,9 +229,12 @@ impl Renderer {
     log::info!("Creating texture with the format {:?}", texture_format);
 
     // todo
-    let result = slug::prepare_text("a", 11);
-    println!("{:#?}", result);
-    return Err(InitializationError::Unknown);
+    let text = slug::prepare_text("/", 620);
+    println!("{:#?}", text.glyphs);
+    println!("{:?}", text.vertices);
+    println!("{:?}", text.indices);
+    println!("{:?}", text.curve_tex_data);
+    println!("{:?}", text.band_tex_data);
 
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
@@ -237,6 +243,7 @@ impl Renderer {
       texture_format,
       texture_data,
       &queues,
+      &text,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
@@ -277,8 +284,13 @@ impl Renderer {
     }
     destructor.push(&pipeline_cache);
 
-    let descriptor_pool = DescriptorPool::new(&device, gpu_data.texture_view)
-      .on_err(|_| unsafe { destructor.fire(&device) })?;
+    let descriptor_pool = DescriptorPool::new(
+      &device,
+      gpu_data.texture_view,
+      gpu_data.text_curve_texture_view,
+      gpu_data.text_band_texture_view,
+    )
+    .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&descriptor_pool);
 
     log::debug!("Creating pipeline");
@@ -291,6 +303,16 @@ impl Renderer {
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&graphics_pipeline);
+
+    let text_pipeline = TextPipeline::new(
+      &device,
+      pipeline_cache,
+      render_pass,
+      &descriptor_pool,
+      RENDER_EXTENT,
+    )
+    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    destructor.push(&text_pipeline);
 
     let command_pools = fill_destroyable_array_with_expression!(
       &device,
@@ -340,6 +362,7 @@ impl Renderer {
       descriptor_pool,
       render_targets,
       screenshot_buffer,
+      text_pipeline,
     })
   }
 
@@ -359,6 +382,7 @@ impl Renderer {
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
       &self.pipeline,
+      &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
       position,
@@ -555,6 +579,7 @@ impl Drop for Renderer {
 
       self.command_pools.destroy_self(&self.device);
 
+      self.text_pipeline.destroy_self(&self.device);
       self.pipeline.destroy_self(&self.device);
       self.pipeline_cache.destroy_self(&self.device);
       self.descriptor_pool.destroy_self(&self.device);

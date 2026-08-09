@@ -8,7 +8,7 @@ use crate::{
   render::{
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
-    pipelines::GraphicsPipeline,
+    pipelines::{GraphicsPipeline, TextPipeline, TextPushConstants},
     render_object::{RenderPosition, QUAD_INDICES},
     render_targets::RenderTargets,
     RENDER_EXTENT,
@@ -73,6 +73,7 @@ impl GraphicsCommandBufferPool {
     swapchain_extent: vk::Extent2D,
 
     pipeline: &GraphicsPipeline,
+    text_pipeline: &TextPipeline,
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
@@ -89,6 +90,8 @@ impl GraphicsCommandBufferPool {
     let render_height = RENDER_EXTENT.height as i32;
     let swapchain_width = swapchain_extent.width as i32;
     let swapchain_height = swapchain_extent.height as i32;
+
+    let text_pc = TextPushConstants::new(RENDER_EXTENT, [0.0, 0.0]);
 
     // do a copy operation instead of blit if true
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
@@ -134,6 +137,26 @@ impl GraphicsCommandBufferPool {
       device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer], &[0]);
       device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
       device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+
+      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+      device.cmd_bind_descriptor_sets(
+        cb,
+        vk::PipelineBindPoint::GRAPHICS,
+        text_pipeline.layout,
+        0,
+        &[descriptor_pool.text_set],
+        &[],
+      );
+      device.cmd_push_constants(
+        cb,
+        text_pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(&text_pc),
+      );
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.text_vertices], &[0]);
+      device.cmd_bind_index_buffer(cb, data.text_indices, 0, vk::IndexType::UINT32);
+      device.cmd_draw_indexed(cb, data.text_index_count, 1, 0, 0, 0);
 
       device.cmd_end_render_pass(cb);
     }

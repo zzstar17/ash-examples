@@ -7,8 +7,10 @@ use std::{
 use ash::vk;
 
 pub mod shader;
+pub mod text_shader;
 
 pub use shader::Shader;
+pub use text_shader::TextShader;
 use vkobjects::errors::OutOfMemoryError;
 
 #[derive(thiserror::Error, Debug)]
