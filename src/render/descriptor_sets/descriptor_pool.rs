@@ -144,8 +144,8 @@ impl DescriptorPool {
   pub fn new(
     device: &ash::Device,
     texture_view: vk::ImageView,
-    text_curves_view: vk::ImageView,
-    text_bands_view: vk::ImageView,
+    text_curve_view: vk::ImageView,
+    text_band_view: vk::ImageView,
   ) -> Result<Self, OutOfMemoryError> {
     let texture_sampler = create_texture_sampler(device)?;
     let text_curves_sampler = create_sampler_nearest_float(device)?;
@@ -170,8 +170,8 @@ impl DescriptorPool {
     let sets = allocate_sets(device, pool, &[texture_layout, text_layout])?;
     let writes = [
       texture_write_descriptor_set(sets[0], texture_view, 0),
-      texture_write_descriptor_set(sets[1], text_curves_view, 0),
-      texture_write_descriptor_set(sets[1], text_bands_view, 1),
+      texture_write_descriptor_set(sets[1], text_curve_view, 0),
+      texture_write_descriptor_set(sets[1], text_band_view, 1),
     ];
     unsafe {
       let contextualized = [

@@ -1,6 +1,7 @@
 use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
 use harfrust::{script, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
+use itertools::Itertools;
 use std::{collections::HashMap, fmt::Debug, mem::offset_of, str::FromStr};
 use ttf_parser::Face;
 
@@ -65,11 +66,11 @@ impl QuadCurve {
   }
 
   pub fn max_x(&self) -> f32 {
-    f32::max(self.p2.x, f32::max(self.p0.x, self.p1.x))
+    self.p0.x.max(self.p1.x).max(self.p2.x)
   }
 
   pub fn max_y(&self) -> f32 {
-    f32::max(self.p2.y, f32::max(self.p0.y, self.p1.y))
+    self.p0.y.max(self.p1.y).max(self.p2.y)
   }
 }
 
@@ -258,6 +259,7 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
       curve_texel_idx += 2;
     }
   }
+  println!("curve_tex_data: {:?}", &curve_tex_data[0..10]);
 
   // --- Band texture (RGBA32Uint, width 4096) ---
   // Per glyph: [hBand headers...] [vBand headers...] [curve index lists...]
@@ -308,30 +310,12 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
 
     // Sort curves: h-bands by descending max x, v-bands by descending max y
     for curve_indices in g.horizontal_bands_curve_indices.iter_mut() {
-      // curve_indices.sort_unstable_by(|&a, &b| {
-      //   let curve1_max_x = g.curves[a].max_x();
-      //   let curve2_max_x = g.curves[b].max_x();
-      //   // reverse ordering
-      //   curve2_max_x.total_cmp(&curve1_max_x)
-      // });
-
-      println!("{:?}", curve_indices);
       curve_indices.sort_by(|&a, &b| {
-        let curve1_max_x = g.curves[a as usize].max_x();
-        let curve2_max_x = g.curves[b as usize].max_x();
-        println!("{:?} {:?} {} {}", a, b, curve1_max_x, curve2_max_x);
-        if curve1_max_x == curve2_max_x {
-          ::std::cmp::Ordering::Equal
-        } else if curve1_max_x < curve2_max_x {
-          ::std::cmp::Ordering::Greater
-        } else {
-          ::std::cmp::Ordering::Less
-        }
+        let curve1_max_x = g.curves[a].max_x();
+        let curve2_max_x = g.curves[b].max_x();
+        // reverse ordering
+        curve2_max_x.total_cmp(&curve1_max_x)
       });
-      println!("{:?}", curve_indices);
-      for i in curve_indices {
-        println!("max_x {}", g.curves[*i].max_x());
-      }
     }
     for curve_indices in g.vertical_bands_curve_indices.iter_mut() {
       curve_indices.sort_by(|&a, &b| {
@@ -382,6 +366,9 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
     band_texel_idx = glyph_start + curve_list_offset;
   }
 
+  let text = band_tex_data[0..300].iter().join("");
+  println!("band_tex_data {:?}", &text);
+
   PackedGlyphData {
     curve_tex_data,
     band_tex_data,
@@ -402,10 +389,8 @@ pub struct SlugVertexGlyphInBandLocation {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct SlugVertexMaxBandIndices {
-  pub padding0: u8,
-  pub max_band_y: u8,
-  pub padding1: u8,
-  pub max_band_x: u8,
+  pub max_band_y: u16,
+  pub max_band_x: u16,
 }
 
 #[repr(C)]
@@ -514,6 +499,8 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
 
   let glyph_buffer = shaper.shape(buffer, ShapeOptions::new());
   let scale = font_size as f32 / (shaper.units_per_em() as f32);
+  println!("scale: {}", scale);
+  // let scale = 0.30273438;
 
   let face = Face::parse(&font_bytes, 0).unwrap();
   println!("Font face name: {:?}", face.names());
@@ -529,9 +516,13 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
     let mut curve_extractor = SlugCurveExtractor::new(&mut curves);
 
     // extracts curves here
-    let int_bbox = face
-      .outline_glyph(ttf_parser::GlyphId(glyph_id), &mut curve_extractor)
-      .unwrap();
+    let int_bbox = match face.outline_glyph(ttf_parser::GlyphId(glyph_id), &mut curve_extractor) {
+      Some(outline) => outline,
+      None => {
+        continue;
+      }
+    };
+
     let bounding_box = Rect {
       min: Point2 {
         x: int_bbox.x_min as f32,
@@ -576,7 +567,15 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
     .zip(glyph_buffer.glyph_positions().iter())
   {
     let glyph_id = info.glyph_id as u16;
-    let (glyph, glyph_loc_x, glyph_loc_y) = glyph_data_map.get(&glyph_id).unwrap();
+    let (glyph, glyph_loc_x, glyph_loc_y) = match glyph_data_map.get(&glyph_id) {
+      Some(values) => values,
+      None => {
+        // empty glyph -> skip
+        cursor_x += pos.x_advance;
+        cursor_y += pos.y_advance;
+        continue;
+      }
+    };
     let bbox = glyph.bounding_box;
 
     let width = bbox.x_max - bbox.x_min;
@@ -610,10 +609,10 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
     let inv_scale = 1.0 / scale;
 
     let corners = [
-      [x0, y0, -1.0, -1.0, bbox.x_min as f32, bbox.y_min as f32], // bottom-left
-      [x1, y0, 1.0, -1.0, bbox.x_max as f32, bbox.y_min as f32],  // bottom-right
-      [x1, y1, 1.0, 1.0, bbox.x_max as f32, bbox.y_max as f32],   // top-right
-      [x0, y1, -1.0, 1.0, bbox.x_min as f32, bbox.y_max as f32],  // top-left
+      [x0, -y0, -1.0, -1.0, bbox.x_min as f32, bbox.y_min as f32], // bottom-left
+      [x1, -y0, 1.0, -1.0, bbox.x_max as f32, bbox.y_min as f32],  // bottom-right
+      [x1, -y1, 1.0, 1.0, bbox.x_max as f32, bbox.y_max as f32],   // top-right
+      [x0, -y1, -1.0, 1.0, bbox.x_min as f32, bbox.y_max as f32],  // top-left
     ];
     for [px, py, nx, ny, ex, ey] in corners {
       let vertex = SlugVertex {
@@ -628,9 +627,7 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
           x: (*glyph_loc_x).try_into().unwrap(),
         },
         max_band_indices: SlugVertexMaxBandIndices {
-          padding0: 0,
           max_band_y: band_max_y.try_into().unwrap(),
-          padding1: 0,
           max_band_x: band_max_x.try_into().unwrap(),
         },
 

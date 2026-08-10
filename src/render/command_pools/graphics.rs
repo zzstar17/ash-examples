@@ -91,7 +91,7 @@ impl GraphicsCommandBufferPool {
     let swapchain_width = swapchain_extent.width as i32;
     let swapchain_height = swapchain_extent.height as i32;
 
-    let text_pc = TextPushConstants::new(RENDER_EXTENT, [0.0, 0.0]);
+    let text_pc = TextPushConstants::new(RENDER_EXTENT, [0.0, 400.0]);
 
     // do a copy operation instead of blit if true
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
@@ -154,9 +154,9 @@ impl GraphicsCommandBufferPool {
         0,
         utility::any_as_u8_slice(&text_pc),
       );
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.text_vertices], &[0]);
-      device.cmd_bind_index_buffer(cb, data.text_indices, 0, vk::IndexType::UINT32);
-      device.cmd_draw_indexed(cb, data.text_index_count, 1, 0, 0, 0);
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.text.vertices], &[0]);
+      device.cmd_bind_index_buffer(cb, data.text.indices, 0, vk::IndexType::UINT32);
+      device.cmd_draw_indexed(cb, data.text.index_count, 1, 0, 0, 0);
 
       device.cmd_end_render_pass(cb);
     }

@@ -229,12 +229,12 @@ impl Renderer {
     log::info!("Creating texture with the format {:?}", texture_format);
 
     // todo
-    let text = slug::prepare_text("/", 620);
-    println!("{:#?}", text.glyphs);
-    println!("{:?}", text.vertices);
-    println!("{:?}", text.indices);
-    println!("{:?}", text.curve_tex_data);
-    println!("{:?}", text.band_tex_data);
+    let text = slug::prepare_text("abc", 240);
+    println!("text_glyphs\n{:?}", text.glyphs);
+    println!("vertices\n{:?}", text.vertices);
+    println!("indices\n{:?}", text.indices);
+    // println!("{:?}", text.curve_tex_data);
+    // println!("{:?}", text.band_tex_data);
 
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
@@ -287,8 +287,8 @@ impl Renderer {
     let descriptor_pool = DescriptorPool::new(
       &device,
       gpu_data.texture_view,
-      gpu_data.text_curve_texture_view,
-      gpu_data.text_band_texture_view,
+      gpu_data.text_curve_view,
+      gpu_data.text_band_view,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&descriptor_pool);

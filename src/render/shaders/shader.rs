@@ -3,10 +3,14 @@ use std::{ffi::CStr, marker::PhantomData, path::Path, ptr};
 use ash::vk;
 use vkobjects::DeviceManuallyDestroyed;
 
+use crate::ENABLE_USE_DEBUG_SHADERS;
+
 use super::{load_shader, ShaderError};
 
 const VERT_SHADER_PATH: &str = "./shaders/vert.spv";
+const VERT_DEBUG_SHADER_PATH: &str = "./shaders/vert_debug.spv";
 const FRAG_SHADER_PATH: &str = "./shaders/frag.spv";
+const FRAG_DEBUG_SHADER_PATH: &str = "./shaders/frag_debug.spv";
 
 static MAIN_FN_NAME: &CStr = c"main";
 
@@ -17,9 +21,19 @@ pub struct Shader {
 
 impl Shader {
   pub fn load(device: &ash::Device) -> Result<Self, ShaderError> {
+    let vert_path = Path::new(if ENABLE_USE_DEBUG_SHADERS {
+      VERT_DEBUG_SHADER_PATH
+    } else {
+      VERT_SHADER_PATH
+    });
+    let frag_path = Path::new(if ENABLE_USE_DEBUG_SHADERS {
+      FRAG_DEBUG_SHADER_PATH
+    } else {
+      FRAG_SHADER_PATH
+    });
     Ok(Self {
-      vert: load_shader(device, Path::new(VERT_SHADER_PATH))?,
-      frag: load_shader(device, Path::new(FRAG_SHADER_PATH))?,
+      vert: load_shader(device, vert_path)?,
+      frag: load_shader(device, frag_path)?,
     })
   }
 }

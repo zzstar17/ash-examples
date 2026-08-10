@@ -55,10 +55,11 @@ const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);
 
 const START_PAUSED: bool = false; // start application in a paused state
 
-const RENDER_UNTIL_FRAME: usize = usize::MAX;
+const RENDER_UNTIL_FRAME: usize = 1;
 // const RENDER_UNTIL_FRAME: usize = 120;
 
 const DEBUG_PRINT_FRAME_INFO: bool = false;
+const ENABLE_USE_DEBUG_SHADERS: bool = true;
 
 // This application doesn't use dynamic pipeline size, so resizing is expensive
 // If a small resize happens (for example while resizing with the mouse) this usually means that
