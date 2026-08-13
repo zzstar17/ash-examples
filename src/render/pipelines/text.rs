@@ -198,8 +198,8 @@ impl TextPipeline {
     let multisample_state_ci = no_multisample_state();
 
     let attachment_state = vk::PipelineColorBlendAttachmentState {
-      // disable blend
-      blend_enable: vk::FALSE,
+      // blend by opacity
+      blend_enable: vk::TRUE,
       color_write_mask: vk::ColorComponentFlags::RGBA,
 
       // final_color = (src_alpha * src_color) + ((1 - src_alpha) * dst_color)

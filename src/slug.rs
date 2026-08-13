@@ -1,9 +1,17 @@
 use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
-use harfrust::{script, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
+use harfrust::{script, FontRef, GlyphInfo, Language, ShapeOptions, ShaperData, UnicodeBuffer};
 use itertools::Itertools;
-use std::{collections::HashMap, fmt::Debug, mem::offset_of, str::FromStr};
+use std::{
+  collections::HashMap,
+  fmt::Debug,
+  fs::{self, File, OpenOptions},
+  io::{Read, Write},
+  mem::offset_of,
+  str::FromStr,
+};
 use ttf_parser::Face;
+use vkobjects::utility::any_as_u8_slice;
 
 // Band count is also hardcoded in the shader
 const BAND_COUNT: usize = 8;
@@ -180,8 +188,6 @@ fn build_glyph_bands(
   let mut hbands: [Vec<usize>; BAND_COUNT] = Default::default();
   let mut vbands: [Vec<usize>; BAND_COUNT] = Default::default();
 
-  println!("minmax {:?} {:?} {} {}", min, max, width, height);
-
   for (c_i, curve) in curves.iter().enumerate() {
     let [cxmin, cymin, cxmax, cymax] = curve.bounding_box();
 
@@ -194,7 +200,6 @@ fn build_glyph_bands(
     {
       let b0 = (((cymin - min.y) / height) * BAND_COUNT as f32) as usize;
       let b1 = (((cymax - min.y) / height) * BAND_COUNT as f32) as usize;
-      println!("horizontal {} {}", b0, b1.min(BAND_COUNT - 1));
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         hbands[b].push(c_i);
       }
@@ -208,7 +213,6 @@ fn build_glyph_bands(
     {
       let b0 = ((cxmin - min.x) / width * BAND_COUNT as f32) as usize;
       let b1 = ((cxmax - min.x) / width * BAND_COUNT as f32) as usize;
-      println!("vertical {} {}", b0, b1.min(BAND_COUNT - 1));
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         vbands[b].push(c_i);
       }
@@ -259,7 +263,6 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
       curve_texel_idx += 2;
     }
   }
-  println!("curve_tex_data: {:?}", &curve_tex_data[0..10]);
 
   // --- Band texture (RGBA32Uint, width 4096) ---
   // Per glyph: [hBand headers...] [vBand headers...] [curve index lists...]
@@ -380,21 +383,21 @@ fn pack_glyph_data(glyphs: &mut [SlugGlyph]) -> PackedGlyphData {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SlugVertexGlyphInBandLocation {
-  pub y: u16,
   pub x: u16,
+  pub y: u16,
 }
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SlugVertexMaxBandIndices {
-  pub max_band_y: u16,
   pub max_band_x: u16,
+  pub max_band_y: u16,
 }
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct SlugBertexBandInfo {
   pub scale_x: f32,
   pub scale_y: f32,
@@ -403,7 +406,7 @@ pub struct SlugBertexBandInfo {
 }
 
 #[repr(C)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SlugVertex {
   // pos
   pub obj_space_vertex_coords: [f32; 2],
@@ -483,6 +486,134 @@ pub struct PrepareTextResult {
   pub band_tex_height: usize,
 }
 
+#[allow(dead_code)]
+impl PrepareTextResult {
+  pub fn save_to_file(&self) {
+    let vertices_slice = unsafe {
+      let bytes = self.vertices.len() * size_of::<SlugVertex>();
+      std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, bytes)
+    };
+    let indices_slice = unsafe {
+      let bytes = self.indices.len() * size_of::<u32>();
+      std::slice::from_raw_parts(self.indices.as_ptr() as *const u8, bytes)
+    };
+    let curve_tex_slice = unsafe {
+      let bytes = self.curve_tex_data.len() * size_of::<[f32; 4]>();
+      std::slice::from_raw_parts(self.curve_tex_data.as_ptr() as *const u8, bytes)
+    };
+    let band_tex_slice = unsafe {
+      let bytes = self.band_tex_data.len() * size_of::<u32>();
+      std::slice::from_raw_parts(self.band_tex_data.as_ptr() as *const u8, bytes)
+    };
+
+    let mut vertices = File::create("./vertices").unwrap();
+    vertices.write_all(&vertices_slice).unwrap();
+    vertices.flush().unwrap();
+
+    let mut indices = File::create("./indices").unwrap();
+    indices.write_all(&indices_slice).unwrap();
+    indices.flush().unwrap();
+
+    let mut curve_tex = File::create("./curve_tex").unwrap();
+    curve_tex.write_all(&curve_tex_slice).unwrap();
+    curve_tex.flush().unwrap();
+
+    let mut band_tex = File::create("./band_tex").unwrap();
+    band_tex.write_all(&band_tex_slice).unwrap();
+    band_tex.flush().unwrap();
+  }
+
+  pub fn save_to_file_text(&self) {
+    let mut vertices = OpenOptions::new()
+      .append(true)
+      .open("./testing/vertices.txt")
+      .unwrap();
+    vertices
+      .write_fmt(format_args!("{:?}\n", self.vertices))
+      .unwrap();
+    vertices.flush().unwrap();
+
+    let mut indices = OpenOptions::new()
+      .append(true)
+      .open("./testing/indices.txt")
+      .unwrap();
+    indices
+      .write_fmt(format_args!("{:?}\n", self.indices))
+      .unwrap();
+    indices.flush().unwrap();
+
+    let mut curve_tex = OpenOptions::new()
+      .append(true)
+      .open("./testing/curve_tex.txt")
+      .unwrap();
+    curve_tex
+      .write_fmt(format_args!("{:?}\n", self.curve_tex_data))
+      .unwrap();
+    curve_tex.flush().unwrap();
+
+    let mut band_tex = OpenOptions::new()
+      .append(true)
+      .open("./testing/band_tex.txt")
+      .unwrap();
+    band_tex
+      .write_fmt(format_args!("{:?}\n", self.band_tex_data))
+      .unwrap();
+    band_tex.flush().unwrap();
+  }
+
+  pub fn compare_to_file(&self) {
+    let mut vertices_file = File::open("./vertices").unwrap();
+    let mut vertices_bytes = Vec::new();
+    vertices_file.read_to_end(&mut vertices_bytes).unwrap();
+
+    let mut indices_file = File::open("./indices").unwrap();
+    let mut indices_bytes = Vec::new();
+    indices_file.read_to_end(&mut indices_bytes).unwrap();
+
+    let mut curve_tex_file = File::open("./curve_tex").unwrap();
+    let mut curve_tex_bytes = Vec::new();
+    curve_tex_file.read_to_end(&mut curve_tex_bytes).unwrap();
+
+    let mut band_tex_file = File::open("./band_tex").unwrap();
+    let mut band_tex_bytes = Vec::new();
+    band_tex_file.read_to_end(&mut band_tex_bytes).unwrap();
+
+    let vertices_slice = unsafe {
+      let bytes = vertices_bytes.len() / size_of::<SlugVertex>();
+      std::slice::from_raw_parts(vertices_bytes.as_ptr() as *const SlugVertex, bytes)
+    };
+    let indices_slice = unsafe {
+      let bytes = indices_bytes.len() / size_of::<u32>();
+      std::slice::from_raw_parts(indices_bytes.as_ptr() as *const u32, bytes)
+    };
+    let curve_tex_slice = unsafe {
+      let bytes = curve_tex_bytes.len() / size_of::<[f32; 4]>();
+      std::slice::from_raw_parts(curve_tex_bytes.as_ptr() as *const [f32; 4], bytes)
+    };
+    let band_tex_slice = unsafe {
+      let bytes = band_tex_bytes.len() / size_of::<u32>();
+      std::slice::from_raw_parts(band_tex_bytes.as_ptr() as *const u32, bytes)
+    };
+
+    let mut wrong_vertices = 0usize;
+    for (&a, &b) in vertices_slice.iter().zip(self.vertices.iter()) {
+      unsafe {
+        if any_as_u8_slice(&a) != any_as_u8_slice(&b) {
+          wrong_vertices += 1;
+        }
+      }
+    }
+
+    log::error!("vertices equal count: {}", wrong_vertices);
+    log::error!("indices equal: {}", indices_slice == self.indices);
+    log::error!(
+      "curve_tex equal: {}",
+      curve_tex_slice == self.curve_tex_data
+    );
+    log::error!("band_tex equal: {}", band_tex_slice == self.band_tex_data);
+  }
+}
+
 pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
   let mut buffer = UnicodeBuffer::new();
   buffer.push_str(text);
@@ -499,15 +630,13 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
 
   let glyph_buffer = shaper.shape(buffer, ShapeOptions::new());
   let scale = font_size as f32 / (shaper.units_per_em() as f32);
-  println!("scale: {}", scale);
-  // let scale = 0.30273438;
 
   let face = Face::parse(&font_bytes, 0).unwrap();
   println!("Font face name: {:?}", face.names());
 
   let mut glyph_map: HashMap<u16, SlugGlyph> = HashMap::new();
-  for info in glyph_buffer.glyph_infos() {
-    let glyph_id = info.glyph_id.try_into().unwrap();
+  for glyph_info in glyph_buffer.glyph_infos() {
+    let glyph_id = glyph_info.glyph_id.try_into().unwrap();
     if glyph_map.contains_key(&glyph_id) {
       continue;
     }
@@ -548,6 +677,9 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
   }
 
   let mut glyphs: Vec<SlugGlyph> = glyph_map.into_values().collect();
+  // sort glyphs for testing
+  // glyphs.sort_by_key(|k| k.id);
+
   let packed = pack_glyph_data(&mut glyphs);
 
   let mut glyph_data_map = HashMap::new();
@@ -623,12 +755,12 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
         // tex (location 1): em-space coords + packed glyph/band data
         em_space_sample_coords: [ex, ey],
         glyph_in_band_loc: SlugVertexGlyphInBandLocation {
-          y: (*glyph_loc_y).try_into().unwrap(),
           x: (*glyph_loc_x).try_into().unwrap(),
+          y: (*glyph_loc_y).try_into().unwrap(),
         },
         max_band_indices: SlugVertexMaxBandIndices {
-          max_band_y: band_max_y.try_into().unwrap(),
           max_band_x: band_max_x.try_into().unwrap(),
+          max_band_y: band_max_y.try_into().unwrap(),
         },
 
         // jac (location 2): inverse Jacobian (d(em)/d(obj))
