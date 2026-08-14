@@ -2,11 +2,12 @@ use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
 use harfrust::{script, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
 use std::{
-  collections::{HashMap},
+  collections::HashMap,
   fmt::Debug,
   fs::{File, OpenOptions},
   io::{Read, Write},
   mem::offset_of,
+  ptr,
   str::FromStr,
 };
 use ttf_parser::Face;
@@ -79,15 +80,6 @@ impl QuadCurve {
   pub fn max_y(&self) -> f32 {
     self.p0.y.max(self.p1.y).max(self.p2.y)
   }
-}
-
-#[derive(Clone, Debug)]
-pub struct SlugGlyph {
-  pub id: u16,
-  pub curves: Vec<QuadCurve>,
-  // BAND_COUNT horizontal followed by BAND_COUNT vertical
-  pub bands_curve_indices: [Vec<usize>; BAND_COUNT * 2],
-  pub bounding_box: ttf_parser::Rect,
 }
 
 /// Extract glyph curves
@@ -231,111 +223,199 @@ fn build_glyph_bands(
 
 pub const TEX_WIDTH: usize = 4096;
 
-#[derive(Clone, Debug)]
-struct PackedGlyphData {
-  curve_tex_data: Vec<[f32; 4]>,
-  band_tex_data: Vec<u32>,
-  curve_tex_height: usize,
-  band_tex_height: usize,
-  glyph_band_info: Vec<(u16, u16)>,
+#[derive(Debug, Clone)]
+pub struct SlugGlyphProcessor {
+  glyph_curve_buffer: Vec<QuadCurve>,
+
+  pub curve_tex_data: Vec<[f32; 4]>,
+  pub band_tex_data: Vec<u32>,
+
+  total_curve_texels: usize,
+  pub curve_tex_height: usize,
+  total_band_texels: usize,
+  pub band_tex_height: usize,
+
+  curve_texel_i: usize,
+  band_texel_i: usize,
 }
 
-fn pack_glyph_data(glyphs: &[SlugGlyph]) -> PackedGlyphData {
+impl SlugGlyphProcessor {
+  pub fn new() -> Self {
+    Self {
+      glyph_curve_buffer: Vec::new(),
+
+      curve_tex_data: Vec::new(),
+      band_tex_data: Vec::new(),
+
+      total_curve_texels: 0,
+      curve_tex_height: 0,
+      total_band_texels: 0,
+      band_tex_height: 0,
+
+      curve_texel_i: 0,
+      band_texel_i: 0,
+    }
+  }
+
+  fn expand_curve_data_new_glyph(&mut self) {
+    self.total_curve_texels += self.glyph_curve_buffer.len() * 2;
+    let new_curve_tex_height = (self.total_curve_texels / TEX_WIDTH) + 1;
+    if new_curve_tex_height > self.curve_tex_height {
+      let expand_len = TEX_WIDTH * (new_curve_tex_height - self.curve_tex_height);
+      self.curve_tex_data.reserve_exact(expand_len);
+      unsafe {
+        let end_ptr = self
+          .curve_tex_data
+          .as_mut_ptr()
+          .add(self.curve_tex_data.len());
+        ptr::write_bytes(end_ptr, 0, expand_len);
+        self
+          .curve_tex_data
+          .set_len(self.curve_tex_data.len() + expand_len);
+      }
+      self.curve_tex_height = new_curve_tex_height;
+    }
+  }
+
+  fn expand_band_data_new_glyph(
+    &mut self,
+    glyph_band_curve_indices: &[Vec<usize>; BAND_COUNT * 2],
+  ) {
+    let header_count = glyph_band_curve_indices.len();
+    // Pad to avoid header wrapping at row boundary
+    let padded = TEX_WIDTH - (self.total_band_texels % TEX_WIDTH);
+    if padded < header_count && padded < TEX_WIDTH {
+      self.total_band_texels += padded;
+    }
+    self.total_band_texels += header_count;
+    for indices in glyph_band_curve_indices.iter() {
+      self.total_band_texels += indices.len();
+    }
+
+    let new_band_tex_height = (self.total_band_texels / TEX_WIDTH) + 1;
+    if new_band_tex_height > self.band_tex_height {
+      let expand_len = TEX_WIDTH * (new_band_tex_height - self.band_tex_height) * 4;
+      self.band_tex_data.reserve_exact(expand_len);
+      unsafe {
+        let end_ptr = self
+          .band_tex_data
+          .as_mut_ptr()
+          .add(self.band_tex_data.len());
+        ptr::write_bytes(end_ptr, 0, expand_len);
+        self
+          .band_tex_data
+          .set_len(self.band_tex_data.len() + expand_len);
+      }
+      self.band_tex_height = new_band_tex_height;
+    }
+  }
+
   // --- Curve texture (RGBA32Float, width 4096) ---
   // Each curve = 2 texels: (p0x, p0y, p1x, p1y) and (p2x, p2y, 0, 0)
-  //
+  fn write_curves_new_glyph(&mut self) {
+    self.expand_curve_data_new_glyph();
+    for c in self.glyph_curve_buffer.iter() {
+      // Texel 0: (p0x, p0y, p1x, p1y)
+      let i0 = self.curve_texel_i;
+      self.curve_tex_data[i0] = [c.p0.x, c.p0.y, c.p1.x, c.p1.y];
+
+      // Texel 1: (p2x, p2y, 0, 0)
+      let i1 = self.curve_texel_i + 1;
+      self.curve_tex_data[i1][0] = c.p2.x;
+      self.curve_tex_data[i1][1] = c.p2.y;
+
+      self.curve_texel_i += 2;
+    }
+  }
+
   // --- Band texture (RGBA32Uint, width 4096) ---
   // Per glyph: [hBand headers...] [vBand headers...] [curve index lists...]
   // Each header texel: (curveCount, offsetFromGlyphLoc, 0, 0)
   // Each curve ref texel: (curveTexX, curveTexY, 0, 0)
-
-  let mut total_curve_texels = 0;
-  for g in glyphs.iter() {
-    total_curve_texels += g.curves.len() * 2;
-  }
-
-  let mut total_band_texels = 0;
-  for g in glyphs.iter() {
-    let header_count = g.bands_curve_indices.len();
-    // Pad to avoid header wrapping at row boundary
-    let padded = TEX_WIDTH - (total_band_texels % TEX_WIDTH);
-    if padded < header_count && padded < TEX_WIDTH {
-      total_band_texels += padded;
-    }
-    total_band_texels += header_count;
-    for indices in g.bands_curve_indices.iter() {
-      total_band_texels += indices.len();
-    }
-  }
-
-  let curve_tex_height = (total_curve_texels / TEX_WIDTH) + 1;
-  let mut curve_tex_data = vec![[0f32; 4]; TEX_WIDTH * curve_tex_height];
-  let band_tex_height = (total_band_texels / TEX_WIDTH) + 1;
-  let mut band_tex_data = vec![0u32; TEX_WIDTH * band_tex_height * 4];
-
-  let mut curve_texel_i = 0;
-  let mut band_texel_i = 0;
-  let mut glyph_band_info: Vec<(u16, u16)> = Vec::new();
-  for glyph in glyphs.iter() {
-    let cur_glyph_curve_start_i = curve_texel_i;
-    // write curves
-    for c in glyph.curves.iter() {
-      // Texel 0: (p0x, p0y, p1x, p1y)
-      let i0 = curve_texel_i;
-      curve_tex_data[i0] = [c.p0.x, c.p0.y, c.p1.x, c.p1.y];
-
-      // Texel 1: (p2x, p2y, 0, 0)
-      let i1 = curve_texel_i + 1;
-      curve_tex_data[i1][0] = c.p2.x;
-      curve_tex_data[i1][1] = c.p2.y;
-
-      curve_texel_i += 2;
-    }
-
-    let header_count = glyph.bands_curve_indices.len();
+  //
+  // returns glyph in band location
+  fn write_bands_new_glyph(
+    &mut self,
+    glyph_curve_start_i: usize,
+    glyph_band_curve_indices: &[Vec<usize>; BAND_COUNT * 2],
+  ) -> (u16, u16) {
+    self.expand_band_data_new_glyph(glyph_band_curve_indices);
+    let header_count = glyph_band_curve_indices.len();
 
     // Ensure headers don't straddle a row boundary
-    let cur_x = band_texel_i % TEX_WIDTH;
+    let cur_x = self.band_texel_i % TEX_WIDTH;
     if cur_x + header_count > TEX_WIDTH {
-      band_texel_i = ((band_texel_i / TEX_WIDTH) + 1) * TEX_WIDTH;
+      self.band_texel_i = ((self.band_texel_i / TEX_WIDTH) + 1) * TEX_WIDTH;
     }
 
-    let glyph_loc_x = (band_texel_i % TEX_WIDTH) as u16;
-    let glyph_loc_y = (band_texel_i / TEX_WIDTH).try_into().unwrap();
-    glyph_band_info.push((glyph_loc_x, glyph_loc_y));
+    let band_loc_x = (self.band_texel_i % TEX_WIDTH) as u16;
+    let band_loc_y = (self.band_texel_i / TEX_WIDTH).try_into().unwrap();
 
     // Write band headers
     let mut curve_list_offset = header_count;
-    for (i, band_indices) in glyph.bands_curve_indices.iter().enumerate() {
-      let tl = band_texel_i + i;
+    for (i, band_indices) in glyph_band_curve_indices.iter().enumerate() {
+      let tl = self.band_texel_i + i;
       let di = tl * 4;
-      band_tex_data[di] = band_indices.len() as u32;
-      band_tex_data[di + 1] = curve_list_offset as u32;
+      self.band_tex_data[di] = band_indices.len() as u32;
+      self.band_tex_data[di + 1] = curve_list_offset as u32;
 
-      let list_start = band_texel_i + curve_list_offset;
+      let list_start = self.band_texel_i + curve_list_offset;
       for (j, curve_i) in band_indices.iter().enumerate() {
-        let curve_texel = cur_glyph_curve_start_i + curve_i * 2;
+        let curve_texel = glyph_curve_start_i + curve_i * 2;
         let curve_tex_x = curve_texel % TEX_WIDTH;
         let curve_tex_y = curve_texel / TEX_WIDTH;
 
         let tl = list_start + j;
         let di = tl * 4;
-        band_tex_data[di] = curve_tex_x as u32;
-        band_tex_data[di + 1] = curve_tex_y as u32;
+        self.band_tex_data[di] = curve_tex_x as u32;
+        self.band_tex_data[di + 1] = curve_tex_y as u32;
       }
 
       curve_list_offset += band_indices.len();
     }
 
-    band_texel_i = band_texel_i + curve_list_offset;
+    self.band_texel_i += curve_list_offset;
+
+    (band_loc_x, band_loc_y)
   }
 
-  PackedGlyphData {
-    curve_tex_data,
-    band_tex_data,
-    curve_tex_height,
-    band_tex_height,
-    glyph_band_info,
+  pub fn process_new_glyph(&mut self, face: &Face, glyph_id: u16) -> Option<ProcessedGlyphData> {
+    self.glyph_curve_buffer.clear();
+    let mut curve_extractor = SlugCurveExtractor::new(&mut self.glyph_curve_buffer);
+
+    // extracts curves here
+    let bounding_box = match face.outline_glyph(ttf_parser::GlyphId(glyph_id), &mut curve_extractor)
+    {
+      Some(outline) => outline,
+      None => {
+        return None;
+      }
+    };
+
+    let point_bounding_box = PointRect {
+      min: Point2 {
+        x: bounding_box.x_min as f32,
+        y: bounding_box.y_min as f32,
+      },
+      max: Point2 {
+        x: bounding_box.x_max as f32,
+        y: bounding_box.y_max as f32,
+      },
+    };
+
+    let band_curve_indices = build_glyph_bands(&self.glyph_curve_buffer, point_bounding_box);
+
+    let glyph_curve_start_i = self.curve_texel_i;
+    self.write_curves_new_glyph();
+
+    let (band_loc_x, band_loc_y) =
+      self.write_bands_new_glyph(glyph_curve_start_i, &band_curve_indices);
+
+    Some(ProcessedGlyphData {
+      bounding_box,
+      band_loc_x,
+      band_loc_y,
+    })
   }
 }
 
@@ -355,7 +435,7 @@ pub struct SlugVertexMaxBandIndices {
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
-pub struct SlugBertexBandInfo {
+pub struct SlugVertexBandInfo {
   pub scale_x: f32,
   pub scale_y: f32,
   pub offset_x: f32,
@@ -377,7 +457,7 @@ pub struct SlugVertex {
   // jac
   pub jac: [f32; 4],
   // bnd
-  pub band: SlugBertexBandInfo,
+  pub band: SlugVertexBandInfo,
   // col
   pub color: [f32; 4],
 }
@@ -434,7 +514,6 @@ impl SlugVertex {
 
 #[derive(Clone, Debug)]
 pub struct PrepareTextResult {
-  pub glyphs: Vec<SlugGlyph>,
   pub vertices: Vec<SlugVertex>,
   pub indices: Vec<u32>,
   pub curve_tex_data: Vec<[f32; 4]>,
@@ -600,65 +679,15 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
 
   // None for glyphs with no bounding box (like empty space)
   let mut processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>> = HashMap::new();
-  // todo: skip making this vec entirely, process each glyph linearly
-  let mut glyphs: Vec<SlugGlyph> = Vec::new();
+  let mut glyph_processor = SlugGlyphProcessor::new();
   for glyph_info in glyph_buffer.glyph_infos() {
     let glyph_id = glyph_info.glyph_id.try_into().unwrap();
     if processed_glyph_map.contains_key(&glyph_id) {
       continue;
     }
 
-    let mut curves = Vec::new();
-    let mut curve_extractor = SlugCurveExtractor::new(&mut curves);
-
-    // extracts curves here
-    let bounding_box = match face.outline_glyph(ttf_parser::GlyphId(glyph_id), &mut curve_extractor)
-    {
-      Some(outline) => outline,
-      None => {
-        processed_glyph_map.insert(glyph_id, None);
-        continue;
-      }
-    };
-
-    let point_bounding_box = PointRect {
-      min: Point2 {
-        x: bounding_box.x_min as f32,
-        y: bounding_box.y_min as f32,
-      },
-      max: Point2 {
-        x: bounding_box.x_max as f32,
-        y: bounding_box.y_max as f32,
-      },
-    };
-
-    let bands = build_glyph_bands(&curves, point_bounding_box);
-    glyphs.push(SlugGlyph {
-      id: glyph_id,
-      curves: curves,
-      bands_curve_indices: bands,
-      bounding_box,
-    });
-    processed_glyph_map.insert(
-      glyph_id,
-      Some(ProcessedGlyphData {
-        bounding_box,
-        band_loc_x: 0,
-        band_loc_y: 0,
-      }),
-    );
-  }
-
-  let packed = pack_glyph_data(&glyphs);
-
-  for (i, glyph) in glyphs.iter().enumerate() {
-    processed_glyph_map.get_mut(&glyph.id).map(|opt| {
-      opt.as_mut().map(|glyph| {
-        let (glyph_loc_x, glyph_loc_y) = packed.glyph_band_info[i];
-        glyph.band_loc_x = glyph_loc_x;
-        glyph.band_loc_y = glyph_loc_y;
-      })
-    });
+    let processed_glyph = glyph_processor.process_new_glyph(&face, glyph_id);
+    processed_glyph_map.insert(glyph_id, processed_glyph);
   }
 
   let mut vertices = Vec::new();
@@ -740,7 +769,7 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
         // jac (location 2): inverse Jacobian (d(em)/d(obj))
         jac: [inv_scale, 0.0, 0.0, inv_scale],
         // bnd (location 3): band transform (scale + offset)
-        band: SlugBertexBandInfo {
+        band: SlugVertexBandInfo {
           scale_x: band_scale_x,
           scale_y: band_scale_y,
           offset_x: band_offset_x,
@@ -759,12 +788,11 @@ pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
   }
 
   PrepareTextResult {
-    glyphs,
     vertices,
     indices,
-    curve_tex_data: packed.curve_tex_data,
-    band_tex_data: packed.band_tex_data,
-    curve_tex_height: packed.curve_tex_height,
-    band_tex_height: packed.band_tex_height,
+    curve_tex_data: glyph_processor.curve_tex_data,
+    band_tex_data: glyph_processor.band_tex_data,
+    curve_tex_height: glyph_processor.curve_tex_height,
+    band_tex_height: glyph_processor.band_tex_height,
   }
 }

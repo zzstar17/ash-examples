@@ -55,7 +55,7 @@ const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);
 
 const START_PAUSED: bool = false; // start application in a paused state
 
-const RENDER_UNTIL_FRAME: usize = 1;
+const RENDER_UNTIL_FRAME: usize = usize::MAX;
 // const RENDER_UNTIL_FRAME: usize = 120;
 
 const DEBUG_PRINT_FRAME_INFO: bool = false;

@@ -228,15 +228,7 @@ impl Renderer {
     format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    // todo
     let text = slug::prepare_text("olá gente :)", 150);
-    println!("text_glyphs\n{:?}", text.glyphs);
-    println!("vertices\n{:?}", text.vertices);
-    println!("indices\n{:?}", text.indices);
-    // println!("{:?}", text.curve_tex_data);
-    // println!("{:?}", text.band_tex_data);
-
-    text.save_to_file_text();
 
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
