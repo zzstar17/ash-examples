@@ -1,17 +1,9 @@
 use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
-use harfrust::{script, FontRef, Language, ShapeOptions, ShaperData, UnicodeBuffer};
-use std::{
-  collections::HashMap,
-  fmt::Debug,
-  fs::{File, OpenOptions},
-  io::{Read, Write},
-  mem::offset_of,
-  ptr,
-  str::FromStr,
-};
+use core::f32;
+use harfrust::{script, Language, ShapeOptions, Shaper, UnicodeBuffer};
+use std::{collections::HashMap, fmt::Debug, mem::offset_of, ptr, str::FromStr};
 use ttf_parser::Face;
-use vkobjects::utility::any_as_u8_slice;
 
 // Band count is also hardcoded in the shader
 const BAND_COUNT: usize = 8;
@@ -31,6 +23,39 @@ pub struct QuadCurve {
 pub struct PointRect {
   pub min: Point2<f32>,
   pub max: Point2<f32>,
+}
+
+fn expand_to_include(this: &mut ttf_parser::Rect, other: ttf_parser::Rect) {
+  if other.x_min > this.x_min {
+    this.x_min = other.x_min;
+  }
+  if other.y_min > this.y_min {
+    this.y_min = other.y_min;
+  }
+  if other.x_max > this.x_max {
+    this.x_max = other.x_max;
+  }
+  if other.y_max > this.y_max {
+    this.y_max = other.y_max;
+  }
+}
+
+impl PointRect {
+  // expand self rect to be at most as big as other
+  pub fn expand_to_include(&mut self, other: PointRect) {
+    if other.min.x > self.min.x {
+      self.min.x = other.min.x;
+    }
+    if other.min.y > self.min.y {
+      self.min.y = other.min.y;
+    }
+    if other.max.x > self.max.x {
+      self.max.x = other.max.x;
+    }
+    if other.max.y > self.max.y {
+      self.max.y = other.max.y;
+    }
+  }
 }
 
 impl QuadCurve {
@@ -513,141 +538,11 @@ impl SlugVertex {
 }
 
 #[derive(Clone, Debug)]
-pub struct PrepareTextResult {
-  pub vertices: Vec<SlugVertex>,
-  pub indices: Vec<u32>,
-  pub curve_tex_data: Vec<[f32; 4]>,
-  pub band_tex_data: Vec<u32>,
+pub struct SlugTextureData<'a> {
+  pub curve_tex_data: &'a [[f32; 4]],
+  pub band_tex_data: &'a [u32],
   pub curve_tex_height: usize,
   pub band_tex_height: usize,
-}
-
-#[allow(dead_code)]
-impl PrepareTextResult {
-  pub fn save_to_file(&self) {
-    let vertices_slice = unsafe {
-      let bytes = self.vertices.len() * size_of::<SlugVertex>();
-      std::slice::from_raw_parts(self.vertices.as_ptr() as *const u8, bytes)
-    };
-    let indices_slice = unsafe {
-      let bytes = self.indices.len() * size_of::<u32>();
-      std::slice::from_raw_parts(self.indices.as_ptr() as *const u8, bytes)
-    };
-    let curve_tex_slice = unsafe {
-      let bytes = self.curve_tex_data.len() * size_of::<[f32; 4]>();
-      std::slice::from_raw_parts(self.curve_tex_data.as_ptr() as *const u8, bytes)
-    };
-    let band_tex_slice = unsafe {
-      let bytes = self.band_tex_data.len() * size_of::<u32>();
-      std::slice::from_raw_parts(self.band_tex_data.as_ptr() as *const u8, bytes)
-    };
-
-    let mut vertices = File::create("./vertices").unwrap();
-    vertices.write_all(&vertices_slice).unwrap();
-    vertices.flush().unwrap();
-
-    let mut indices = File::create("./indices").unwrap();
-    indices.write_all(&indices_slice).unwrap();
-    indices.flush().unwrap();
-
-    let mut curve_tex = File::create("./curve_tex").unwrap();
-    curve_tex.write_all(&curve_tex_slice).unwrap();
-    curve_tex.flush().unwrap();
-
-    let mut band_tex = File::create("./band_tex").unwrap();
-    band_tex.write_all(&band_tex_slice).unwrap();
-    band_tex.flush().unwrap();
-  }
-
-  pub fn save_to_file_text(&self) {
-    let mut vertices = OpenOptions::new()
-      .append(true)
-      .open("./testing/vertices.txt")
-      .unwrap();
-    vertices
-      .write_fmt(format_args!("{:?}\n", self.vertices))
-      .unwrap();
-    vertices.flush().unwrap();
-
-    let mut indices = OpenOptions::new()
-      .append(true)
-      .open("./testing/indices.txt")
-      .unwrap();
-    indices
-      .write_fmt(format_args!("{:?}\n", self.indices))
-      .unwrap();
-    indices.flush().unwrap();
-
-    let mut curve_tex = OpenOptions::new()
-      .append(true)
-      .open("./testing/curve_tex.txt")
-      .unwrap();
-    curve_tex
-      .write_fmt(format_args!("{:?}\n", self.curve_tex_data))
-      .unwrap();
-    curve_tex.flush().unwrap();
-
-    let mut band_tex = OpenOptions::new()
-      .append(true)
-      .open("./testing/band_tex.txt")
-      .unwrap();
-    band_tex
-      .write_fmt(format_args!("{:?}\n", self.band_tex_data))
-      .unwrap();
-    band_tex.flush().unwrap();
-  }
-
-  pub fn compare_to_file(&self) {
-    let mut vertices_file = File::open("./vertices").unwrap();
-    let mut vertices_bytes = Vec::new();
-    vertices_file.read_to_end(&mut vertices_bytes).unwrap();
-
-    let mut indices_file = File::open("./indices").unwrap();
-    let mut indices_bytes = Vec::new();
-    indices_file.read_to_end(&mut indices_bytes).unwrap();
-
-    let mut curve_tex_file = File::open("./curve_tex").unwrap();
-    let mut curve_tex_bytes = Vec::new();
-    curve_tex_file.read_to_end(&mut curve_tex_bytes).unwrap();
-
-    let mut band_tex_file = File::open("./band_tex").unwrap();
-    let mut band_tex_bytes = Vec::new();
-    band_tex_file.read_to_end(&mut band_tex_bytes).unwrap();
-
-    let vertices_slice = unsafe {
-      let bytes = vertices_bytes.len() / size_of::<SlugVertex>();
-      std::slice::from_raw_parts(vertices_bytes.as_ptr() as *const SlugVertex, bytes)
-    };
-    let indices_slice = unsafe {
-      let bytes = indices_bytes.len() / size_of::<u32>();
-      std::slice::from_raw_parts(indices_bytes.as_ptr() as *const u32, bytes)
-    };
-    let curve_tex_slice = unsafe {
-      let bytes = curve_tex_bytes.len() / size_of::<[f32; 4]>();
-      std::slice::from_raw_parts(curve_tex_bytes.as_ptr() as *const [f32; 4], bytes)
-    };
-    let band_tex_slice = unsafe {
-      let bytes = band_tex_bytes.len() / size_of::<u32>();
-      std::slice::from_raw_parts(band_tex_bytes.as_ptr() as *const u32, bytes)
-    };
-
-    let mut wrong_vertices = 0usize;
-    for (&a, &b) in vertices_slice.iter().zip(self.vertices.iter()) {
-      unsafe {
-        if any_as_u8_slice(&a) != any_as_u8_slice(&b) {
-          wrong_vertices += 1;
-        }
-      }
-    }
-
-    log::error!("vertices equal count: {}", wrong_vertices);
-    log::error!("indices equal: {}", indices_slice == self.indices);
-    log::error!(
-      "curve_tex equal: {}",
-      curve_tex_slice == self.curve_tex_data
-    );
-    log::error!("band_tex equal: {}", band_tex_slice == self.band_tex_data);
-  }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -657,142 +552,234 @@ pub struct ProcessedGlyphData {
   band_loc_y: u16,
 }
 
-pub fn prepare_text(text: &str, font_size: usize) -> PrepareTextResult {
-  let mut buffer = UnicodeBuffer::new();
-  buffer.push_str(text);
+pub struct SlugRendering<'a> {
+  text_buffer: Option<UnicodeBuffer>,
+  font_face: Face<'a>,
 
-  buffer.set_direction(harfrust::Direction::LeftToRight);
-  buffer.set_script(script::LATIN);
-  buffer.set_language(Language::from_str("en").unwrap());
+  processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>>,
+  glyph_processor: SlugGlyphProcessor,
+}
 
-  let font_bytes = std::fs::read("c:\\windows\\Fonts\\arial.ttf").unwrap();
-  let font = FontRef::new(&font_bytes).expect("Failed to read font data");
+impl<'a> SlugRendering<'a> {
+  pub fn new(font_bytes: &'a [u8]) -> Self {
+    let text_buffer = UnicodeBuffer::new();
+    let font_face = Face::parse(&font_bytes, 0).unwrap();
+    println!("Font face name: {:?}", font_face.names());
 
-  let shaper_data = ShaperData::new(&font);
-  let shaper = shaper_data.shaper(&font).build();
+    // None for glyphs with no bounding box (like empty space)
+    let processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>> = HashMap::new();
+    let glyph_processor = SlugGlyphProcessor::new();
 
-  let glyph_buffer = shaper.shape(buffer, ShapeOptions::new());
-  let scale = font_size as f32 / (shaper.units_per_em() as f32);
-
-  let face = Face::parse(&font_bytes, 0).unwrap();
-  println!("Font face name: {:?}", face.names());
-
-  // None for glyphs with no bounding box (like empty space)
-  let mut processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>> = HashMap::new();
-  let mut glyph_processor = SlugGlyphProcessor::new();
-  for glyph_info in glyph_buffer.glyph_infos() {
-    let glyph_id = glyph_info.glyph_id.try_into().unwrap();
-    if processed_glyph_map.contains_key(&glyph_id) {
-      continue;
+    Self {
+      text_buffer: Some(text_buffer),
+      font_face,
+      processed_glyph_map,
+      glyph_processor,
     }
-
-    let processed_glyph = glyph_processor.process_new_glyph(&face, glyph_id);
-    processed_glyph_map.insert(glyph_id, processed_glyph);
   }
 
-  let mut vertices = Vec::new();
-  let mut indices = Vec::new();
-  let mut cursor_x = 0;
-  let mut cursor_y = 0;
-  let mut quad_idx: u32 = 0;
-  for (info, pos) in glyph_buffer
-    .glyph_infos()
-    .iter()
-    .zip(glyph_buffer.glyph_positions().iter())
-  {
-    let glyph_id = info.glyph_id as u16;
-    let glyph_processed_data = match processed_glyph_map.get(&glyph_id).unwrap() {
-      Some(values) => *values,
-      None => {
-        // empty glyph -> skip
-        cursor_x += pos.x_advance;
-        cursor_y += pos.y_advance;
+  pub fn build_text(
+    &mut self,
+    shaper: &Shaper,
+    text: &str,
+    font_size: usize,
+    offset: vk::Offset2D,
+    vertices: &mut Vec<SlugVertex>,
+    indices: &mut Vec<u32>,
+  ) {
+    let mut text_buffer = self.text_buffer.take().unwrap();
+
+    text_buffer.push_str(text);
+
+    text_buffer.set_direction(harfrust::Direction::LeftToRight);
+    text_buffer.set_script(script::LATIN);
+    text_buffer.set_language(Language::from_str("en").unwrap());
+
+    let glyph_buffer = shaper.shape(text_buffer, ShapeOptions::new());
+    let scale = font_size as f32 / (shaper.units_per_em() as f32);
+
+    // add new glyphs
+    for glyph_info in glyph_buffer.glyph_infos() {
+      let glyph_id = glyph_info.glyph_id.try_into().unwrap();
+      if self.processed_glyph_map.contains_key(&glyph_id) {
         continue;
       }
-    };
-    let bbox = glyph_processed_data.bounding_box;
 
-    let width = bbox.x_max - bbox.x_min;
-    let height = bbox.y_max - bbox.y_min;
-
-    // Object-space position (Y-up screen pixels)
-    let ox = (cursor_x + pos.x_offset) as f32 * scale;
-    let oy = (cursor_y + pos.y_offset) as f32 * scale;
-    let x0 = ox + bbox.x_min as f32 * scale;
-    let y0 = oy + bbox.y_min as f32 * scale;
-    let x1 = ox + bbox.x_max as f32 * scale;
-    let y1 = oy + bbox.y_max as f32 * scale;
-
-    // Band transform: maps em-space to band indices
-    let band_scale_x = if width > 0 {
-      BAND_COUNT as f32 / width as f32
-    } else {
-      0.0
-    };
-    let band_scale_y = if height > 0 {
-      BAND_COUNT as f32 / height as f32
-    } else {
-      0.0
-    };
-    let band_offset_x = -bbox.x_min as f32 * band_scale_x;
-    let band_offset_y = -bbox.y_min as f32 * band_scale_y;
-
-    let band_max_x = BAND_COUNT - 1;
-    let band_max_y = BAND_COUNT - 1;
-
-    let inv_scale = 1.0 / scale;
-
-    let corners = [
-      [x0, -y0, -1.0, -1.0, bbox.x_min as f32, bbox.y_min as f32], // bottom-left
-      [x1, -y0, 1.0, -1.0, bbox.x_max as f32, bbox.y_min as f32],  // bottom-right
-      [x1, -y1, 1.0, 1.0, bbox.x_max as f32, bbox.y_max as f32],   // top-right
-      [x0, -y1, -1.0, 1.0, bbox.x_min as f32, bbox.y_max as f32],  // top-left
-    ];
-    for [px, py, nx, ny, ex, ey] in corners {
-      let vertex = SlugVertex {
-        // pos (location 0): object-space position + normal
-        obj_space_vertex_coords: [px, py],
-        obj_space_normal_vector: [nx, ny],
-
-        // tex (location 1): em-space coords + packed glyph/band data
-        em_space_sample_coords: [ex, ey],
-        // todo: convert all of bellow to instance data
-        glyph_in_band_loc: SlugVertexGlyphInBandLocation {
-          x: glyph_processed_data.band_loc_x,
-          y: glyph_processed_data.band_loc_y,
-        },
-        max_band_indices: SlugVertexMaxBandIndices {
-          max_band_x: band_max_x.try_into().unwrap(),
-          max_band_y: band_max_y.try_into().unwrap(),
-        },
-
-        // jac (location 2): inverse Jacobian (d(em)/d(obj))
-        jac: [inv_scale, 0.0, 0.0, inv_scale],
-        // bnd (location 3): band transform (scale + offset)
-        band: SlugVertexBandInfo {
-          scale_x: band_scale_x,
-          scale_y: band_scale_y,
-          offset_x: band_offset_x,
-          offset_y: band_offset_y,
-        },
-        color: [0.0, 1.0, 0.0, 1.0],
-      };
-      vertices.push(vertex);
+      let processed_glyph = self
+        .glyph_processor
+        .process_new_glyph(&self.font_face, glyph_id);
+      self.processed_glyph_map.insert(glyph_id, processed_glyph);
     }
 
-    let base = quad_idx * 4;
-    indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
-    cursor_x += pos.x_advance;
-    cursor_y += pos.y_advance;
-    quad_idx += 1;
+    let mut cursor_x = 0;
+    let mut cursor_y = 0;
+    // todo: probably change this to the actual command buffer
+    let mut quad_idx: u32 = (vertices.len() / 4) as u32;
+    // let mut full_text_bounds = PointRect {
+    //   min: Point2 {
+    //     x: f32::MAX,
+    //     y: f32::MAX,
+    //   },
+    //   max: Point2 {
+    //     x: f32::MIN,
+    //     y: f32::MIN,
+    //   },
+    // };
+    // let mut full_text_bounds = ttf_parser::Rect { x_min: i16::MAX, y_min: i16::MAX, x_max: i16::MIN, y_max: i16::MIN };
+    for (info, pos) in glyph_buffer
+      .glyph_infos()
+      .iter()
+      .zip(glyph_buffer.glyph_positions().iter())
+    {
+      let glyph_id = info.glyph_id as u16;
+      // None if glyph is empty space (has no bounding box)
+      let glyph_processed_opt = match self.processed_glyph_map.get(&glyph_id) {
+        Some(opt) => *opt,
+        None => {
+          // add new glyph to map
+          let processed_opt = self
+            .glyph_processor
+            .process_new_glyph(&self.font_face, glyph_id);
+          self.processed_glyph_map.insert(glyph_id, processed_opt);
+          processed_opt
+        }
+      };
+      let glyph_processed_data = match glyph_processed_opt {
+        // full data
+        Some(values) => values,
+        None => {
+          // empty glyph -> skip
+          cursor_x += pos.x_advance;
+          cursor_y += pos.y_advance;
+          continue;
+        }
+      };
+
+      let bbox = glyph_processed_data.bounding_box;
+
+      let width = bbox.x_max - bbox.x_min;
+      let height = bbox.y_max - bbox.y_min;
+
+      // Object-space position (Y-up screen pixels)
+      let ox = cursor_x + pos.x_offset;
+      let oy = cursor_y + pos.y_offset;
+      let x0_unscaled = ox + bbox.x_min as i32 + offset.x;
+      let y0_unscaled = oy + bbox.y_min as i32 + offset.y;
+      let x1_unscaled = ox + bbox.x_max as i32 + offset.x;
+      let y1_unscaled = oy + bbox.y_max as i32 + offset.y;
+      let area = PointRect {
+        min: Point2 {
+          x: x0_unscaled as f32 * scale,
+          y: -y0_unscaled as f32 * scale,
+        },
+        max: Point2 {
+          x: x1_unscaled as f32 * scale,
+          y: -y1_unscaled as f32 * scale,
+        },
+      };
+      // full_text_bounds.expand_to_include(area);
+
+      // Band transform: maps em-space to band indices
+      let band_scale_x = if width > 0 {
+        BAND_COUNT as f32 / width as f32
+      } else {
+        0.0
+      };
+      let band_scale_y = if height > 0 {
+        BAND_COUNT as f32 / height as f32
+      } else {
+        0.0
+      };
+      let band_offset_x = -bbox.x_min as f32 * band_scale_x;
+      let band_offset_y = -bbox.y_min as f32 * band_scale_y;
+
+      let band_max_x = BAND_COUNT - 1;
+      let band_max_y = BAND_COUNT - 1;
+
+      let inv_scale = 1.0 / scale;
+
+      let corners = [
+        [
+          area.min.x,
+          area.min.y,
+          -1.0,
+          -1.0,
+          bbox.x_min as f32,
+          bbox.y_min as f32,
+        ], // bottom-left
+        [
+          area.max.x,
+          area.min.y,
+          1.0,
+          -1.0,
+          bbox.x_max as f32,
+          bbox.y_min as f32,
+        ], // bottom-right
+        [
+          area.max.x,
+          area.max.y,
+          1.0,
+          1.0,
+          bbox.x_max as f32,
+          bbox.y_max as f32,
+        ], // top-right
+        [
+          area.min.x,
+          area.max.y,
+          -1.0,
+          1.0,
+          bbox.x_min as f32,
+          bbox.y_max as f32,
+        ], // top-left
+      ];
+      for [px, py, nx, ny, ex, ey] in corners {
+        let vertex = SlugVertex {
+          // pos (location 0): object-space position + normal
+          obj_space_vertex_coords: [px, py],
+          obj_space_normal_vector: [nx, ny],
+
+          // tex (location 1): em-space coords + packed glyph/band data
+          em_space_sample_coords: [ex, ey],
+          // todo: convert all of bellow to instance data
+          glyph_in_band_loc: SlugVertexGlyphInBandLocation {
+            x: glyph_processed_data.band_loc_x,
+            y: glyph_processed_data.band_loc_y,
+          },
+          max_band_indices: SlugVertexMaxBandIndices {
+            max_band_x: band_max_x.try_into().unwrap(),
+            max_band_y: band_max_y.try_into().unwrap(),
+          },
+
+          // jac (location 2): inverse Jacobian (d(em)/d(obj))
+          jac: [inv_scale, 0.0, 0.0, inv_scale],
+          // bnd (location 3): band transform (scale + offset)
+          band: SlugVertexBandInfo {
+            scale_x: band_scale_x,
+            scale_y: band_scale_y,
+            offset_x: band_offset_x,
+            offset_y: band_offset_y,
+          },
+          color: [0.0, 0.0, 0.0, 1.0],
+        };
+        vertices.push(vertex);
+      }
+
+      let base = quad_idx * 4;
+      indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+      cursor_x += pos.x_advance;
+      cursor_y += pos.y_advance;
+      quad_idx += 1;
+    }
+
+    self.text_buffer = Some(glyph_buffer.clear())
   }
 
-  PrepareTextResult {
-    vertices,
-    indices,
-    curve_tex_data: glyph_processor.curve_tex_data,
-    band_tex_data: glyph_processor.band_tex_data,
-    curve_tex_height: glyph_processor.curve_tex_height,
-    band_tex_height: glyph_processor.band_tex_height,
+  pub fn get_texture_data(&'a self) -> SlugTextureData<'a> {
+    SlugTextureData {
+      curve_tex_data: &self.glyph_processor.curve_tex_data,
+      band_tex_data: &self.glyph_processor.band_tex_data,
+      curve_tex_height: self.glyph_processor.curve_tex_height,
+      band_tex_height: self.glyph_processor.band_tex_height,
+    }
   }
 }

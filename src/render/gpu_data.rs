@@ -6,7 +6,7 @@ use crate::{
     create_objs::{create_buffer, create_image, create_image_view},
     render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
   },
-  slug::{self, PrepareTextResult, SlugVertex},
+  slug::{self, SlugTextureData, SlugVertex},
 };
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
@@ -57,6 +57,12 @@ pub struct TextBuffers {
   pub index_count: u32,
 }
 
+pub struct TextData<'a> {
+  pub textures: SlugTextureData<'a>,
+  pub vertices: &'a [SlugVertex],
+  pub indices: &'a [u32],
+}
+
 #[derive(Debug)]
 pub struct GPUData {
   pub texture: vk::Image,
@@ -103,7 +109,7 @@ impl TextBuffers {
 
   pub fn new(
     device: &Device,
-    text_data: &PrepareTextResult,
+    text_data: &TextData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let text_vertices_size = (text_data.vertices.len() * size_of::<SlugVertex>()) as u64;
@@ -114,7 +120,7 @@ impl TextBuffers {
       device,
       Self::CURVES_FORMAT,
       slug::TEX_WIDTH as u32,
-      text_data.curve_tex_height as u32,
+      text_data.textures.curve_tex_height as u32,
       TEXTURE_USAGES,
       #[cfg(feature = "vl")]
       marker,
@@ -125,7 +131,7 @@ impl TextBuffers {
       device,
       Self::BANDS_FORMAT,
       slug::TEX_WIDTH as u32,
-      text_data.band_tex_height as u32,
+      text_data.textures.band_tex_height as u32,
       TEXTURE_USAGES,
       #[cfg(feature = "vl")]
       marker,
@@ -184,28 +190,28 @@ fn create_and_copy_from_staging_buffers(
   texture: vk::Image,
   texture_extent: vk::Extent2D,
   texture_data: Vec<u8>,
-  text_data: &PrepareTextResult,
+  text_data: &TextData,
   text_buffers: &TextBuffers,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
 ) -> Result<PendingDataInitialization, GPUDataAllocationError> {
   let text_vertices_size = (text_data.vertices.len() * size_of::<SlugVertex>()) as u64;
   let text_indices_size = (text_data.indices.len() * size_of::<u32>()) as u64;
 
-  let text_curve_len = slug::TEX_WIDTH * text_data.curve_tex_height * 4;
-  let text_band_len = slug::TEX_WIDTH * text_data.band_tex_height * 4;
+  let text_curve_len = slug::TEX_WIDTH * text_data.textures.curve_tex_height * 4;
+  let text_band_len = slug::TEX_WIDTH * text_data.textures.band_tex_height * 4;
 
   let text_curve_texture_size = (text_curve_len * size_of::<f32>()) as u64;
   let text_band_texture_size = (text_band_len * size_of::<u32>()) as u64;
   let text_curve_extent = vk::Extent2D {
     width: slug::TEX_WIDTH as u32,
-    height: text_data.curve_tex_height as u32,
+    height: text_data.textures.curve_tex_height as u32,
   };
   let text_band_extent = vk::Extent2D {
     width: slug::TEX_WIDTH as u32,
-    height: text_data.band_tex_height as u32,
+    height: text_data.textures.band_tex_height as u32,
   };
-  assert_eq!(text_data.curve_tex_data.len() * 4, text_curve_len);
-  assert_eq!(text_data.band_tex_data.len(), text_band_len);
+  assert_eq!(text_data.textures.curve_tex_data.len() * 4, text_curve_len);
+  assert_eq!(text_data.textures.band_tex_data.len(), text_band_len);
 
   let graphics_pool = command_pools::initialization::InitCommandBufferPool::new(
     device,
@@ -220,11 +226,11 @@ fn create_and_copy_from_staging_buffers(
       [
         (texture_data.as_ptr(), texture_data.len() as u64),
         (
-          text_data.curve_tex_data.as_ptr() as *const u8,
+          text_data.textures.curve_tex_data.as_ptr() as *const u8,
           text_curve_texture_size,
         ),
         (
-          text_data.band_tex_data.as_ptr() as *const u8,
+          text_data.textures.band_tex_data.as_ptr() as *const u8,
           text_band_texture_size,
         ),
         (VERTICES.as_ptr() as *const u8, VERTICES_SIZE),
@@ -312,7 +318,7 @@ impl GPUData {
     texture_format: vk::Format,
     texture_data: Vec<u8>,
     queues: &SingleQueues,
-    text_data: &PrepareTextResult,
+    text_data: &TextData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(Self, PendingDataInitialization), GPUDataAllocationError> {
     let texture = create_image(

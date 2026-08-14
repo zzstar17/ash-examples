@@ -14,8 +14,11 @@ use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   ferris::Ferris,
-  render::{gpu_data::GPUDataAllocationError, pipelines::TextPipeline},
-  slug::{self},
+  render::{
+    gpu_data::{GPUDataAllocationError, TextData},
+    pipelines::TextPipeline,
+  },
+  slug::SlugRendering,
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -228,7 +231,53 @@ impl Renderer {
     format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    let text = slug::prepare_text("olá gente :)", 150);
+    let font_bytes = std::fs::read("c:\\windows\\Fonts\\segoepr.ttf").unwrap();
+    let font = harfrust::FontRef::new(&font_bytes).expect("Failed to read font data");
+
+    let shaper_data = harfrust::ShaperData::new(&font);
+    let shaper = shaper_data.shaper(&font).build();
+    let mut slug = SlugRendering::new(&font_bytes);
+
+    let mut text_vertices = Vec::new();
+    let mut text_indices = Vec::new();
+    let font_size = 50;
+    slug.build_text(
+      &shaper,
+      "Sadly it doesn't yet",
+      font_size,
+      vk::Offset2D { x: 0, y: 0 },
+      &mut text_vertices,
+      &mut text_indices,
+    );
+    slug.build_text(
+      &shaper,
+      "support non standard fonts",
+      font_size,
+      vk::Offset2D {
+        x: 0,
+        y: -40 * font_size as i32,
+      },
+      &mut text_vertices,
+      &mut text_indices,
+    );
+    slug.build_text(
+      &shaper,
+      "that are not like arial",
+      font_size,
+      vk::Offset2D {
+        x: 0,
+        y: -80 * font_size as i32,
+      },
+      &mut text_vertices,
+      &mut text_indices,
+    );
+    let text_textures = slug.get_texture_data();
+
+    let text_data = TextData {
+      textures: text_textures,
+      vertices: &text_vertices,
+      indices: &text_indices,
+    };
 
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
@@ -237,7 +286,7 @@ impl Renderer {
       texture_format,
       texture_data,
       &queues,
-      &text,
+      &text_data,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )

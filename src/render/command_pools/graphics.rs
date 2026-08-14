@@ -91,7 +91,7 @@ impl GraphicsCommandBufferPool {
     let swapchain_width = swapchain_extent.width as i32;
     let swapchain_height = swapchain_extent.height as i32;
 
-    let text_pc = TextPushConstants::new(RENDER_EXTENT, [0.0, 400.0]);
+    let text_pc = TextPushConstants::new(RENDER_EXTENT, [10.0, 100.0]);
 
     // do a copy operation instead of blit if true
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
