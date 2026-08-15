@@ -1,8 +1,8 @@
 use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
 use core::f32;
-use harfrust::{script, Language, ShapeOptions, Shaper, UnicodeBuffer};
-use std::{collections::HashMap, fmt::Debug, mem::offset_of, ptr, str::FromStr};
+use harfrust::{ShapeOptions, Shaper, UnicodeBuffer};
+use std::{collections::HashMap, fmt::Debug, mem::offset_of, ptr};
 use ttf_parser::Face;
 
 // Band count is also hardcoded in the shader
@@ -25,35 +25,33 @@ pub struct PointRect {
   pub max: Point2<f32>,
 }
 
-fn expand_to_include(this: &mut ttf_parser::Rect, other: ttf_parser::Rect) {
-  if other.x_min > this.x_min {
-    this.x_min = other.x_min;
-  }
-  if other.y_min > this.y_min {
-    this.y_min = other.y_min;
-  }
-  if other.x_max > this.x_max {
-    this.x_max = other.x_max;
-  }
-  if other.y_max > this.y_max {
-    this.y_max = other.y_max;
-  }
-}
-
 impl PointRect {
-  // expand self rect to be at most as big as other
-  pub fn expand_to_include(&mut self, other: PointRect) {
-    if other.min.x > self.min.x {
-      self.min.x = other.min.x;
-    }
-    if other.min.y > self.min.y {
-      self.min.y = other.min.y;
-    }
-    if other.max.x > self.max.x {
-      self.max.x = other.max.x;
-    }
-    if other.max.y > self.max.y {
-      self.max.y = other.max.y;
+  pub const REVERSED_INFINITY: Self = PointRect {
+    min: Point2 {
+      x: f32::INFINITY,
+      y: f32::INFINITY,
+    },
+    max: Point2 {
+      x: f32::NEG_INFINITY,
+      y: f32::NEG_INFINITY,
+    },
+  };
+
+  pub fn height(&self) -> f32 {
+    self.max.y - self.min.y
+  }
+
+  /// Return PointRect that includes both
+  pub fn or(self, other: PointRect) -> Self {
+    Self {
+      min: Point2 {
+        x: self.min.x.min(other.min.x),
+        y: self.min.y.min(other.min.y),
+      },
+      max: Point2 {
+        x: self.max.x.max(other.max.x),
+        y: self.max.y.max(other.max.y),
+      },
     }
   }
 }
@@ -560,6 +558,12 @@ pub struct SlugRendering<'a> {
   glyph_processor: SlugGlyphProcessor,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MultilineRect {
+  pub first_line: PointRect,
+  pub total: PointRect,
+}
+
 impl<'a> SlugRendering<'a> {
   pub fn new(font_bytes: &'a [u8]) -> Self {
     let text_buffer = UnicodeBuffer::new();
@@ -586,14 +590,14 @@ impl<'a> SlugRendering<'a> {
     offset: vk::Offset2D,
     vertices: &mut Vec<SlugVertex>,
     indices: &mut Vec<u32>,
-  ) {
+  ) -> PointRect {
     let mut text_buffer = self.text_buffer.take().unwrap();
 
     text_buffer.push_str(text);
 
     text_buffer.set_direction(harfrust::Direction::LeftToRight);
-    text_buffer.set_script(script::LATIN);
-    text_buffer.set_language(Language::from_str("en").unwrap());
+    // text_buffer.set_script(script::LATIN);
+    // text_buffer.set_language(Language::from_str("en").unwrap());
 
     let glyph_buffer = shaper.shape(text_buffer, ShapeOptions::new());
     let scale = font_size as f32 / (shaper.units_per_em() as f32);
@@ -615,17 +619,7 @@ impl<'a> SlugRendering<'a> {
     let mut cursor_y = 0;
     // todo: probably change this to the actual command buffer
     let mut quad_idx: u32 = (vertices.len() / 4) as u32;
-    // let mut full_text_bounds = PointRect {
-    //   min: Point2 {
-    //     x: f32::MAX,
-    //     y: f32::MAX,
-    //   },
-    //   max: Point2 {
-    //     x: f32::MIN,
-    //     y: f32::MIN,
-    //   },
-    // };
-    // let mut full_text_bounds = ttf_parser::Rect { x_min: i16::MAX, y_min: i16::MAX, x_max: i16::MIN, y_max: i16::MIN };
+    let mut full_text_bounds = PointRect::REVERSED_INFINITY;
     for (info, pos) in glyph_buffer
       .glyph_infos()
       .iter()
@@ -670,14 +664,14 @@ impl<'a> SlugRendering<'a> {
       let area = PointRect {
         min: Point2 {
           x: x0_unscaled as f32 * scale,
-          y: -y0_unscaled as f32 * scale,
+          y: -y1_unscaled as f32 * scale,
         },
         max: Point2 {
           x: x1_unscaled as f32 * scale,
-          y: -y1_unscaled as f32 * scale,
+          y: -y0_unscaled as f32 * scale,
         },
       };
-      // full_text_bounds.expand_to_include(area);
+      full_text_bounds = full_text_bounds.or(area);
 
       // Band transform: maps em-space to band indices
       let band_scale_x = if width > 0 {
@@ -701,7 +695,7 @@ impl<'a> SlugRendering<'a> {
       let corners = [
         [
           area.min.x,
-          area.min.y,
+          area.max.y,
           -1.0,
           -1.0,
           bbox.x_min as f32,
@@ -709,7 +703,7 @@ impl<'a> SlugRendering<'a> {
         ], // bottom-left
         [
           area.max.x,
-          area.min.y,
+          area.max.y,
           1.0,
           -1.0,
           bbox.x_max as f32,
@@ -717,7 +711,7 @@ impl<'a> SlugRendering<'a> {
         ], // bottom-right
         [
           area.max.x,
-          area.max.y,
+          area.min.y,
           1.0,
           1.0,
           bbox.x_max as f32,
@@ -725,7 +719,7 @@ impl<'a> SlugRendering<'a> {
         ], // top-right
         [
           area.min.x,
-          area.max.y,
+          area.min.y,
           -1.0,
           1.0,
           bbox.x_min as f32,
@@ -771,7 +765,51 @@ impl<'a> SlugRendering<'a> {
       quad_idx += 1;
     }
 
-    self.text_buffer = Some(glyph_buffer.clear())
+    self.text_buffer = Some(glyph_buffer.clear());
+
+    full_text_bounds
+  }
+
+  pub fn build_lines(
+    &mut self,
+    shaper: &Shaper,
+    text: &[&str],
+    font_size: usize,
+    offset: vk::Offset2D,
+    line_distance: i32,
+    vertices: &mut Vec<SlugVertex>,
+    indices: &mut Vec<u32>,
+  ) -> MultilineRect {
+    assert!(
+      text.len() > 0,
+      "Slug build lines text must be at least one line"
+    );
+
+    let first_rect = self.build_text(shaper, text[0], font_size, offset, vertices, indices);
+
+    let mut total_rect = first_rect;
+    let mut line_offset = line_distance;
+    for &line in text[1..].iter() {
+      let line_rect = self.build_text(
+        shaper,
+        line,
+        font_size,
+        vk::Offset2D {
+          x: offset.x,
+          y: offset.y - (line_offset * font_size as i32),
+        },
+        vertices,
+        indices,
+      );
+
+      line_offset += line_distance;
+      total_rect = total_rect.or(line_rect);
+    }
+
+    MultilineRect {
+      first_line: first_rect,
+      total: total_rect,
+    }
   }
 
   pub fn get_texture_data(&'a self) -> SlugTextureData<'a> {

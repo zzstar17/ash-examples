@@ -231,8 +231,8 @@ impl Renderer {
     format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    let font_bytes = std::fs::read("c:\\windows\\Fonts\\segoepr.ttf").unwrap();
-    let font = harfrust::FontRef::new(&font_bytes).expect("Failed to read font data");
+    let font_bytes = std::fs::read("c:\\windows\\Fonts\\meiryo.ttc").unwrap();
+    let font = harfrust::FontRef::from_index(&font_bytes, 0).expect("Failed to read font data");
 
     let shaper_data = harfrust::ShaperData::new(&font);
     let shaper = shaper_data.shaper(&font).build();
@@ -240,45 +240,33 @@ impl Renderer {
 
     let mut text_vertices = Vec::new();
     let mut text_indices = Vec::new();
-    let font_size = 50;
-    slug.build_text(
+    let font_size = 30;
+    let text = [
+      "Looks like it does",
+      "support most fonts",
+      "僕を連れてって　浸み込んでしまう前に",
+      "見えないまま掴みたいとか　どうせ叶わないからさ",
+      "手はずっと濡れていて　いつか落としてしまうこと",
+      "まだ気付いてなかった",
+    ];
+    let full_size = slug.build_lines(
       &shaper,
-      "Sadly it doesn't yet",
+      &text,
       font_size,
       vk::Offset2D { x: 0, y: 0 },
+      90,
       &mut text_vertices,
       &mut text_indices,
     );
-    slug.build_text(
-      &shaper,
-      "support non standard fonts",
-      font_size,
-      vk::Offset2D {
-        x: 0,
-        y: -40 * font_size as i32,
-      },
-      &mut text_vertices,
-      &mut text_indices,
-    );
-    slug.build_text(
-      &shaper,
-      "that are not like arial",
-      font_size,
-      vk::Offset2D {
-        x: 0,
-        y: -80 * font_size as i32,
-      },
-      &mut text_vertices,
-      &mut text_indices,
-    );
+
     let text_textures = slug.get_texture_data();
 
     let text_data = TextData {
       textures: text_textures,
       vertices: &text_vertices,
       indices: &text_indices,
+      size: full_size,
     };
-
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
       &physical_device,

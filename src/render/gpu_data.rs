@@ -6,7 +6,7 @@ use crate::{
     create_objs::{create_buffer, create_image, create_image_view},
     render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
   },
-  slug::{self, SlugTextureData, SlugVertex},
+  slug::{self, MultilineRect, SlugTextureData, SlugVertex},
 };
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
@@ -61,6 +61,7 @@ pub struct TextData<'a> {
   pub textures: SlugTextureData<'a>,
   pub vertices: &'a [SlugVertex],
   pub indices: &'a [u32],
+  pub size: MultilineRect,
 }
 
 #[derive(Debug)]
@@ -74,6 +75,7 @@ pub struct GPUData {
   pub text: TextBuffers,
   pub text_curve_view: vk::ImageView,
   pub text_band_view: vk::ImageView,
+  pub text_size: MultilineRect,
 
   memories: Vec<DetailedMemory>,
 }
@@ -434,6 +436,7 @@ impl GPUData {
         text: text_buffers,
         text_band_view,
         text_curve_view,
+        text_size: text_data.size,
       },
       pending_device_init,
     ))
