@@ -14,6 +14,7 @@ use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   ferris::Ferris,
+  font,
   render::{
     gpu_data::{GPUDataAllocationError, TextData},
     pipelines::TextPipeline,
@@ -80,6 +81,8 @@ pub struct Renderer {
   descriptor_pool: DescriptorPool,
 
   screenshot_buffer: ScreenshotBuffer,
+
+  slug: SlugRendering<'static>,
 }
 
 struct Destructor<const N: usize> {
@@ -231,17 +234,16 @@ impl Renderer {
     format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    let font_bytes = std::fs::read("c:\\windows\\Fonts\\meiryo.ttc").unwrap();
-    let font = harfrust::FontRef::from_index(&font_bytes, 0).expect("Failed to read font data");
+    let shaper = font::SHAPER_DATA.shaper(&font::FONT_REF).build();
+    let mut slug = SlugRendering::new(&font::FONT_FACE, shaper);
 
-    let shaper_data = harfrust::ShaperData::new(&font);
-    let shaper = shaper_data.shaper(&font).build();
-    let mut slug = SlugRendering::new(&font_bytes);
+    slug.add_glyphs_in_str("0123456789");
 
     let mut text_vertices = Vec::new();
     let mut text_indices = Vec::new();
     let font_size = 30;
     let text = [
+      "fps: 60",
       "Looks like it does",
       "support most fonts",
       "僕を連れてって　浸み込んでしまう前に",
@@ -250,11 +252,10 @@ impl Renderer {
       "まだ気付いてなかった",
     ];
     let full_size = slug.build_lines(
-      &shaper,
       &text,
       font_size,
       vk::Offset2D { x: 0, y: 0 },
-      90,
+      1.5,
       &mut text_vertices,
       &mut text_indices,
     );
@@ -394,6 +395,8 @@ impl Renderer {
       render_targets,
       screenshot_buffer,
       text_pipeline,
+
+      slug,
     })
   }
 

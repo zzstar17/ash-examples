@@ -1,4 +1,5 @@
 mod ferris;
+mod font;
 mod render;
 mod slug;
 
@@ -29,6 +30,9 @@ const INITIAL_WINDOW_WIDTH: u32 = 800;
 const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
 const RESOLUTION: [u32; 2] = [800, 800];
+
+// get first that exists
+const TEXT_FONT: [&str; 3] = ["Source Code Pro", "Consolas", "Arial"];
 
 const SCREENSHOT_SAVE_FILE: &str = "last_screenshot.png";
 

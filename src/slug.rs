@@ -552,7 +552,8 @@ pub struct ProcessedGlyphData {
 
 pub struct SlugRendering<'a> {
   text_buffer: Option<UnicodeBuffer>,
-  font_face: Face<'a>,
+  pub shaper: Shaper<'a>,
+  pub font_face: &'a Face<'a>,
 
   processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>>,
   glyph_processor: SlugGlyphProcessor,
@@ -565,10 +566,9 @@ pub struct MultilineRect {
 }
 
 impl<'a> SlugRendering<'a> {
-  pub fn new(font_bytes: &'a [u8]) -> Self {
+  // make sure font_ref and shaper_data target the same font and index
+  pub fn new(font_face: &'a Face<'a>, shaper: Shaper<'a>) -> Self {
     let text_buffer = UnicodeBuffer::new();
-    let font_face = Face::parse(&font_bytes, 0).unwrap();
-    println!("Font face name: {:?}", font_face.names());
 
     // None for glyphs with no bounding box (like empty space)
     let processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>> = HashMap::new();
@@ -579,28 +579,19 @@ impl<'a> SlugRendering<'a> {
       font_face,
       processed_glyph_map,
       glyph_processor,
+      shaper,
     }
   }
 
-  pub fn build_text(
-    &mut self,
-    shaper: &Shaper,
-    text: &str,
-    font_size: usize,
-    offset: vk::Offset2D,
-    vertices: &mut Vec<SlugVertex>,
-    indices: &mut Vec<u32>,
-  ) -> PointRect {
+  // add glyphs to map and textures but not create vertices for them
+  pub fn add_glyphs_in_str(&mut self, text: &str) {
     let mut text_buffer = self.text_buffer.take().unwrap();
 
     text_buffer.push_str(text);
 
     text_buffer.set_direction(harfrust::Direction::LeftToRight);
-    // text_buffer.set_script(script::LATIN);
-    // text_buffer.set_language(Language::from_str("en").unwrap());
 
-    let glyph_buffer = shaper.shape(text_buffer, ShapeOptions::new());
-    let scale = font_size as f32 / (shaper.units_per_em() as f32);
+    let glyph_buffer = self.shaper.shape(text_buffer, ShapeOptions::new());
 
     // add new glyphs
     for glyph_info in glyph_buffer.glyph_infos() {
@@ -614,6 +605,33 @@ impl<'a> SlugRendering<'a> {
         .process_new_glyph(&self.font_face, glyph_id);
       self.processed_glyph_map.insert(glyph_id, processed_glyph);
     }
+
+    self.text_buffer = Some(glyph_buffer.clear());
+  }
+
+  pub fn get_bounding_box_from_char(&self, c: char) -> Option<ttf_parser::Rect> {
+    let glyph_id = self.font_face.glyph_index(c).unwrap();
+    let opt = self.processed_glyph_map.get(&glyph_id.0).unwrap();
+    opt.map(|data| data.bounding_box)
+  }
+
+  pub fn build_text(
+    &mut self,
+    text: &str,
+    font_size: usize,
+    // unscaled offset
+    offset: vk::Offset2D,
+    vertices: &mut Vec<SlugVertex>,
+    indices: &mut Vec<u32>,
+  ) -> PointRect {
+    let mut text_buffer = self.text_buffer.take().unwrap();
+
+    text_buffer.push_str(text);
+
+    text_buffer.set_direction(harfrust::Direction::LeftToRight);
+
+    let glyph_buffer = self.shaper.shape(text_buffer, ShapeOptions::new());
+    let scale = font_size as f32 / (self.shaper.units_per_em() as f32);
 
     let mut cursor_x = 0;
     let mut cursor_y = 0;
@@ -772,11 +790,10 @@ impl<'a> SlugRendering<'a> {
 
   pub fn build_lines(
     &mut self,
-    shaper: &Shaper,
     text: &[&str],
     font_size: usize,
     offset: vk::Offset2D,
-    line_distance: i32,
+    line_distance_mult: f32,
     vertices: &mut Vec<SlugVertex>,
     indices: &mut Vec<u32>,
   ) -> MultilineRect {
@@ -785,18 +802,18 @@ impl<'a> SlugRendering<'a> {
       "Slug build lines text must be at least one line"
     );
 
-    let first_rect = self.build_text(shaper, text[0], font_size, offset, vertices, indices);
+    let first_rect = self.build_text(text[0], font_size, offset, vertices, indices);
+    let line_distance = (self.font_face.ascender() as f32 * line_distance_mult) as i32;
 
     let mut total_rect = first_rect;
     let mut line_offset = line_distance;
     for &line in text[1..].iter() {
       let line_rect = self.build_text(
-        shaper,
         line,
         font_size,
         vk::Offset2D {
           x: offset.x,
-          y: offset.y - (line_offset * font_size as i32),
+          y: offset.y - line_offset,
         },
         vertices,
         indices,
