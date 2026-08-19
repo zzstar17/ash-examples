@@ -1,5 +1,5 @@
 use ash::vk;
-use std::{marker::PhantomData, ptr};
+use std::ptr;
 use vkallocator::HostMemorySyncError;
 use vkinitialization::{
   device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
@@ -19,7 +19,7 @@ use crate::{
   gpu_data::GPUData,
   initialization,
   pipelines::{self, GraphicsPipeline},
-  render_pass::create_render_pass,
+  IMAGE_FORMAT,
 };
 
 pub struct Renderer {
@@ -35,7 +35,6 @@ pub struct Renderer {
 
   command_pools: CommandPools,
 
-  render_pass: vk::RenderPass,
   pipeline: GraphicsPipeline,
 
   gpu_data: GPUData,
@@ -80,11 +79,12 @@ impl Renderer {
         }
       };
 
-    // PhysicalDeviceFeatures::default();
     let (device, queues) = Device::create(
       &instance,
       &physical_device_creation,
-      DeviceExtensions::default(),
+      DeviceExtensions {
+        ..Default::default()
+      },
       DeviceExtensions {
         memory_priority: true,
         pageable_device_local_memory: true,
@@ -92,6 +92,7 @@ impl Renderer {
       },
       DeviceFeatures {
         synchronization2: true,
+        dynamic_rendering: true,
         ..Default::default()
       },
       DeviceFeatures::default(),
@@ -107,15 +108,9 @@ impl Renderer {
       marker.set_queue_labels(queues);
     }
 
-    let render_pass = create_render_pass(&device).on_err(|_| unsafe {
-      destroy!(&device);
-      destroy_instance();
-    })?;
-
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
       &physical_device,
-      render_pass,
       vk::Extent2D {
         width: image_width,
         height: image_height,
@@ -126,14 +121,14 @@ impl Renderer {
       &marker,
     )
     .on_err(|_| unsafe {
-      destroy!(&device => &render_pass, &device);
+      destroy!(&device => &device);
       destroy_instance();
     })?;
 
     log::info!("Creating pipeline cache");
     let (pipeline_cache, created_from_file) =
       pipelines::create_pipeline_cache(&device, &physical_device).on_err(|_| unsafe {
-        destroy!(&device => &gpu_data_pending_initialization, &gpu_data, &render_pass, &device);
+        destroy!(&device => &gpu_data_pending_initialization, &gpu_data, &device);
         destroy_instance();
       })?;
     if created_from_file {
@@ -144,8 +139,8 @@ impl Renderer {
 
     log::debug!("Creating pipeline");
     let pipeline =
-      GraphicsPipeline::create(&device, pipeline_cache, render_pass).on_err(|_| unsafe {
-        destroy!(&device => &pipeline_cache, &gpu_data_pending_initialization, &gpu_data, &render_pass, &device);
+      GraphicsPipeline::create(&device, pipeline_cache, IMAGE_FORMAT).on_err(|_| unsafe {
+        destroy!(&device => &pipeline_cache, &gpu_data_pending_initialization, &gpu_data, &device);
         destroy_instance();
       })?;
 
@@ -160,7 +155,7 @@ impl Renderer {
 
     let command_pools = CommandPools::new(&device, &physical_device,#[cfg(feature = "vl")]
     &marker,).on_err(|_| unsafe {
-      destroy!(&device => &pipeline, &gpu_data_pending_initialization, &gpu_data_pending_initialization, &gpu_data, &render_pass, &device);
+      destroy!(&device => &pipeline, &gpu_data_pending_initialization, &gpu_data_pending_initialization, &gpu_data, &device);
       destroy_instance();
     })?;
 
@@ -168,7 +163,7 @@ impl Renderer {
       gpu_data_pending_initialization
         .wait_and_self_destroy(&device)
         .on_err(|_| {
-          destroy!(&device => &command_pools, &pipeline, &gpu_data, &render_pass, &device);
+          destroy!(&device => &command_pools, &pipeline, &gpu_data, &device);
           destroy_instance();
         })?;
     }
@@ -185,7 +180,6 @@ impl Renderer {
       queues,
       command_pools,
       gpu_data,
-      render_pass,
       pipeline,
     })
   }
@@ -195,7 +189,6 @@ impl Renderer {
     self.command_pools.graphics_pool.record_triangle(
       &self.device,
       &self.physical_device.queue_families,
-      self.render_pass,
       &self.pipeline,
       &self.gpu_data,
     )?;
@@ -229,48 +222,57 @@ impl Renderer {
     )
     .on_err(|_| unsafe { destroy!(&self.device => &image_clear_finished) })?;
 
-    let clear_image_submit = vk::SubmitInfo {
-      s_type: vk::StructureType::SUBMIT_INFO,
-      p_next: ptr::null(),
-      wait_semaphore_count: 0,
-      p_wait_semaphores: ptr::null(),
-      p_wait_dst_stage_mask: ptr::null(),
-      command_buffer_count: 1,
-      p_command_buffers: &self.command_pools.graphics_pool.triangle,
-      signal_semaphore_count: 1,
-      p_signal_semaphores: &image_clear_finished,
-      _marker: PhantomData,
-    };
-    let wait_for = vk::PipelineStageFlags::TRANSFER;
-    let transfer_image_submit = vk::SubmitInfo {
-      s_type: vk::StructureType::SUBMIT_INFO,
-      p_next: ptr::null(),
-      wait_semaphore_count: 1,
-      p_wait_semaphores: &image_clear_finished,
-      p_wait_dst_stage_mask: &wait_for,
-      command_buffer_count: 1,
-      p_command_buffers: &self.command_pools.transfer_pool.copy_image_to_buffer,
-      signal_semaphore_count: 0,
-      p_signal_semaphores: ptr::null(),
-      _marker: PhantomData,
-    };
+    let transfer_semaphores_info = [vk::SemaphoreSubmitInfo {
+      semaphore: image_clear_finished,
+      stage_mask: vk::PipelineStageFlags2::COPY,
+      ..Default::default()
+    }];
+    let graphics_command_buffer_info = [vk::CommandBufferSubmitInfo {
+      command_buffer: self.command_pools.graphics_pool.triangle,
+      ..Default::default()
+    }];
+    let transfer_command_buffer_info = [vk::CommandBufferSubmitInfo {
+      command_buffer: self.command_pools.transfer_pool.copy_image_to_buffer,
+      ..Default::default()
+    }];
+
+    let graphics_image_submit = [vk::SubmitInfo2 {
+      flags: vk::SubmitFlags::empty(),
+      wait_semaphore_info_count: 0,
+      p_wait_semaphore_infos: ptr::null(),
+      command_buffer_info_count: graphics_command_buffer_info.len() as u32,
+      p_command_buffer_infos: graphics_command_buffer_info.as_ptr(),
+      signal_semaphore_info_count: transfer_semaphores_info.len() as u32,
+      p_signal_semaphore_infos: transfer_semaphores_info.as_ptr(),
+      ..Default::default()
+    }];
+    let transfer_image_submit = [vk::SubmitInfo2 {
+      flags: vk::SubmitFlags::empty(),
+      wait_semaphore_info_count: transfer_semaphores_info.len() as u32,
+      p_wait_semaphore_infos: transfer_semaphores_info.as_ptr(),
+      command_buffer_info_count: transfer_command_buffer_info.len() as u32,
+      p_command_buffer_infos: transfer_command_buffer_info.as_ptr(),
+      signal_semaphore_info_count: 0,
+      p_signal_semaphore_infos: ptr::null(),
+      ..Default::default()
+    }];
 
     let destroy_objs = || unsafe { destroy!(&self.device => &image_clear_finished, &all_done) };
 
     unsafe {
       self
         .device
-        .queue_submit(
+        .queue_submit2(
           self.queues.graphics.handle,
-          &[clear_image_submit],
+          &graphics_image_submit,
           vk::Fence::null(),
         )
         .on_err(|_| destroy_objs())?;
       self
         .device
-        .queue_submit(
+        .queue_submit2(
           self.queues.transfer.handle,
-          &[transfer_image_submit],
+          &transfer_image_submit,
           all_done,
         )
         .on_err(|_| destroy_objs())?;
@@ -306,7 +308,7 @@ impl Drop for Renderer {
         .device_wait_idle()
         .expect("Failed to wait for the device to become idle during drop");
 
-      destroy!(&self.device => &self.command_pools, &self.gpu_data, &self.pipeline, &self.render_pass);
+      destroy!(&self.device => &self.command_pools, &self.gpu_data, &self.pipeline);
 
       ManuallyDestroyed::destroy_self(&self.device);
 

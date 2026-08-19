@@ -2,7 +2,7 @@
 
 This example draws a triangle on an image, copies it to host accessible memory and saves it to a file.
 
-It uses [Image clear example](https://github.com/zzstar17/ash-by-example/tree/main/compute_image_clear) as base and other concepts from [Storage image compute shader](https://github.com/zzstar17/ash-by-example/tree/main/storage_image_compute_shader). The compute pipeline is substituted with a graphics pipeline and it introduces render passes, vertex and index buffers.
+It uses [Image clear example](https://github.com/zzstar17/ash-by-example/tree/main/compute_image_clear) as base and other concepts from [Storage image compute shader](https://github.com/zzstar17/ash-by-example/tree/main/storage_image_compute_shader). The compute pipeline is replaced with a graphics pipeline and it uses dynamic rendering to draw the triangle using vertex and index buffers.
 
 You can run this example with:
 
@@ -30,6 +30,8 @@ pub struct Vertex {
 One in the final buffer, the vertices are read from continuous memory by the GPU.
 
 ## Code overview
+
+Todo: Render pass outdated, write more about pipeline creation
 
 - A render pass describes how image attachments are used through rendering. This is similar to creating pipeline barriers to transition image layouts and creating memory dependencies between stages, however it all needs to be specified before pipeline creation. It has multiple execution steps called subpasses. In this example, the render pass contains only one subpass and one attachment (the local image), as well as two memory dependencies for external synchronization to and from the subpass.
 - A framebuffer which is compatible with the render pass is created. This framebuffer takes a image view from the local image as an attachment to be used in rendering.

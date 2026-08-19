@@ -81,13 +81,13 @@ impl TransferCommandBufferPool {
       .unwrap_or(queue_families.graphics)
       .index;
     if graphics_family != transfer_family {
-      // matches to release found in compute
+      // matches to release found in graphics
       let src_acquire = vk::ImageMemoryBarrier2 {
         s_type: vk::StructureType::IMAGE_MEMORY_BARRIER_2,
         p_next: ptr::null(),
-        src_access_mask: vk::AccessFlags2::NONE, // NONE for ownership acquire,
+        src_access_mask: vk::AccessFlags2::NONE, // ownership acquire
         dst_access_mask: vk::AccessFlags2::TRANSFER_READ,
-        src_stage_mask: vk::PipelineStageFlags2::TRANSFER, // from semaphore
+        src_stage_mask: vk::PipelineStageFlags2::NONE, // ownership acquire
         dst_stage_mask: vk::PipelineStageFlags2::COPY,
         old_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
@@ -131,18 +131,14 @@ impl TransferCommandBufferPool {
     // flush memory to host (device writes are not automatically made available)
     // having the buffer reside in memory marked as coherent is not relevant to domain operations
     let flush_host = vk::BufferMemoryBarrier2 {
-      s_type: vk::StructureType::BUFFER_MEMORY_BARRIER_2,
-      p_next: ptr::null(),
       src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
       dst_access_mask: vk::AccessFlags2::HOST_READ,
       src_stage_mask: vk::PipelineStageFlags2::COPY,
       dst_stage_mask: vk::PipelineStageFlags2::HOST,
-      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
-      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
       buffer: dst_buffer,
       offset: 0,
       size: vk::WHOLE_SIZE,
-      _marker: PhantomData,
+      ..Default::default()
     };
     device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[flush_host], &[]));
 

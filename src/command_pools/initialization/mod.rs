@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr};
+use std::ptr;
 
 use ash::{vk, Device};
 use vkobjects::{
@@ -102,20 +102,22 @@ impl InitCommandBufferPool {
       Ok(v) => v,
       Err(err) => return Err((self, err.into())),
     };
-    let submit_info = vk::SubmitInfo {
-      s_type: vk::StructureType::SUBMIT_INFO,
-      p_next: ptr::null(),
-      wait_semaphore_count: 0,
-      p_wait_semaphores: ptr::null(),
-      p_wait_dst_stage_mask: ptr::null(),
-      command_buffer_count: 1,
-      p_command_buffers: &cb,
-      signal_semaphore_count: 0,
-      p_signal_semaphores: ptr::null(),
-      _marker: PhantomData,
-    };
+    let cb_info = [vk::CommandBufferSubmitInfo {
+      command_buffer: cb,
+      ..Default::default()
+    }];
+    let submit_info = [vk::SubmitInfo2 {
+      flags: vk::SubmitFlags::empty(),
+      wait_semaphore_info_count: 0,
+      p_wait_semaphore_infos: ptr::null(),
+      command_buffer_info_count: cb_info.len() as u32,
+      p_command_buffer_infos: cb_info.as_ptr(),
+      signal_semaphore_info_count: 0,
+      p_signal_semaphore_infos: ptr::null(),
+      ..Default::default()
+    }];
     unsafe {
-      if let Err(err) = device.queue_submit(queue, &[submit_info], fence) {
+      if let Err(err) = device.queue_submit2(queue, &submit_info, fence) {
         return Err((self, err.into()));
       }
     }

@@ -1,4 +1,5 @@
 use std::{
+  ffi::c_void,
   marker::PhantomData,
   ptr::{self, addr_of},
 };
@@ -24,7 +25,7 @@ impl GraphicsPipeline {
   pub fn create(
     device: &ash::Device,
     cache: vk::PipelineCache,
-    render_pass: vk::RenderPass,
+    render_format: vk::Format,
   ) -> Result<Self, PipelineCreationError> {
     let shader = shaders::Shader::load(device).map_err(PipelineCreationError::ShaderFailed)?;
     let shader_stages = shader.get_pipeline_shader_creation_info();
@@ -97,9 +98,18 @@ impl GraphicsPipeline {
     let layout = unsafe { device.create_pipeline_layout(&layout_create_info, None) }
       .map_err(OutOfMemoryError::from)?;
 
+    let render_formats = [render_format];
+    let rendering_create_info = vk::PipelineRenderingCreateInfo {
+      color_attachment_count: render_formats.len() as u32,
+      p_color_attachment_formats: render_formats.as_ptr(),
+      depth_attachment_format: vk::Format::UNDEFINED,
+      stencil_attachment_format: vk::Format::UNDEFINED,
+      ..Default::default()
+    };
+
     let create_info = vk::GraphicsPipelineCreateInfo {
       s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-      p_next: ptr::null(),
+      p_next: addr_of!(rendering_create_info) as *const c_void,
       flags: vk::PipelineCreateFlags::empty(),
       stage_count: shader_stages.len() as u32,
       p_stages: shader_stages.as_ptr(),
@@ -113,7 +123,7 @@ impl GraphicsPipeline {
       p_color_blend_state: &color_blend_state,
       p_dynamic_state: ptr::null(),
       layout,
-      render_pass,
+      render_pass: vk::RenderPass::null(), // replaced by dynamic rendering
       subpass: 0,
       base_pipeline_handle: vk::Pipeline::null(),
       base_pipeline_index: -1, // -1 for null

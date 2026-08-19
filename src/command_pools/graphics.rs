@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr};
+use std::ptr;
 
 use ash::vk;
 use vkinitialization::device::QueueFamilies;
@@ -54,7 +54,6 @@ impl GraphicsCommandBufferPool {
     &mut self,
     device: &ash::Device,
     queue_families: &QueueFamilies,
-    render_pass: vk::RenderPass,
     pipeline: &GraphicsPipeline,
     data: &GPUData,
   ) -> Result<(), OutOfMemoryError> {
@@ -63,38 +62,7 @@ impl GraphicsCommandBufferPool {
       vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     device.begin_command_buffer(cb, &begin_info)?;
 
-    {
-      let clear_value = vk::ClearValue {
-        color: BACKGROUND_COLOR,
-      };
-      let render_pass_begin_info = vk::RenderPassBeginInfo {
-        s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
-        p_next: ptr::null(),
-        render_pass,
-        framebuffer: data.r_target_framebuffer,
-        // whole image
-        render_area: vk::Rect2D {
-          offset: vk::Offset2D { x: 0, y: 0 },
-          extent: vk::Extent2D {
-            width: IMAGE_WIDTH,
-            height: IMAGE_HEIGHT,
-          },
-        },
-        clear_value_count: 1,
-        p_clear_values: &clear_value,
-        _marker: PhantomData,
-      };
-      device.cmd_begin_render_pass(cb, &render_pass_begin_info, vk::SubpassContents::INLINE);
-
-      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer], &[0]);
-      device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
-      device.cmd_draw_indexed(cb, INDICES.len() as u32, 1, 0, 0, 0);
-
-      device.cmd_end_render_pass(cb);
-    }
-
-    // image has 1 mip_level / 1 array layer
+    // 1 mip_level / 1 array layer
     let subresource_range = vk::ImageSubresourceRange {
       aspect_mask: vk::ImageAspectFlags::COLOR,
       base_mip_level: 0,
@@ -103,8 +71,83 @@ impl GraphicsCommandBufferPool {
       layer_count: 1,
     };
 
-    // After the render pass finishes the image will already have the correct layout, so only a
-    // queue ownership transfer is necessary
+    // change image initial layout
+    {
+      let prepare_color_attachment_write = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        old_layout: vk::ImageLayout::UNDEFINED,
+        new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        image: data.render_target,
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(
+        cb,
+        &dependency_info(&[], &[], &[prepare_color_attachment_write]),
+      );
+    }
+
+    {
+      let clear_value = vk::ClearValue {
+        color: BACKGROUND_COLOR,
+      };
+      let color_attachments = [vk::RenderingAttachmentInfo {
+        image_view: data.render_target_view,
+        image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        resolve_mode: vk::ResolveModeFlags::NONE,
+        resolve_image_view: vk::ImageView::null(),
+        resolve_image_layout: vk::ImageLayout::UNDEFINED,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        clear_value,
+        ..Default::default()
+      }];
+      let rendering_info = vk::RenderingInfo {
+        flags: vk::RenderingFlags::empty(),
+        render_area: vk::Rect2D {
+          offset: vk::Offset2D { x: 0, y: 0 },
+          extent: vk::Extent2D {
+            width: IMAGE_WIDTH,
+            height: IMAGE_HEIGHT,
+          },
+        },
+        layer_count: 1,
+        view_mask: 0,
+        color_attachment_count: color_attachments.len() as u32,
+        p_color_attachments: color_attachments.as_ptr(),
+        p_depth_attachment: ptr::null(),
+        p_stencil_attachment: ptr::null(),
+        ..Default::default()
+      };
+      device.cmd_begin_rendering(cb, &rendering_info);
+
+      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.pipeline);
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer], &[0]);
+      device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
+      device.cmd_draw_indexed(cb, INDICES.len() as u32, 1, 0, 0, 0);
+
+      device.cmd_end_rendering(cb);
+    }
+
+    {
+      let wait_before_copy = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        dst_access_mask: vk::AccessFlags2::TRANSFER_READ,
+        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags2::COPY,
+        old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        image: data.render_target,
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_before_copy]));
+    }
+
+    // perform a queue family ownership transfer if the queue families are not the same
     let graphics_family = queue_families.graphics.index;
     let transfer_family = queue_families
       .transfer
@@ -112,19 +155,17 @@ impl GraphicsCommandBufferPool {
       .index;
     if graphics_family != transfer_family {
       let release = vk::ImageMemoryBarrier2 {
-        s_type: vk::StructureType::IMAGE_MEMORY_BARRIER_2,
-        p_next: ptr::null(),
-        src_stage_mask: vk::PipelineStageFlags2::TRANSFER, // from render pass
-        dst_stage_mask: vk::PipelineStageFlags2::TRANSFER,
-        src_access_mask: vk::AccessFlags2::NONE, // from render pass
-        dst_access_mask: vk::AccessFlags2::NONE, // NONE for ownership release
+        src_access_mask: vk::AccessFlags2::TRANSFER_READ,
+        dst_access_mask: vk::AccessFlags2::empty(), // ownership release
+        src_stage_mask: vk::PipelineStageFlags2::COPY,
+        dst_stage_mask: vk::PipelineStageFlags2::empty(), // ownership release
         old_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         src_queue_family_index: graphics_family,
         dst_queue_family_index: transfer_family,
         image: data.render_target,
         subresource_range,
-        _marker: PhantomData,
+        ..Default::default()
       };
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[release]));
     }

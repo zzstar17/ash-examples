@@ -15,7 +15,6 @@ use vkobjects::{
 use crate::{
   command_pools::{self, initialization::PendingInitialization},
   create_objs::{create_buffer, create_image, create_image_view},
-  render_pass::create_framebuffer,
   vertices::Vertex,
   INDICES, VERTICES,
 };
@@ -40,8 +39,7 @@ pub enum GPUDataAllocationError {
 #[derive(Debug)]
 pub struct GPUData {
   pub render_target: vk::Image,
-  pub r_target_image_view: vk::ImageView,
-  pub r_target_framebuffer: vk::Framebuffer,
+  pub render_target_view: vk::ImageView,
 
   pub vertex_buffer: vk::Buffer,
   pub index_buffer: vk::Buffer,
@@ -140,7 +138,6 @@ impl GPUData {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    render_pass: vk::RenderPass,
     render_extent: vk::Extent2D,
     output_size: u64,
     queues: &SingleQueues,
@@ -239,22 +236,13 @@ impl GPUData {
     memories.extend_from_slice(host_output_buffer_alloc.get_memories());
     log::info!("Allocated memory count: {}", memories.len());
 
-    let r_target_image_view = create_image_view(device, render_target)
+    let render_target_view = create_image_view(device, render_target)
     .on_err(|_| unsafe {destroy!(device => &host_output_buffer, &render_target, &pending_device_init, &index_buffer, &vertex_buffer, memories.as_slice()) })?;
-
-    let r_target_framebuffer = create_framebuffer(
-      device,
-      render_pass,
-      r_target_image_view,
-      render_extent,
-    ).on_err(|_| unsafe {
-      destroy!(device => &r_target_image_view, &host_output_buffer, &render_target, &pending_device_init, &index_buffer, &vertex_buffer, memories.as_slice()) })?;
 
     Ok((
       Self {
         render_target,
-        r_target_framebuffer,
-        r_target_image_view,
+        render_target_view,
         vertex_buffer,
         index_buffer,
         host_output_buffer,
@@ -278,8 +266,7 @@ impl GPUData {
 
 impl DeviceManuallyDestroyed for GPUData {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.r_target_framebuffer.destroy_self(device);
-    self.r_target_image_view.destroy_self(device);
+    self.render_target_view.destroy_self(device);
     self.render_target.destroy_self(device);
 
     self.vertex_buffer.destroy_self(device);
