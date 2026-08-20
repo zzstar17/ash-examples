@@ -7,7 +7,6 @@ mod gpu_data;
 mod initialization;
 mod pipelines;
 mod render_object;
-mod render_pass;
 mod render_targets;
 mod renderer;
 mod screenshot_buffer;
