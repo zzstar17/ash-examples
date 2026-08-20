@@ -1,8 +1,9 @@
 use std::{
+  ffi::c_void,
   marker::PhantomData,
   mem::{self, size_of},
   ops::BitOr,
-  ptr::{self},
+  ptr::{self, addr_of},
 };
 
 use ash::vk::{self, Handle};
@@ -66,8 +67,8 @@ impl TextPipeline {
   pub fn new(
     device: &ash::Device,
     cache: vk::PipelineCache,
-    render_pass: vk::RenderPass,
     descriptor_pool: &DescriptorPool,
+    render_format: vk::Format,
     extent: vk::Extent2D,
   ) -> Result<Self, PipelineCreationError> {
     let layout = Self::create_layout(device, descriptor_pool)?;
@@ -79,7 +80,7 @@ impl TextPipeline {
       &shader,
       cache,
       vk::Pipeline::null(),
-      render_pass,
+      render_format,
       extent,
     )?;
 
@@ -96,7 +97,7 @@ impl TextPipeline {
     &mut self,
     device: &ash::Device,
     cache: vk::PipelineCache,
-    render_pass: vk::RenderPass,
+    render_format: vk::Format,
     extent: vk::Extent2D,
   ) -> Result<(), PipelineCreationError> {
     assert!(self.old.is_none());
@@ -107,7 +108,7 @@ impl TextPipeline {
       &self.shader,
       cache,
       self.current,
-      render_pass,
+      render_format,
       extent,
     )?;
 
@@ -164,7 +165,7 @@ impl TextPipeline {
     shader: &TextShader,
     cache: vk::PipelineCache,
     base: vk::Pipeline,
-    render_pass: vk::RenderPass,
+    render_format: vk::Format,
     extent: vk::Extent2D,
   ) -> Result<vk::Pipeline, PipelineCreationError> {
     let shader_stages = shader.get_pipeline_shader_creation_info();
@@ -224,13 +225,22 @@ impl TextPipeline {
       _marker: PhantomData,
     };
 
+    let render_formats = [render_format];
+    let rendering_create_info = vk::PipelineRenderingCreateInfo {
+      color_attachment_count: render_formats.len() as u32,
+      p_color_attachment_formats: render_formats.as_ptr(),
+      depth_attachment_format: vk::Format::UNDEFINED,
+      stencil_attachment_format: vk::Format::UNDEFINED,
+      ..Default::default()
+    };
+
     let mut flags = vk::PipelineCreateFlags::ALLOW_DERIVATIVES;
     if !base.is_null() {
       flags = flags.bitor(vk::PipelineCreateFlags::DERIVATIVE)
     }
     let create_info = vk::GraphicsPipelineCreateInfo {
       s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
-      p_next: ptr::null(),
+      p_next: addr_of!(rendering_create_info) as *const c_void,
       flags,
       stage_count: shader_stages.len() as u32,
       p_stages: shader_stages.as_ptr(),
@@ -244,7 +254,7 @@ impl TextPipeline {
       p_color_blend_state: &color_blend_state,
       p_dynamic_state: ptr::null(),
       layout,
-      render_pass,
+      render_pass: vk::RenderPass::null(),
       subpass: 0,
       base_pipeline_handle: base,
       base_pipeline_index: -1, // -1 for null

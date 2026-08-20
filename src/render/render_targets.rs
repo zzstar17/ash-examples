@@ -10,7 +10,6 @@ use vkobjects::{
 
 use super::{
   create_objs::{create_image, create_image_view},
-  render_pass::create_framebuffer,
   FRAMES_IN_FLIGHT, RENDER_EXTENT,
 };
 
@@ -21,7 +20,6 @@ pub struct RenderTargets {
   pub images: [vk::Image; FRAMES_IN_FLIGHT],
   pub memories: Box<[DetailedMemory]>,
   pub image_views: [vk::ImageView; FRAMES_IN_FLIGHT],
-  pub framebuffers: [vk::Framebuffer; FRAMES_IN_FLIGHT],
 }
 
 impl RenderTargets {
@@ -30,7 +28,6 @@ impl RenderTargets {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    render_pass: vk::RenderPass,
     render_format: vk::Format,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, AllocationError> {
@@ -85,27 +82,16 @@ impl RenderTargets {
     )
     .on_err(|_| unsafe { destroy!(device => images.as_ref(), &alloc) })?;
 
-    let framebuffers = fill_destroyable_array_from_iter!(
-      device,
-      image_views
-        .iter()
-        .map(|view| create_framebuffer(device, render_pass, *view, RENDER_EXTENT)),
-      FRAMES_IN_FLIGHT
-    )
-    .on_err(|_| unsafe { destroy!(device => image_views.as_ref(), images.as_ref(), &alloc) })?;
-
     Ok(Self {
       images,
       image_views,
       memories: Box::from(alloc.get_memories()),
-      framebuffers,
     })
   }
 }
 
 impl DeviceManuallyDestroyed for RenderTargets {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.framebuffers.destroy_self(device);
     self.image_views.destroy_self(device);
     self.images.destroy_self(device);
     self.memories.destroy_self(device);

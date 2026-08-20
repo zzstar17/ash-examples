@@ -32,7 +32,6 @@ use super::{
   initialization::{self},
   pipelines::{self, GraphicsPipeline},
   render_object::RenderPosition,
-  render_pass::create_render_pass,
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
@@ -68,8 +67,6 @@ pub struct Renderer {
   surface: Surface,
 
   pub swapchains: Swapchains,
-
-  render_pass: vk::RenderPass,
   render_targets: RenderTargets,
 
   pipeline_cache: vk::PipelineCache,
@@ -186,6 +183,7 @@ impl Renderer {
       },
       DeviceFeatures {
         synchronization2: true,
+        dynamic_rendering: true,
         ..Default::default()
       },
       DeviceFeatures {
@@ -288,14 +286,10 @@ impl Renderer {
     // vkCmdCopyImage does not convert formats, while vkCmdBlitImage does, so using different formats
     // would mean not using vkCmdCopyImage at all anymore
     let render_format = swapchains.get_format();
-    let render_pass =
-      create_render_pass(&device, render_format).on_err(|_| unsafe { destructor.fire(&device) })?;
-    destructor.push(&render_pass);
 
     let render_targets = RenderTargets::new(
       &device,
       &physical_device,
-      render_pass,
       render_format,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
@@ -329,8 +323,8 @@ impl Renderer {
     let graphics_pipeline = GraphicsPipeline::new(
       &device,
       pipeline_cache,
-      render_pass,
       &descriptor_pool,
+      render_format,
       RENDER_EXTENT,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
@@ -339,8 +333,8 @@ impl Renderer {
     let text_pipeline = TextPipeline::new(
       &device,
       pipeline_cache,
-      render_pass,
       &descriptor_pool,
+      render_format,
       RENDER_EXTENT,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
@@ -387,7 +381,6 @@ impl Renderer {
       queues,
       command_pools,
       data: gpu_data,
-      render_pass,
       pipeline: graphics_pipeline,
       pipeline_cache,
       swapchains,
@@ -411,7 +404,6 @@ impl Renderer {
     self.command_pools[frame_i].record_main(
       frame_i,
       &self.device,
-      self.render_pass,
       &self.render_targets,
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
@@ -457,9 +449,6 @@ impl Renderer {
       self.cleanup_after_old_swapchain(cur_total_frame);
     }
 
-    let mut new_render_pass = None;
-    let mut new_render_targets = None;
-
     // shouldn't happen commonly
     if changes.format {
       log::info!("Changing swapchain format");
@@ -479,62 +468,38 @@ impl Renderer {
 
       // recreate all objects that depend on image format (but not on extent)
       let new_format = self.swapchains.get_format();
-      new_render_pass = Some(
-        create_render_pass(&self.device, new_format)
-          .on_err(|_| self.swapchains.revert_recreate(&self.device))?,
-      );
-      new_render_targets = Some(
-        RenderTargets::new(
-          &self.device,
-          &self.physical_device,
-          new_render_pass.unwrap(),
-          new_format,
-          #[cfg(feature = "vl")]
-          &self.debug_utils_marker,
-        )
-        .on_err(|_| {
-          new_render_pass.unwrap().destroy_self(&self.device);
-          self.swapchains.revert_recreate(&self.device)
-        })?,
-      );
-    } else if !changes.extent {
-      log::warn!(
-        "[Frame {}] Recreating swapchain without any extent or format change",
-        cur_total_frame
-      );
-    }
+      let new_render_targets = RenderTargets::new(
+        &self.device,
+        &self.physical_device,
+        new_format,
+        #[cfg(feature = "vl")]
+        &self.debug_utils_marker,
+      )
+      .on_err(|_| self.swapchains.revert_recreate(&self.device))?;
 
-    // recreate pipeline because of a new render pass
-    if changes.format {
       log::info!("[Frame {}] Recreating pipeline", cur_total_frame);
       match self.pipeline.recreate(
         &self.device,
         self.pipeline_cache,
-        self.render_pass,
+        self.swapchains.get_format(),
         RENDER_EXTENT,
       ) {
         Ok(v) => v,
         Err(err) => unsafe {
-          if let Some(render_targets) = new_render_targets {
-            render_targets.destroy_self(&self.device);
-          }
-          if let Some(render_pass) = new_render_pass {
-            render_pass.destroy_self(&self.device);
-          }
+          new_render_targets.destroy_self(&self.device);
           self.swapchains.revert_recreate(&self.device);
 
           return Err(err.into());
         },
       }
-    }
 
-    if let Some(new) = new_render_pass {
-      self.render_pass.destroy_self(&self.device);
-      self.render_pass = new;
-    }
-    if let Some(new) = new_render_targets {
       self.render_targets.destroy_self(&self.device);
-      self.render_targets = new;
+      self.render_targets = new_render_targets;
+    } else if !changes.extent {
+      log::warn!(
+        "[Frame {}] Recreating swapchain without any extent or format change",
+        cur_total_frame
+      );
     }
 
     Ok(())
@@ -621,7 +586,6 @@ impl Drop for Renderer {
       self.data.destroy_self(&self.device);
 
       self.render_targets.destroy_self(&self.device);
-      self.render_pass.destroy_self(&self.device);
       self.swapchains.destroy_self(&self.device);
 
       ManuallyDestroyed::destroy_self(&self.surface);
