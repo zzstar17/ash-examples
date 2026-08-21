@@ -47,7 +47,15 @@ pub enum GPUDataAllocationError {
   QueueSubmitError(#[from] QueueSubmitError),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
+pub struct SpriteBuffers {
+  pub texture: vk::Image,
+
+  pub quad_vertices: vk::Buffer,
+  pub quad_indices: vk::Buffer,
+}
+
+#[derive(Debug, Clone, Copy)]
 pub struct TextBuffers {
   pub curve_texture: vk::Image,
   pub band_texture: vk::Image,
@@ -64,18 +72,26 @@ pub struct TextData<'a> {
   pub size: MultilineRect,
 }
 
+pub struct ImageViews {
+  pub sprite: vk::ImageView,
+  pub text_curve: vk::ImageView,
+  pub text_band: vk::ImageView,
+  pub ui: vk::ImageView,
+}
+
 #[derive(Debug)]
 pub struct GPUData {
-  pub texture: vk::Image,
-  pub texture_view: vk::ImageView,
-
-  pub vertex_buffer: vk::Buffer,
-  pub index_buffer: vk::Buffer,
+  pub sprite_buffers: SpriteBuffers,
+  pub sprite_view: vk::ImageView,
 
   pub text: TextBuffers,
   pub text_curve_view: vk::ImageView,
   pub text_band_view: vk::ImageView,
   pub text_size: MultilineRect,
+
+  pub ui: vk::Image,
+  pub ui_view: vk::ImageView,
+  pub ui_size: vk::Extent2D,
 
   memories: Vec<DetailedMemory>,
 }
@@ -102,6 +118,54 @@ impl DeviceManuallyDestroyed for PendingDataInitialization {
     if let Err(err) = self.wait_and_self_destroy(device) {
       log::error!("PendingDataInitialization failed to destroy self: {}", err);
     }
+  }
+}
+
+impl SpriteBuffers {
+  pub fn new(
+    device: &Device,
+    texture_extent: vk::Extent2D,
+    render_format: vk::Format,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, GPUDataAllocationError> {
+    let texture = create_image(
+      device,
+      render_format,
+      texture_extent.width,
+      texture_extent.height,
+      TEXTURE_USAGES,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Texture",
+    )?;
+
+    let quad_vertices: vk::Buffer = create_buffer(
+      device,
+      VERTICES_SIZE,
+      vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Vertex buffer",
+    )
+    .on_err(|_| unsafe { texture.destroy_self(device) })?;
+    let quad_indices: vk::Buffer = create_buffer(
+      device,
+      QUAD_INDICES_SIZE,
+      vk::BufferUsageFlags::INDEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Index buffer",
+    )
+    .on_err(|_| unsafe { destroy!(device => &quad_vertices, &texture) })?;
+
+    Ok(Self {
+      texture,
+      quad_vertices,
+      quad_indices,
+    })
   }
 }
 
@@ -173,13 +237,34 @@ impl TextBuffers {
   }
 }
 
-impl DeviceManuallyDestroyed for TextBuffers {
-  unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.curve_texture.destroy_self(device);
-    self.band_texture.destroy_self(device);
+impl ImageViews {
+  pub fn new(
+    device: &Device,
+    render_format: vk::Format,
+    sprite_buffers: &SpriteBuffers,
+    text_buffers: &TextBuffers,
+    ui: vk::Image,
+  ) -> Result<Self, OutOfMemoryError> {
+    let sprite = create_image_view(device, sprite_buffers.texture, render_format)?;
 
-    self.vertices.destroy_self(device);
-    self.indices.destroy_self(device);
+    let text_curve = create_image_view(
+      device,
+      text_buffers.curve_texture,
+      TextBuffers::CURVES_FORMAT,
+    )
+    .on_err(|_| unsafe { destroy!(device => &sprite) })?;
+    let text_band = create_image_view(device, text_buffers.band_texture, TextBuffers::BANDS_FORMAT)
+      .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
+
+    let ui = create_image_view(device, ui, render_format)
+      .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
+
+    Ok(Self {
+      sprite,
+      text_curve,
+      text_band,
+      ui,
+    })
   }
 }
 
@@ -187,11 +272,9 @@ fn create_and_copy_from_staging_buffers(
   device: &Device,
   physical_device: &PhysicalDevice,
   queues: &SingleQueues,
-  vertex_buffer: vk::Buffer,
-  index_buffer: vk::Buffer,
-  texture: vk::Image,
-  texture_extent: vk::Extent2D,
-  texture_data: Vec<u8>,
+  sprite_buffers: &SpriteBuffers,
+  sprite_texture_extent: vk::Extent2D,
+  sprite_texture_data: Vec<u8>,
   text_data: &TextData,
   text_buffers: &TextBuffers,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
@@ -226,7 +309,10 @@ fn create_and_copy_from_staging_buffers(
       device,
       physical_device,
       [
-        (texture_data.as_ptr(), texture_data.len() as u64),
+        (
+          sprite_texture_data.as_ptr(),
+          sprite_texture_data.len() as u64,
+        ),
         (
           text_data.textures.curve_tex_data.as_ptr() as *const u8,
           text_curve_texture_size,
@@ -252,8 +338,8 @@ fn create_and_copy_from_staging_buffers(
     graphics_pool.record_copy_staging_buffer_to_image(
       device,
       staging_buffers.buffers[0],
-      texture,
-      texture_extent,
+      sprite_buffers.texture,
+      sprite_texture_extent,
       vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
     );
     graphics_pool.record_copy_staging_buffer_to_image(
@@ -273,13 +359,13 @@ fn create_and_copy_from_staging_buffers(
     graphics_pool.record_copy_staging_buffer_to_buffer(
       device,
       staging_buffers.buffers[3],
-      vertex_buffer,
+      sprite_buffers.quad_vertices,
       VERTICES_SIZE,
     );
     graphics_pool.record_copy_staging_buffer_to_buffer(
       device,
       staging_buffers.buffers[4],
-      index_buffer,
+      sprite_buffers.quad_indices,
       QUAD_INDICES_SIZE,
     );
     graphics_pool.record_copy_staging_buffer_to_buffer(
@@ -316,45 +402,34 @@ impl GPUData {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
-    texture_extent: vk::Extent2D,
-    texture_format: vk::Format,
-    texture_data: Vec<u8>,
+    render_format: vk::Format,
+    sprite_texture_extent: vk::Extent2D,
+    sprite_texture_data: Vec<u8>,
     queues: &SingleQueues,
     text_data: &TextData,
+    text_ui_size: vk::Extent2D,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(Self, PendingDataInitialization), GPUDataAllocationError> {
-    let texture = create_image(
+    let ui = create_image(
       device,
-      texture_format,
-      texture_extent.width,
-      texture_extent.height,
-      TEXTURE_USAGES,
+      render_format,
+      text_ui_size.width,
+      text_ui_size.height,
+      vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::SAMPLED),
       #[cfg(feature = "vl")]
       marker,
       #[cfg(feature = "vl")]
-      c"Texture",
+      c"Text UI",
     )?;
 
-    let vertex_buffer: vk::Buffer = create_buffer(
+    let sprite_buffers = SpriteBuffers::new(
       device,
-      VERTICES_SIZE,
-      vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
+      sprite_texture_extent,
+      render_format,
       #[cfg(feature = "vl")]
       marker,
-      #[cfg(feature = "vl")]
-      c"Vertex buffer",
     )
-    .on_err(|_| unsafe { texture.destroy_self(device) })?;
-    let index_buffer: vk::Buffer = create_buffer(
-      device,
-      QUAD_INDICES_SIZE,
-      vk::BufferUsageFlags::INDEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
-      #[cfg(feature = "vl")]
-      marker,
-      #[cfg(feature = "vl")]
-      c"Index buffer",
-    )
-    .on_err(|_| unsafe { destroy!(device => &vertex_buffer, &texture) })?;
+    .on_err(|_| unsafe { destroy!(device => &ui) })?;
 
     let text_buffers = TextBuffers::new(
       device,
@@ -362,7 +437,7 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
     )
-    .on_err(|_| unsafe { destroy!(device => &index_buffer, &vertex_buffer, &texture) })?;
+    .on_err(|_| unsafe { destroy!(device => &sprite_buffers, &ui) })?;
 
     let device_alloc = vkallocator::allocate_and_bind_memory(
       device,
@@ -372,11 +447,12 @@ impl GPUData {
         vk::MemoryPropertyFlags::empty(),
       ],
       [
-        &texture,
+        &sprite_buffers.quad_vertices,
+        &sprite_buffers.quad_indices,
+        &sprite_buffers.texture,
+        &ui,
         &text_buffers.curve_texture,
         &text_buffers.band_texture,
-        &vertex_buffer,
-        &index_buffer,
         &text_buffers.vertices,
         &text_buffers.indices,
       ],
@@ -384,76 +460,87 @@ impl GPUData {
       false,
       #[cfg(feature = "log_alloc")]
       Some([
-        "Ferris",
+        "Quad vertices",
+        "Quad indices",
+        "Sprite texture",
+        "Text UI",
         "Text curve texture",
         "Text band texture",
-        "Vertex buffer",
-        "Index buffer",
         "Text vertices",
         "Text indices",
       ]),
       #[cfg(feature = "log_alloc")]
-      "Constant data",
+      "Constant allocation data",
     )
-    .on_err(|_| unsafe {
-      destroy!(device => &text_buffers, &texture, &index_buffer, &vertex_buffer)
-    })?;
+    .on_err(|_| unsafe { destroy!(device => &text_buffers, &sprite_buffers, &ui) })?;
 
     let pending_device_init = create_and_copy_from_staging_buffers(
       device,
       physical_device,
       queues,
-      vertex_buffer,
-      index_buffer,
-      texture,
-      texture_extent,
-      texture_data,
+      &sprite_buffers,
+      sprite_texture_extent,
+      sprite_texture_data,
       text_data,
       &text_buffers,
       #[cfg(feature = "vl")]
       marker,
     )
     .on_err(|_| unsafe {
-      destroy!(device =>  &text_buffers, &texture, &index_buffer, &vertex_buffer, &device_alloc)
+      destroy!(device => &text_buffers, &sprite_buffers, &ui, &device_alloc)
     })?;
 
     let memories = device_alloc.get_memories().to_vec();
     log::info!("Allocated memory count: {}", memories.len());
 
-    let texture_view = create_image_view(device, texture, texture_format)
-    .on_err(|_| unsafe {destroy!(device => &pending_device_init, &text_buffers, &texture, &index_buffer, &vertex_buffer, memories.as_slice()) })?;
-
-    let text_curve_view = create_image_view(device, text_buffers.curve_texture, TextBuffers::CURVES_FORMAT).on_err(|_| unsafe {destroy!(device => &texture_view, &pending_device_init, &text_buffers, &texture, &index_buffer, &vertex_buffer, memories.as_slice()) })?;
-    let text_band_view = create_image_view(device, text_buffers.band_texture, TextBuffers::BANDS_FORMAT).on_err(|_| unsafe {destroy!(device => &text_curve_view, &texture_view, &pending_device_init, &text_buffers, &texture, &index_buffer, &vertex_buffer, memories.as_slice()) })?;
+    let views = ImageViews::new(device, render_format, &sprite_buffers, &text_buffers, ui)
+      .on_err(|_| unsafe {destroy!(device => &pending_device_init, &text_buffers, &sprite_buffers, &ui, memories.as_slice()) })?;
 
     Ok((
       Self {
-        texture,
-        texture_view,
-        vertex_buffer,
-        index_buffer,
+        sprite_buffers,
+        sprite_view: views.sprite,
         memories,
         text: text_buffers,
-        text_band_view,
-        text_curve_view,
+        text_band_view: views.text_band,
+        text_curve_view: views.text_curve,
         text_size: text_data.size,
+        ui,
+        ui_view: views.ui,
+        ui_size: text_ui_size,
       },
       pending_device_init,
     ))
   }
 }
 
+impl DeviceManuallyDestroyed for SpriteBuffers {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.texture.destroy_self(device);
+    self.quad_vertices.destroy_self(device);
+    self.quad_indices.destroy_self(device);
+  }
+}
+
+impl DeviceManuallyDestroyed for TextBuffers {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.curve_texture.destroy_self(device);
+    self.band_texture.destroy_self(device);
+
+    self.vertices.destroy_self(device);
+    self.indices.destroy_self(device);
+  }
+}
+
 impl DeviceManuallyDestroyed for GPUData {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.texture_view.destroy_self(device);
+    self.sprite_view.destroy_self(device);
     self.text_curve_view.destroy_self(device);
     self.text_band_view.destroy_self(device);
+    self.ui_view.destroy_self(device);
 
-    self.texture.destroy_self(device);
-
-    self.vertex_buffer.destroy_self(device);
-    self.index_buffer.destroy_self(device);
-
+    self.ui.destroy_self(device);
+    self.sprite_buffers.destroy_self(device);
     self.text.destroy_self(device);
 
     self.memories.destroy_self(device);

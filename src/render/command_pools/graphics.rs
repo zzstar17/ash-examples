@@ -89,11 +89,6 @@ impl GraphicsCommandBufferPool {
     let swapchain_width = swapchain_extent.width as i32;
     let swapchain_height = swapchain_extent.height as i32;
 
-    let text_pc = TextPushConstants::new(
-      RENDER_EXTENT,
-      [10.0, data.text_size.first_line.height() + 10.0],
-    );
-
     // do a copy operation instead of blit if true
     let just_copying = (render_width == swapchain_width && swapchain_height >= render_height)
       || (render_height == swapchain_height && swapchain_width >= render_width);
@@ -106,6 +101,98 @@ impl GraphicsCommandBufferPool {
       base_array_layer: 0,
       layer_count: 1,
     };
+    let layers = vk::ImageSubresourceLayers {
+      aspect_mask: vk::ImageAspectFlags::COLOR,
+      mip_level: 0,
+      base_array_layer: 0,
+      layer_count: 1,
+    };
+
+    // todo: only do this initial part if text ui is actually different
+    {
+      let wait_ui = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::NONE,
+        dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER, // previous main shader operation
+        dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+        new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        image: data.ui,
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+
+      let clear_value = vk::ClearValue {
+        color: vk::ClearColorValue {
+          float32: [0.0, 0.0, 0.0, 0.1], // clear with empty
+        },
+      };
+      let color_attachments = [vk::RenderingAttachmentInfo {
+        image_view: data.ui_view,
+        image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        resolve_mode: vk::ResolveModeFlags::NONE,
+        resolve_image_view: vk::ImageView::null(),
+        resolve_image_layout: vk::ImageLayout::UNDEFINED,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        clear_value,
+        ..Default::default()
+      }];
+      let rendering_info = vk::RenderingInfo {
+        flags: vk::RenderingFlags::empty(),
+        render_area: vk::Rect2D {
+          offset: vk::Offset2D { x: 0, y: 0 },
+          extent: data.ui_size,
+        },
+        layer_count: 1,
+        view_mask: 0,
+        color_attachment_count: color_attachments.len() as u32,
+        p_color_attachments: color_attachments.as_ptr(),
+        p_depth_attachment: ptr::null(),
+        p_stencil_attachment: ptr::null(),
+        ..Default::default()
+      };
+      device.cmd_begin_rendering(cb, &rendering_info);
+
+      let text_pc =
+        TextPushConstants::new(RENDER_EXTENT, [0.0, data.text_size.first_line.height()]);
+
+      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+      device.cmd_bind_descriptor_sets(
+        cb,
+        vk::PipelineBindPoint::GRAPHICS,
+        text_pipeline.layout,
+        0,
+        &[descriptor_pool.text_set],
+        &[],
+      );
+      device.cmd_push_constants(
+        cb,
+        text_pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(&text_pc),
+      );
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.text.vertices], &[0]);
+      device.cmd_bind_index_buffer(cb, data.text.indices, 0, vk::IndexType::UINT32);
+      device.cmd_draw_indexed(cb, data.text.index_count, 1, 0, 0, 0);
+
+      device.cmd_end_rendering(cb);
+
+      let wait_ui = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        dst_access_mask: vk::AccessFlags2::SHADER_SAMPLED_READ,
+        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
+        old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        image: data.ui,
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+    }
 
     // wait previous copy on render target
     {
@@ -121,9 +208,7 @@ impl GraphicsCommandBufferPool {
         ..Default::default()
       };
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
-    }
 
-    {
       let clear_value = vk::ClearValue {
         color: BACKGROUND_COLOR,
       };
@@ -154,12 +239,13 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_begin_rendering(cb, &rendering_info);
 
+      // draw ferris
       device.cmd_bind_descriptor_sets(
         cb,
         vk::PipelineBindPoint::GRAPHICS,
         pipeline.layout,
         0,
-        &[descriptor_pool.texture_set],
+        &[descriptor_pool.sprites_set],
         &[],
       );
       device.cmd_push_constants(
@@ -170,29 +256,42 @@ impl GraphicsCommandBufferPool {
         utility::any_as_u8_slice(position),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer], &[0]);
-      device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.quad_vertices], &[0]);
+      device.cmd_bind_index_buffer(
+        cb,
+        data.sprite_buffers.quad_indices,
+        0,
+        vk::IndexType::UINT16,
+      );
       device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
 
-      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+      // draw text ui
+      let position = RenderPosition::new(
+        [
+          ((data.ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
+          ((data.ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
+        ],
+        [
+          data.ui_size.width as f32 / RENDER_EXTENT.width as f32,
+          data.ui_size.height as f32 / RENDER_EXTENT.height as f32,
+        ],
+      );
       device.cmd_bind_descriptor_sets(
         cb,
         vk::PipelineBindPoint::GRAPHICS,
-        text_pipeline.layout,
+        pipeline.layout,
         0,
-        &[descriptor_pool.text_set],
+        &[descriptor_pool.text_ui_set],
         &[],
       );
       device.cmd_push_constants(
         cb,
-        text_pipeline.layout,
+        pipeline.layout,
         vk::ShaderStageFlags::VERTEX,
         0,
-        utility::any_as_u8_slice(&text_pc),
+        utility::any_as_u8_slice(&position),
       );
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.text.vertices], &[0]);
-      device.cmd_bind_index_buffer(cb, data.text.indices, 0, vk::IndexType::UINT32);
-      device.cmd_draw_indexed(cb, data.text.index_count, 1, 0, 0, 0);
+      device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
 
       device.cmd_end_rendering(cb);
     }
@@ -259,13 +358,6 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[flush_clear], &[], &[]));
     }
-
-    let layers = vk::ImageSubresourceLayers {
-      aspect_mask: vk::ImageAspectFlags::COLOR,
-      mip_level: 0,
-      base_array_layer: 0,
-      layer_count: 1,
-    };
 
     // screenshot
     if let Some(buffer) = screenshot_buffer {

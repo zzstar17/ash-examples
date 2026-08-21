@@ -37,6 +37,10 @@ impl PointRect {
     },
   };
 
+  pub fn width(&self) -> f32 {
+    self.max.x - self.min.x
+  }
+
   pub fn height(&self) -> f32 {
     self.max.y - self.min.y
   }
@@ -52,6 +56,13 @@ impl PointRect {
         x: self.max.x.max(other.max.x),
         y: self.max.y.max(other.max.y),
       },
+    }
+  }
+
+  pub fn to_vk_extent(self) -> vk::Extent2D {
+    vk::Extent2D {
+      width: self.width() as u32,
+      height: self.height() as u32,
     }
   }
 }
@@ -758,8 +769,8 @@ impl<'a> SlugRendering<'a> {
             y: glyph_processed_data.band_loc_y,
           },
           max_band_indices: SlugVertexMaxBandIndices {
-            max_band_x: band_max_x.try_into().unwrap(),
-            max_band_y: band_max_y.try_into().unwrap(),
+            max_band_x: band_max_x as u16,
+            max_band_y: band_max_y as u16,
           },
 
           // jac (location 2): inverse Jacobian (d(em)/d(obj))

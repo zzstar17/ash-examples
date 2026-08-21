@@ -3,6 +3,8 @@ use std::{marker::PhantomData, ptr};
 use ash::vk;
 use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
+use crate::render::gpu_data::GPUData;
+
 use super::texture_write_descriptor_set;
 
 fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
@@ -83,9 +85,10 @@ fn create_sampler_nearest_int(device: &ash::Device) -> Result<vk::Sampler, OutOf
 }
 
 pub struct DescriptorPool {
-  pub texture_layout: vk::DescriptorSetLayout,
-  texture_sampler: vk::Sampler,
-  pub texture_set: vk::DescriptorSet,
+  pub sprites_layout: vk::DescriptorSetLayout,
+  sprites_sampler: vk::Sampler,
+  pub sprites_set: vk::DescriptorSet,
+  pub text_ui_set: vk::DescriptorSet,
 
   pub text_layout: vk::DescriptorSetLayout,
   pub text_curves_sampler: vk::Sampler,
@@ -96,12 +99,12 @@ pub struct DescriptorPool {
 }
 
 impl DescriptorPool {
-  // one for graphics one for text
-  const SET_COUNT: u32 = 2;
+  // two for graphics one for text
+  const SET_COUNT: u32 = 3;
 
   const SIZES: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
     ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-    descriptor_count: 3,
+    descriptor_count: 4,
   }];
 
   fn graphics_layout_bindings<'a>(
@@ -141,17 +144,12 @@ impl DescriptorPool {
     ]
   }
 
-  pub fn new(
-    device: &ash::Device,
-    texture_view: vk::ImageView,
-    text_curve_view: vk::ImageView,
-    text_band_view: vk::ImageView,
-  ) -> Result<Self, OutOfMemoryError> {
-    let texture_sampler = create_texture_sampler(device)?;
+  pub fn new(device: &ash::Device, gpu_data: &GPUData) -> Result<Self, OutOfMemoryError> {
+    let sprites_sampler = create_texture_sampler(device)?;
     let text_curves_sampler = create_sampler_nearest_float(device)?;
     let text_bands_sampler = create_sampler_nearest_int(device)?;
 
-    let texture_layout = Self::create_graphics_layout(device, texture_sampler)?;
+    let sprites_layout = Self::create_graphics_layout(device, sprites_sampler)?;
     let text_layout = Self::create_text_layout(device, text_curves_sampler, text_bands_sampler)?;
 
     let pool = {
@@ -167,30 +165,33 @@ impl DescriptorPool {
       unsafe { device.create_descriptor_pool(&pool_create_info, None) }
     }?;
 
-    let sets = allocate_sets(device, pool, &[texture_layout, text_layout])?;
+    let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout])?;
     let writes = [
-      texture_write_descriptor_set(sets[0], texture_view, 0),
-      texture_write_descriptor_set(sets[1], text_curve_view, 0),
-      texture_write_descriptor_set(sets[1], text_band_view, 1),
+      texture_write_descriptor_set(sets[0], gpu_data.sprite_view, 0),
+      texture_write_descriptor_set(sets[1], gpu_data.ui_view, 0),
+      texture_write_descriptor_set(sets[2], gpu_data.text_curve_view, 0),
+      texture_write_descriptor_set(sets[2], gpu_data.text_band_view, 1),
     ];
     unsafe {
       let contextualized = [
         writes[0].contextualize(),
         writes[1].contextualize(),
         writes[2].contextualize(),
+        writes[3].contextualize(),
       ];
       device.update_descriptor_sets(&contextualized, &[]);
     }
 
     Ok(Self {
-      texture_sampler,
-      texture_layout,
-      texture_set: sets[0],
+      sprites_sampler,
+      sprites_layout,
+      sprites_set: sets[0],
+      text_ui_set: sets[1],
 
       text_layout,
       text_curves_sampler,
       text_bands_sampler,
-      text_set: sets[1],
+      text_set: sets[2],
       pool,
     })
   }
@@ -220,8 +221,8 @@ impl DeviceManuallyDestroyed for DescriptorPool {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     device.destroy_descriptor_pool(self.pool, None);
 
-    device.destroy_descriptor_set_layout(self.texture_layout, None);
-    device.destroy_sampler(self.texture_sampler, None);
+    device.destroy_descriptor_set_layout(self.sprites_layout, None);
+    device.destroy_sampler(self.sprites_sampler, None);
 
     device.destroy_descriptor_set_layout(self.text_layout, None);
     device.destroy_sampler(self.text_curves_sampler, None);

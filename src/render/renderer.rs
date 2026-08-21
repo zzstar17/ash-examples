@@ -239,17 +239,9 @@ impl Renderer {
 
     let mut text_vertices = Vec::new();
     let mut text_indices = Vec::new();
-    let font_size = 30;
-    let text = [
-      "fps: 60",
-      "Looks like it does",
-      "support most fonts",
-      "僕を連れてって　浸み込んでしまう前に",
-      "見えないまま掴みたいとか　どうせ叶わないからさ",
-      "手はずっと濡れていて　いつか落としてしまうこと",
-      "まだ気付いてなかった",
-    ];
-    let full_size = slug.build_lines(
+    let font_size = 60;
+    let text = ["fps: 60", "Looks like it does", "support most fonts"];
+    let mut full_size = slug.build_lines(
       &text,
       font_size,
       vk::Offset2D { x: 0, y: 0 },
@@ -257,6 +249,9 @@ impl Renderer {
       &mut text_vertices,
       &mut text_indices,
     );
+    // todo: fix full slug size calculations
+    full_size.total.max.x += 10.0;
+    full_size.total.max.y += 20.0;
 
     let text_textures = slug.get_texture_data();
 
@@ -269,11 +264,12 @@ impl Renderer {
     let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
       &device,
       &physical_device,
-      texture_extent,
       texture_format,
+      texture_extent,
       texture_data,
       &queues,
       &text_data,
+      full_size.total.to_vk_extent(),
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
@@ -310,13 +306,8 @@ impl Renderer {
     }
     destructor.push(&pipeline_cache);
 
-    let descriptor_pool = DescriptorPool::new(
-      &device,
-      gpu_data.texture_view,
-      gpu_data.text_curve_view,
-      gpu_data.text_band_view,
-    )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    let descriptor_pool =
+      DescriptorPool::new(&device, &gpu_data).on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&descriptor_pool);
 
     log::debug!("Creating pipeline");

@@ -120,7 +120,7 @@ impl GraphicsPipeline {
       p_next: ptr::null(),
       flags: vk::PipelineLayoutCreateFlags::empty(),
       set_layout_count: 1,
-      p_set_layouts: &descriptor_pool.texture_layout,
+      p_set_layouts: &descriptor_pool.sprites_layout,
       push_constant_range_count: 1,
       p_push_constant_ranges: &push_constant_range,
       _marker: PhantomData,
