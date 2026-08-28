@@ -31,6 +31,8 @@ const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
 const RESOLUTION: [u32; 2] = [800, 800];
 
+const TEXTURE_PATH: &str = "./ferris.png";
+
 // get first that exists
 const TEXT_FONT: [&str; 3] = ["Source Code Pro", "Consolas", "Arial"];
 

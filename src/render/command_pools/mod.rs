@@ -2,10 +2,8 @@ use std::{marker::PhantomData, ptr};
 
 use ash::vk;
 
-mod graphics;
-pub mod initialization;
+pub mod graphics;
 
-pub use graphics::GraphicsCommandBufferPool;
 use vkobjects::errors::OutOfMemoryError;
 
 const ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange =
@@ -83,7 +81,7 @@ fn allocate_primary_command_buffers(
   }
 }
 
-fn dependency_info<'a>(
+pub fn dependency_info<'a>(
   memory: &'a [vk::MemoryBarrier2],
   buffer: &'a [vk::BufferMemoryBarrier2],
   image: &'a [vk::ImageMemoryBarrier2],

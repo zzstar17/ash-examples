@@ -168,7 +168,7 @@ impl DescriptorPool {
     let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout])?;
     let writes = [
       texture_write_descriptor_set(sets[0], gpu_data.sprite_view, 0),
-      texture_write_descriptor_set(sets[1], gpu_data.ui_view, 0),
+      texture_write_descriptor_set(sets[1], gpu_data.text_ui_view, 0),
       texture_write_descriptor_set(sets[2], gpu_data.text_curve_view, 0),
       texture_write_descriptor_set(sets[2], gpu_data.text_band_view, 1),
     ];

@@ -3,7 +3,10 @@ use vkinitialization::{InstanceCreationError, InstanceOptionalExtensions};
 use vkobjects::ManuallyDestroyed;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
-use crate::render::{errors::InitializationError, renderer::Renderer, SyncRenderer};
+use crate::render::{
+  errors::InitializationError, gpu_data::sprite_buffers::SpriteTextureData, renderer::Renderer,
+  SyncRenderer,
+};
 use std::mem;
 
 use std::{
@@ -63,8 +66,10 @@ impl RenderInit {
   }
 
   pub fn start(self, event_loop: &ActiveEventLoop) -> Result<SyncRenderer, InitializationError> {
-    let renderer = Renderer::initialize(self, event_loop)?;
-    SyncRenderer::new(renderer)
+    let mut sprite_data = SpriteTextureData::read_texture_bytes_as_rgba8()?;
+
+    let renderer = Renderer::initialize(self, event_loop, &mut sprite_data)?;
+    SyncRenderer::new(renderer, &sprite_data)
   }
 
   // take values out without calling drop

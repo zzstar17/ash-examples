@@ -1,11 +1,14 @@
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
+use vkallocator::HostMemorySyncError;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
 use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
-  ferris::Ferris, render::create_objs::create_fence, DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
+  ferris::Ferris,
+  render::{create_objs::create_fence, gpu_data::sprite_buffers::SpriteTextureData},
+  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{
@@ -30,20 +33,33 @@ pub struct SyncRenderer {
 }
 
 impl SyncRenderer {
-  pub fn new(renderer: Renderer) -> Result<Self, InitializationError> {
+  pub fn new(
+    renderer: Renderer,
+    sprite_texture_data: &SpriteTextureData,
+  ) -> Result<Self, InitializationError> {
     let device = &renderer.device;
-    let frame_fences = fill_destroyable_array_with_expression!(
+    let fence0 = create_fence(
       device,
-      create_fence(
-        device,
-        vk::FenceCreateFlags::SIGNALED,
-        #[cfg(feature = "vl")]
-        &renderer.debug_utils_marker,
-        #[cfg(feature = "vl")]
-        c"frame fence"
-      ),
-      FRAMES_IN_FLIGHT
+      vk::FenceCreateFlags::empty(),
+      #[cfg(feature = "vl")]
+      &renderer.debug_utils_marker,
+      #[cfg(feature = "vl")]
+      c"Frame fence 0",
     )?;
+    let fence1 = create_fence(
+      device,
+      vk::FenceCreateFlags::SIGNALED,
+      #[cfg(feature = "vl")]
+      &renderer.debug_utils_marker,
+      #[cfg(feature = "vl")]
+      c"Frame fence 1",
+    )
+    .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
+    let frame_fences = [fence0, fence1];
+
+    unsafe {
+      Self::submit_initial_staging_copy(&renderer, fence0, sprite_texture_data)?;
+    }
 
     let image_available = fill_destroyable_array_with_expression!(
       &renderer.device,
@@ -60,7 +76,7 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
-      last_frame_i: FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
+      last_frame_i: FRAMES_IN_FLIGHT - 1, // make sure render_next_frame waits for fence 0
       frame_fences,
 
       image_available,
@@ -68,6 +84,23 @@ impl SyncRenderer {
       save_next_frame: false,
       saving_frame: None,
     })
+  }
+
+  unsafe fn submit_initial_staging_copy(
+    renderer: &Renderer,
+    fence: vk::Fence,
+    sprite_texture_data: &SpriteTextureData,
+  ) -> Result<(), HostMemorySyncError> {
+    renderer.full_record_upload_initial_staging(0, &sprite_texture_data.bytes)?;
+
+    let command_buffers =
+      [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];
+    let submit_info = vk::SubmitInfo2::default().command_buffer_infos(&command_buffers);
+    renderer
+      .device
+      .queue_submit2(renderer.queues.graphics.handle, &[submit_info], fence)?;
+
+    Ok(())
   }
 
   pub fn window_resized(&mut self) {
@@ -85,6 +118,22 @@ impl SyncRenderer {
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
+
+    if cur_total_frame == 10000 {
+      self.renderer.text_vertices.clear();
+      self.renderer.text_indices.clear();
+
+      let font_size = 60;
+      let text = ["fps: 55", "update"];
+      let _full_size = self.renderer.slug.build_lines(
+        &text,
+        font_size,
+        vk::Offset2D { x: 0, y: 0 },
+        1.5,
+        &mut self.renderer.text_vertices,
+        &mut self.renderer.text_indices,
+      );
+    }
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     unsafe {
@@ -174,8 +223,25 @@ impl SyncRenderer {
     }
 
     // actual rendering
-
     unsafe {
+      let pool = self.renderer.graphics_pools[cur_frame_i];
+      pool.reset(&self.renderer.device)?;
+      pool.begin_recording(&self.renderer.device)?;
+
+      if cur_total_frame == 0 || cur_total_frame == 10000 {
+        // let text_data = super::gpu_data::text::TextData {
+        //   textures: renderer.slug.get_texture_data(),
+        //   vertices: &renderer.text_vertices,
+        //   indices: &renderer.text_indices,
+        // };
+        // self
+        //   .renderer
+        //   .data
+        //   .write_and_record_full_device_text_data(&renderer.device, &text_data, &pool)?;
+
+        self.renderer.record_upload_device_text_data(cur_frame_i)?;
+      }
+
       let mut record_screenshot = false;
       if self.save_next_frame && self.saving_frame.is_none() {
         self.save_next_frame = false;
@@ -190,11 +256,19 @@ impl SyncRenderer {
           height: RENDER_EXTENT.height,
         }),
         record_screenshot,
-      )?;
+        // cur_total_frame == 0,
+        // cur_total_frame > 0,
+        // false,
+        // false,
+        true,
+        true,
+      );
+
+      pool.end_recording(&self.renderer.device)?;
     }
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
-      .command_buffer(self.renderer.command_pools[cur_frame_i].main)];
+      .command_buffer(self.renderer.graphics_pools[cur_frame_i].main)];
 
     let wait_semaphores = [
       // wait for image to become ready for writes

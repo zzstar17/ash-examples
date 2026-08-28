@@ -87,6 +87,8 @@ pub enum InitializationError {
   DeviceIsLost(#[from] DeviceIsLost),
   #[error("Vulkan returned ERROR_UNKNOWN")]
   Unknown,
+  #[error("Vulkan returned VK_ERROR_VALIDATION_FAILED")]
+  ValidationFailed,
 }
 impl std::fmt::Debug for InitializationError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -103,6 +105,16 @@ impl From<winit::error::OsError> for InitializationError {
 impl From<HandleError> for InitializationError {
   fn from(value: HandleError) -> Self {
     InitializationError::WindowError(WindowError::HandleError(value))
+  }
+}
+
+impl From<HostMemorySyncError> for InitializationError {
+  fn from(value: HostMemorySyncError) -> Self {
+    match value {
+      HostMemorySyncError::OutOfMemoryError(v) => Self::GenericOutOfMemoryError(v),
+      HostMemorySyncError::Unknown => Self::Unknown,
+      HostMemorySyncError::ValidationFailed => Self::ValidationFailed,
+    }
   }
 }
 
@@ -140,6 +152,9 @@ pub enum FrameRenderError {
 
   #[error("Failed to recreate swapchain: {0}")]
   FailedToRecreateSwapchain(#[from] SwapchainRecreationError),
+
+  #[error("Failed to copy data to cpu buffers")]
+  FailedToUpdateHostBuffer(#[from] HostMemorySyncError),
 }
 impl std::fmt::Debug for FrameRenderError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

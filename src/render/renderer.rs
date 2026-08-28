@@ -2,13 +2,14 @@ use std::mem::MaybeUninit;
 
 use ash::vk;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
+use vkallocator::HostMemorySyncError;
 use vkinitialization::{
   device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
   Surface,
 };
 use vkobjects::{
-  destroy, errors::OutOfMemoryError, fill_destroyable_array_with_expression, utility::OnErr,
-  DeviceManuallyDestroyed, ManuallyDestroyed,
+  destroy, fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed,
+  ManuallyDestroyed,
 };
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
@@ -16,15 +17,19 @@ use crate::{
   ferris::Ferris,
   font,
   render::{
-    gpu_data::{GPUDataAllocationError, TextData},
+    command_pools::graphics::GraphicsCommandBufferPool,
+    gpu_data::{
+      sprite_buffers::SpriteTextureData,
+      text::{TextBufferDimensions, TextData},
+      GPUDataAllocationError,
+    },
     pipelines::TextPipeline,
   },
-  slug::SlugRendering,
+  slug::{SlugRendering, SlugVertex},
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
 use super::{
-  command_pools::GraphicsCommandBufferPool,
   descriptor_sets::DescriptorPool,
   errors::{ImageError, InitializationError, SwapchainRecreationError},
   format_conversions::{self, KNOWN_FORMATS},
@@ -37,20 +42,6 @@ use super::{
   swapchain::{SwapchainCreationError, Swapchains},
   RenderInit, FRAMES_IN_FLIGHT, RENDER_EXTENT, SWAPCHAIN_IMAGE_USAGES,
 };
-
-const TEXTURE_PATH: &str = "./ferris.png";
-
-fn read_texture_bytes_as_rgba8() -> Result<(u32, u32, Vec<u8>), image::ImageError> {
-  let img = image::ImageReader::open(TEXTURE_PATH)?
-    .decode()?
-    .into_rgba8();
-  let width = img.width();
-  let height = img.height();
-
-  let bytes = img.into_raw();
-  assert!(bytes.len() == width as usize * height as usize * 4);
-  Ok((width, height, bytes))
-}
 
 pub struct Renderer {
   _entry: ash::Entry,
@@ -72,14 +63,16 @@ pub struct Renderer {
   pipeline_cache: vk::PipelineCache,
   pipeline: GraphicsPipeline,
   text_pipeline: TextPipeline,
-  pub command_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
-
-  data: GPUData,
+  pub graphics_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
+  // pub device_copy_pool: DeviceCopyCommandBufferPool,
+  pub data: GPUData,
   descriptor_pool: DescriptorPool,
 
   screenshot_buffer: ScreenshotBuffer,
 
-  slug: SlugRendering<'static>,
+  pub slug: SlugRendering<'static>,
+  pub text_vertices: Vec<SlugVertex>,
+  pub text_indices: Vec<u32>,
 }
 
 struct Destructor<const N: usize> {
@@ -115,6 +108,7 @@ impl Renderer {
   pub fn initialize(
     pre_window: RenderInit,
     event_loop: &ActiveEventLoop,
+    sprite_data: &mut SpriteTextureData,
   ) -> Result<Self, InitializationError> {
     // having an error during window creation triggers pre_window drop
     let window_attributes = Window::default_attributes()
@@ -227,9 +221,7 @@ impl Renderer {
         .unwrap()
     };
 
-    let (width, height, mut texture_data) = read_texture_bytes_as_rgba8()?;
-    let texture_extent = vk::Extent2D { width, height };
-    format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
+    format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
     let shaper = font::SHAPER_DATA.shaper(&font::FONT_REF).build();
@@ -259,23 +251,31 @@ impl Renderer {
       textures: text_textures,
       vertices: &text_vertices,
       indices: &text_indices,
-      size: full_size,
     };
-    let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
+
+    let text_vertices_size =
+      (text_data.vertices.len() * size_of::<crate::slug::SlugVertex>()) as u64;
+    let text_indices_size = (text_data.indices.len() * size_of::<u32>()) as u64;
+
+    let gpu_data = GPUData::new(
       &device,
       &physical_device,
       texture_format,
-      texture_extent,
-      texture_data,
-      &queues,
-      &text_data,
+      sprite_data,
+      &text_textures,
+      TextBufferDimensions {
+        device_vertices_size: text_vertices_size,
+        device_indices_size: text_indices_size,
+        cpu_vertices_size: text_vertices_size, // todo
+        cpu_indices_size: text_indices_size,   // todo
+      },
       full_size.total.to_vk_extent(),
+      full_size,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&gpu_data);
-    destructor.push(&gpu_data_pending_initialization);
 
     // use same format for surface and the render target
     // see SWAPCHAIN_PREFERRED_IMAGE_FORMAT in render/mod.rs
@@ -331,7 +331,7 @@ impl Renderer {
     .on_err(|_| unsafe { destructor.fire(&device) })?;
     destructor.push(&text_pipeline);
 
-    let command_pools = fill_destroyable_array_with_expression!(
+    let graphics_pools = fill_destroyable_array_with_expression!(
       &device,
       GraphicsCommandBufferPool::create(
         &device,
@@ -342,13 +342,8 @@ impl Renderer {
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
-    destructor.push(command_pools.as_ptr());
+    destructor.push(graphics_pools.as_ptr());
 
-    unsafe {
-      gpu_data_pending_initialization
-        .wait_and_self_destroy(&device)
-        .on_err(|_| destructor.fire(&device))?;
-    }
     let screenshot_buffer = ScreenshotBuffer::new(
       &device,
       &physical_device,
@@ -370,7 +365,7 @@ impl Renderer {
       physical_device,
       device,
       queues,
-      command_pools,
+      graphics_pools,
       data: gpu_data,
       pipeline: graphics_pipeline,
       pipeline_cache,
@@ -379,27 +374,72 @@ impl Renderer {
       render_targets,
       screenshot_buffer,
       text_pipeline,
-
+      // device_copy_pool,
       slug,
+      text_vertices,
+      text_indices,
     })
   }
 
-  pub unsafe fn record_graphics(
+  pub unsafe fn full_record_upload_initial_staging(
+    &self,
+    frame_i: usize,
+    sprite_texture_bytes: &[u8],
+  ) -> Result<(), HostMemorySyncError> {
+    let pool = &self.graphics_pools[frame_i];
+    pool.begin_recording(&self.device)?;
+    self
+      .data
+      .write_and_record_initial_staging_data(&self.device, sprite_texture_bytes, pool)?;
+    pool.end_recording(&self.device)?;
+    Ok(())
+  }
+
+  pub unsafe fn record_upload_device_text_data(
     &mut self,
+    frame_i: usize,
+  ) -> Result<(), HostMemorySyncError> {
+    let pool = &self.graphics_pools[frame_i];
+
+    let text_data = TextData {
+      textures: self.slug.get_texture_data(),
+      vertices: &self.text_vertices,
+      indices: &self.text_indices,
+    };
+    self
+      .data
+      .write_and_record_full_device_text_data(&self.device, &text_data, pool)?;
+
+    Ok(())
+  }
+
+  pub unsafe fn record_graphics(
+    &self,
     frame_i: usize,
     image_i: usize,
     position: &RenderPosition,
     save_to_screenshot_buffer: bool,
-  ) -> Result<(), OutOfMemoryError> {
-    self.command_pools[frame_i].reset(&self.device)?;
-    self.command_pools[frame_i].record_main(
+    update_text_ui: bool,
+    draw_text: bool,
+  ) {
+    let pool = &self.graphics_pools[frame_i];
+
+    if update_text_ui {
+      pool.record_update_text_ui(
+        &self.device,
+        &self.descriptor_pool,
+        &self.data,
+        &self.text_pipeline,
+      );
+    }
+
+    pool.record_main(
       frame_i,
       &self.device,
       &self.render_targets,
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
       &self.pipeline,
-      &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
       position,
@@ -408,8 +448,8 @@ impl Renderer {
       } else {
         None
       },
-    )?;
-    Ok(())
+      draw_text,
+    );
   }
 
   pub unsafe fn recreate_swapchain(
@@ -567,7 +607,8 @@ impl Drop for Renderer {
 
       self.screenshot_buffer.destroy_self(&self.device);
 
-      self.command_pools.destroy_self(&self.device);
+      self.graphics_pools.destroy_self(&self.device);
+      // self.device_copy_pool.destroy_self(&self.device);
 
       self.text_pipeline.destroy_self(&self.device);
       self.pipeline.destroy_self(&self.device);

@@ -546,7 +546,7 @@ impl SlugVertex {
   }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct SlugTextureData<'a> {
   pub curve_tex_data: &'a [[f32; 4]],
   pub band_tex_data: &'a [u32],
