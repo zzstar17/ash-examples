@@ -5,6 +5,9 @@ use harfrust::{ShapeOptions, Shaper, UnicodeBuffer};
 use std::{collections::HashMap, fmt::Debug, mem::offset_of, ptr};
 use ttf_parser::Face;
 
+pub const VERTICES_PER_GLYPH: usize = 4;
+pub const INDICES_PER_GLYPH: usize = 6;
+
 // Band count is also hardcoded in the shader
 const BAND_COUNT: usize = 8;
 
@@ -679,8 +682,7 @@ impl<'a> SlugRendering<'a> {
 
     let mut cursor_x = offset.x;
     let mut cursor_y = offset.y;
-    // todo: probably change this to the actual command buffer
-    let mut quad_idx: u32 = (vertices.len() / 4) as u32;
+    let mut quad_idx: u32 = (vertices.len() / VERTICES_PER_GLYPH) as u32;
     let mut full_text_bounds = PointRect::REVERSED_INFINITY;
     for (info, pos) in glyph_buffer
       .glyph_infos()
@@ -796,7 +798,7 @@ impl<'a> SlugRendering<'a> {
 
           // tex (location 1): em-space coords + packed glyph/band data
           em_space_sample_coords: [ex, ey],
-          // todo: convert all of bellow to instance data
+          // all this below could be instance data
           glyph_in_band_loc: SlugVertexGlyphInBandLocation {
             x: glyph_processed_data.band_loc_x,
             y: glyph_processed_data.band_loc_y,
@@ -820,7 +822,7 @@ impl<'a> SlugRendering<'a> {
         vertices.push(vertex);
       }
 
-      let base = quad_idx * 4;
+      let base = quad_idx * VERTICES_PER_GLYPH as u32;
       indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
       cursor_x += pos.x_advance;
       cursor_y += pos.y_advance;

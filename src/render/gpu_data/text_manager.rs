@@ -14,7 +14,7 @@ use crate::{
       GPUDataAllocationError,
     },
   },
-  slug::{MultilineRect, SlugRendering, SlugVertex, TextBuildBounds},
+  slug::{self, MultilineRect, SlugRendering, SlugVertex, TextBuildBounds},
 };
 
 pub struct TextManager {
@@ -35,6 +35,10 @@ pub struct TextManager {
 
 impl TextManager {
   const FONT_SIZE: usize = 30;
+
+  // capacity in glyphs
+  const HOST_BUFFER_VERTICES_GLYPH_CAPACITY: usize = 80;
+  const HOST_BUFFER_INDICES_GLYPH_CAPACITY: usize = Self::HOST_BUFFER_VERTICES_GLYPH_CAPACITY;
 
   pub fn new(
     device: &ash::Device,
@@ -62,7 +66,7 @@ impl TextManager {
       rect: rect_gpu_idle,
       offset: gpu_idle_offset,
     } = slug.build_text(
-      "GPU idle: ",
+      "GPU bound: ",
       Self::FONT_SIZE,
       vk::Offset2D {
         x: 0,
@@ -85,8 +89,12 @@ impl TextManager {
     let dimensions = TextBufferDimensions {
       device_vertices_size: text_vertices_size,
       device_indices_size: text_indices_size,
-      cpu_vertices_size: (140 * 4 * size_of::<SlugVertex>()) as u64, // todo
-      cpu_indices_size: (140 * 6 * size_of::<u32>()) as u64,         // todo
+      cpu_vertices_size: (Self::HOST_BUFFER_VERTICES_GLYPH_CAPACITY
+        * slug::VERTICES_PER_GLYPH
+        * size_of::<SlugVertex>()) as u64,
+      cpu_indices_size: (Self::HOST_BUFFER_INDICES_GLYPH_CAPACITY
+        * slug::INDICES_PER_GLYPH
+        * size_of::<u32>()) as u64,
     };
 
     let buffers = TextBuffers::new(
@@ -316,11 +324,12 @@ impl TextManager {
     device: &ash::Device,
     frame_i: usize,
     fps: FPSDurations,
+    gpu_bound: bool,
   ) -> Result<(), HostMemorySyncError> {
     self.host_vertices.clear();
     self.host_indices.clear();
 
-    let fps_text = format!("{:.2}, {:.2}, {:.2}", fps.min, fps.max, fps.average);
+    let fps_text = format!("{:.1}, {:.1}, {:.1}", fps.min, fps.max, fps.average);
     self.slug.build_text(
       &fps_text,
       Self::FONT_SIZE,
@@ -329,18 +338,38 @@ impl TextManager {
       &mut self.host_indices,
     );
     self.slug.build_text(
-      "no",
+      if gpu_bound { "yes" } else { "no" },
       Self::FONT_SIZE,
       self.gpu_idle_offset,
       &mut self.host_vertices,
       &mut self.host_indices,
     );
 
-    let vertices_size = self.host_vertices_size();
-    let indices_size = self.host_indices_size();
+    let mut vertices_size = self.host_vertices_size();
+    let mut indices_size = self.host_indices_size();
 
-    assert!(vertices_size <= self.buffers.host[frame_i].vertices.buffer_size);
-    assert!(indices_size <= self.buffers.host[frame_i].indices.buffer_size);
+    if vertices_size > self.buffers.host[frame_i].vertices.buffer_size {
+      log::warn!(
+        "Text host device vertices size {} exceeds buffer capacity {}",
+        vertices_size,
+        self.buffers.host[frame_i].vertices.buffer_size
+      );
+      self
+        .host_vertices
+        .truncate(Self::HOST_BUFFER_VERTICES_GLYPH_CAPACITY * slug::VERTICES_PER_GLYPH);
+      vertices_size = self.host_vertices_size();
+    }
+    if indices_size > self.buffers.host[frame_i].indices.buffer_size {
+      log::warn!(
+        "Text host device indices size {} exceeds buffer capacity {}",
+        indices_size,
+        self.buffers.host[frame_i].indices.buffer_size
+      );
+      self
+        .host_indices
+        .truncate(Self::HOST_BUFFER_INDICES_GLYPH_CAPACITY * slug::INDICES_PER_GLYPH);
+      indices_size = self.host_indices_size();
+    }
 
     unsafe {
       ptr::copy_nonoverlapping(

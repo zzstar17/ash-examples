@@ -64,7 +64,6 @@ impl TextBuffers {
       height: textures.band_tex_height as u32,
     };
 
-    // todo: add device checking for this
     let curve_texture = create_image(
       device,
       Self::CURVES_FORMAT,

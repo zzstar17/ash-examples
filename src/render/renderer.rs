@@ -163,7 +163,7 @@ impl Renderer {
       DeviceExtensions {
         memory_priority: true,
         pageable_device_local_memory: true,
-        swapchain_maintenance1: true,
+        swapchain_maintenance1: false,
         ..Default::default()
       },
       DeviceFeatures {
@@ -172,7 +172,7 @@ impl Renderer {
         ..Default::default()
       },
       DeviceFeatures {
-        swapchain_maintenance1: true,
+        swapchain_maintenance1: false,
         ..Default::default()
       },
     )
@@ -329,11 +329,12 @@ impl Renderer {
     &mut self,
     frame_i: usize,
     fps: FPSDurations,
+    gpu_bound: bool,
   ) -> Result<(), HostMemorySyncError> {
     self
       .data
       .text
-      .write_host_device_text_data(&self.device, frame_i, fps)
+      .write_host_device_text_data(&self.device, frame_i, fps, gpu_bound)
   }
 
   pub unsafe fn full_record_upload_initial_staging(

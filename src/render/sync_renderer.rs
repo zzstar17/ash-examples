@@ -122,18 +122,33 @@ impl SyncRenderer {
     self.last_frame_i = cur_frame_i;
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
-    unsafe {
-      self
-        .renderer
-        .device
-        .wait_for_fences(&[self.frame_fences[cur_frame_i]], true, u64::MAX)?;
-    }
+    let gpu_bound = unsafe {
+      let gpu_bound =
+        match self
+          .renderer
+          .device
+          .wait_for_fences(&[self.frame_fences[cur_frame_i]], true, 0)
+        {
+          Ok(()) => false,
+          Err(vkerr) => match vkerr {
+            vk::Result::TIMEOUT => true,
+            other => return Err(other.into()),
+          },
+        };
+      if gpu_bound {
+        self
+          .renderer
+          .device
+          .wait_for_fences(&[self.frame_fences[cur_frame_i]], true, u64::MAX)?;
+      }
+      gpu_bound
+    };
 
     // current frame resources are now safe to use as they are not being used by the GPU
 
     self
       .renderer
-      .write_host_device_text_data(cur_frame_i, fps)?;
+      .write_host_device_text_data(cur_frame_i, fps, gpu_bound)?;
 
     let destroyed_old_swapchain = self
       .renderer
