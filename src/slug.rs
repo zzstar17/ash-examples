@@ -554,6 +554,18 @@ pub struct SlugTextureData<'a> {
   pub band_tex_height: usize,
 }
 
+impl<'a> SlugTextureData<'a> {
+  pub fn curve_tex_size(&self) -> u64 {
+    let curve_len = TEX_WIDTH * self.curve_tex_height * 4;
+    (curve_len * size_of::<f32>()) as u64
+  }
+
+  pub fn band_tex_size(&self) -> u64 {
+    let band_len = TEX_WIDTH * self.band_tex_height * 4;
+    (band_len * size_of::<u32>()) as u64
+  }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ProcessedGlyphData {
   bounding_box: ttf_parser::Rect,
@@ -565,6 +577,7 @@ pub struct SlugRendering<'a> {
   text_buffer: Option<UnicodeBuffer>,
   pub shaper: Shaper<'a>,
   pub font_face: &'a Face<'a>,
+  font_ascender: f32,
 
   processed_glyph_map: HashMap<u16, Option<ProcessedGlyphData>>,
   glyph_processor: SlugGlyphProcessor,
@@ -574,6 +587,25 @@ pub struct SlugRendering<'a> {
 pub struct MultilineRect {
   pub first_line: PointRect,
   pub total: PointRect,
+}
+
+impl MultilineRect {
+  pub fn from_line_rects(rects: &[PointRect]) -> Self {
+    assert!(rects.len() > 0);
+    let first_line = rects[0];
+    let mut total = first_line;
+    for line in rects[1..].iter() {
+      total = total.or(*line);
+    }
+
+    Self { first_line, total }
+  }
+}
+
+pub struct TextBuildBounds {
+  // unscaled
+  pub offset: vk::Offset2D,
+  pub rect: PointRect,
 }
 
 impl<'a> SlugRendering<'a> {
@@ -588,6 +620,7 @@ impl<'a> SlugRendering<'a> {
     Self {
       text_buffer: Some(text_buffer),
       font_face,
+      font_ascender: font_face.ascender() as f32,
       processed_glyph_map,
       glyph_processor,
       shaper,
@@ -634,7 +667,7 @@ impl<'a> SlugRendering<'a> {
     offset: vk::Offset2D,
     vertices: &mut Vec<SlugVertex>,
     indices: &mut Vec<u32>,
-  ) -> PointRect {
+  ) -> TextBuildBounds {
     let mut text_buffer = self.text_buffer.take().unwrap();
 
     text_buffer.push_str(text);
@@ -644,8 +677,8 @@ impl<'a> SlugRendering<'a> {
     let glyph_buffer = self.shaper.shape(text_buffer, ShapeOptions::new());
     let scale = font_size as f32 / (self.shaper.units_per_em() as f32);
 
-    let mut cursor_x = 0;
-    let mut cursor_y = 0;
+    let mut cursor_x = offset.x;
+    let mut cursor_y = offset.y;
     // todo: probably change this to the actual command buffer
     let mut quad_idx: u32 = (vertices.len() / 4) as u32;
     let mut full_text_bounds = PointRect::REVERSED_INFINITY;
@@ -684,12 +717,12 @@ impl<'a> SlugRendering<'a> {
       let height = bbox.y_max - bbox.y_min;
 
       // Object-space position (Y-up screen pixels)
-      let ox = cursor_x + pos.x_offset;
+      let ox: i32 = cursor_x + pos.x_offset;
       let oy = cursor_y + pos.y_offset;
-      let x0_unscaled = ox + bbox.x_min as i32 + offset.x;
-      let y0_unscaled = oy + bbox.y_min as i32 + offset.y;
-      let x1_unscaled = ox + bbox.x_max as i32 + offset.x;
-      let y1_unscaled = oy + bbox.y_max as i32 + offset.y;
+      let x0_unscaled = ox + bbox.x_min as i32;
+      let y0_unscaled = oy + bbox.y_min as i32;
+      let x1_unscaled = ox + bbox.x_max as i32;
+      let y1_unscaled = oy + bbox.y_max as i32;
       let area = PointRect {
         min: Point2 {
           x: x0_unscaled as f32 * scale,
@@ -796,7 +829,17 @@ impl<'a> SlugRendering<'a> {
 
     self.text_buffer = Some(glyph_buffer.clear());
 
-    full_text_bounds
+    TextBuildBounds {
+      offset: vk::Offset2D {
+        x: cursor_x,
+        y: cursor_y,
+      },
+      rect: full_text_bounds,
+    }
+  }
+
+  pub fn get_line_dist(&self, mult: f32) -> i32 {
+    (self.font_ascender * mult) as i32
   }
 
   pub fn build_lines(
@@ -813,13 +856,17 @@ impl<'a> SlugRendering<'a> {
       "Slug build lines text must be at least one line"
     );
 
-    let first_rect = self.build_text(text[0], font_size, offset, vertices, indices);
-    let line_distance = (self.font_face.ascender() as f32 * line_distance_mult) as i32;
+    let TextBuildBounds {
+      rect: first_rect, ..
+    } = self.build_text(text[0], font_size, offset, vertices, indices);
+    let line_distance = self.get_line_dist(line_distance_mult);
 
     let mut total_rect = first_rect;
     let mut line_offset = line_distance;
     for &line in text[1..].iter() {
-      let line_rect = self.build_text(
+      let TextBuildBounds {
+        rect: line_rect, ..
+      } = self.build_text(
         line,
         font_size,
         vk::Offset2D {

@@ -15,17 +15,12 @@ use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   ferris::Ferris,
-  font,
+  last_frames_durations::FPSDurations,
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
-    gpu_data::{
-      sprite_buffers::SpriteTextureData,
-      text::{TextBufferDimensions, TextData},
-      GPUDataAllocationError,
-    },
+    gpu_data::{sprite_buffers::SpriteTextureData, GPUDataAllocationError},
     pipelines::TextPipeline,
   },
-  slug::{SlugRendering, SlugVertex},
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -69,10 +64,6 @@ pub struct Renderer {
   descriptor_pool: DescriptorPool,
 
   screenshot_buffer: ScreenshotBuffer,
-
-  pub slug: SlugRendering<'static>,
-  pub text_vertices: Vec<SlugVertex>,
-  pub text_indices: Vec<u32>,
 }
 
 struct Destructor<const N: usize> {
@@ -224,54 +215,11 @@ impl Renderer {
     format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    let shaper = font::SHAPER_DATA.shaper(&font::FONT_REF).build();
-    let mut slug = SlugRendering::new(&font::FONT_FACE, shaper);
-
-    slug.add_glyphs_in_str("0123456789");
-
-    let mut text_vertices = Vec::new();
-    let mut text_indices = Vec::new();
-    let font_size = 60;
-    let text = ["fps: 60", "Looks like it does", "support most fonts"];
-    let mut full_size = slug.build_lines(
-      &text,
-      font_size,
-      vk::Offset2D { x: 0, y: 0 },
-      1.5,
-      &mut text_vertices,
-      &mut text_indices,
-    );
-    // todo: fix full slug size calculations
-    full_size.total.max.x += 10.0;
-    full_size.total.max.y += 20.0;
-
-    let text_textures = slug.get_texture_data();
-
-    let text_data = TextData {
-      textures: text_textures,
-      vertices: &text_vertices,
-      indices: &text_indices,
-    };
-
-    let text_vertices_size =
-      (text_data.vertices.len() * size_of::<crate::slug::SlugVertex>()) as u64;
-    let text_indices_size = (text_data.indices.len() * size_of::<u32>()) as u64;
-
     let gpu_data = GPUData::new(
       &device,
       &physical_device,
       texture_format,
       sprite_data,
-      &text_textures,
-      TextBufferDimensions {
-        device_vertices_size: text_vertices_size,
-        device_indices_size: text_indices_size,
-        cpu_vertices_size: text_vertices_size, // todo
-        cpu_indices_size: text_indices_size,   // todo
-      },
-      full_size.total.to_vk_extent(),
-      full_size,
-      #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })?;
@@ -374,11 +322,18 @@ impl Renderer {
       render_targets,
       screenshot_buffer,
       text_pipeline,
-      // device_copy_pool,
-      slug,
-      text_vertices,
-      text_indices,
     })
+  }
+
+  pub fn write_host_device_text_data(
+    &mut self,
+    frame_i: usize,
+    fps: FPSDurations,
+  ) -> Result<(), HostMemorySyncError> {
+    self
+      .data
+      .text
+      .write_host_device_text_data(&self.device, frame_i, fps)
   }
 
   pub unsafe fn full_record_upload_initial_staging(
@@ -401,14 +356,9 @@ impl Renderer {
   ) -> Result<(), HostMemorySyncError> {
     let pool = &self.graphics_pools[frame_i];
 
-    let text_data = TextData {
-      textures: self.slug.get_texture_data(),
-      vertices: &self.text_vertices,
-      indices: &self.text_indices,
-    };
     self
       .data
-      .write_and_record_full_device_text_data(&self.device, &text_data, pool)?;
+      .write_and_record_full_device_text_data(&self.device, pool)?;
 
     Ok(())
   }
@@ -440,6 +390,7 @@ impl Renderer {
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
       &self.pipeline,
+      &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
       position,

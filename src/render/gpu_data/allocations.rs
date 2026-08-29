@@ -7,7 +7,7 @@ use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::render::{
   create_objs::create_buffer,
-  gpu_data::{sprite_buffers::SpriteBuffers, text::TextBuffers, GPUDataAllocationError},
+  gpu_data::{sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, GPUDataAllocationError},
 };
 
 pub fn allocate_staging_memory(
@@ -94,37 +94,60 @@ pub fn allocate_device(
 pub fn allocate_host_device(
   device: &Device,
   physical_device: &PhysicalDevice,
-  text_buffers: &TextBuffers,
+  text_buffers: &mut TextBuffers,
 ) -> Result<Vec<DetailedMemory>, GPUDataAllocationError> {
-  let device_alloc = vkallocator::allocate_and_bind_memory(
+  let (alloc, mapped_host_buffers) = vkallocator::allocate_and_map_host_memory(
     device,
     physical_device,
     [
       vk::MemoryPropertyFlags::DEVICE_LOCAL,
       vk::MemoryPropertyFlags::HOST_VISIBLE,
     ],
-    [&text_buffers.cpu.vertices, &text_buffers.cpu.indices],
+    [
+      &*text_buffers.host[0].vertices,
+      &*text_buffers.host[0].indices,
+      &*text_buffers.host[1].vertices,
+      &*text_buffers.host[1].indices,
+    ],
     0.5,
-    false,
     #[cfg(feature = "log_alloc")]
-    Some(["Text host vertices", "Text host indices"]),
+    Some([
+      "Text host vertices 0",
+      "Text host indices 0",
+      "Text host vertices 1",
+      "Text host indices 1",
+    ]),
     #[cfg(feature = "log_alloc")]
     "Host device data",
   )
   .or_else(|_| {
-    vkallocator::allocate_and_bind_memory(
+    vkallocator::allocate_and_map_host_memory(
       device,
       physical_device,
       [vk::MemoryPropertyFlags::HOST_VISIBLE],
-      [&text_buffers.cpu.vertices, &text_buffers.cpu.indices],
+      [
+        &*text_buffers.host[0].vertices,
+        &*text_buffers.host[0].indices,
+        &*text_buffers.host[1].vertices,
+        &*text_buffers.host[1].indices,
+      ],
       0.5,
-      false,
       #[cfg(feature = "log_alloc")]
-      Some(["Text host vertices", "Text host indices"]),
+      Some([
+        "Text host vertices 0",
+        "Text host indices 0",
+        "Text host vertices 1",
+        "Text host indices 1",
+      ]),
       #[cfg(feature = "log_alloc")]
       "Host device data",
     )
   })?;
 
-  Ok(device_alloc.get_memories().to_vec())
+  text_buffers.host[0].vertices = mapped_host_buffers[0].into_buffer();
+  text_buffers.host[0].indices = mapped_host_buffers[1].into_buffer();
+  text_buffers.host[1].vertices = mapped_host_buffers[2].into_buffer();
+  text_buffers.host[1].indices = mapped_host_buffers[3].into_buffer();
+
+  Ok(alloc.get_memories().to_vec())
 }

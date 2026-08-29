@@ -7,6 +7,7 @@ use winit::{dpi::PhysicalSize, window::Window};
 
 use crate::{
   ferris::Ferris,
+  last_frames_durations::FPSDurations,
   render::{create_objs::create_fence, gpu_data::sprite_buffers::SpriteTextureData},
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
@@ -115,25 +116,10 @@ impl SyncRenderer {
     &mut self,
     cur_total_frame: usize,
     ferris: &Ferris,
+    fps: FPSDurations,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
-
-    if cur_total_frame == 10000 {
-      self.renderer.text_vertices.clear();
-      self.renderer.text_indices.clear();
-
-      let font_size = 60;
-      let text = ["fps: 55", "update"];
-      let _full_size = self.renderer.slug.build_lines(
-        &text,
-        font_size,
-        vk::Offset2D { x: 0, y: 0 },
-        1.5,
-        &mut self.renderer.text_vertices,
-        &mut self.renderer.text_indices,
-      );
-    }
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     unsafe {
@@ -144,6 +130,10 @@ impl SyncRenderer {
     }
 
     // current frame resources are now safe to use as they are not being used by the GPU
+
+    self
+      .renderer
+      .write_host_device_text_data(cur_frame_i, fps)?;
 
     let destroyed_old_swapchain = self
       .renderer
@@ -229,16 +219,6 @@ impl SyncRenderer {
       pool.begin_recording(&self.renderer.device)?;
 
       if cur_total_frame == 0 || cur_total_frame == 10000 {
-        // let text_data = super::gpu_data::text::TextData {
-        //   textures: renderer.slug.get_texture_data(),
-        //   vertices: &renderer.text_vertices,
-        //   indices: &renderer.text_indices,
-        // };
-        // self
-        //   .renderer
-        //   .data
-        //   .write_and_record_full_device_text_data(&renderer.device, &text_data, &pool)?;
-
         self.renderer.record_upload_device_text_data(cur_frame_i)?;
       }
 
@@ -256,11 +236,7 @@ impl SyncRenderer {
           height: RENDER_EXTENT.height,
         }),
         record_screenshot,
-        // cur_total_frame == 0,
-        // cur_total_frame > 0,
-        // false,
-        // false,
-        true,
+        cur_total_frame == 0,
         true,
       );
 

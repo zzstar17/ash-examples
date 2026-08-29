@@ -1,15 +1,18 @@
-use std::ops::BitOr;
+use std::{ops::BitOr, ptr::NonNull};
 
 use crate::{
   render::{
     create_objs::{create_buffer, create_image},
     gpu_data::{GPUDataAllocationError, TEXTURE_USAGES},
+    FRAMES_IN_FLIGHT,
   },
   slug::{self, SlugTextureData, SlugVertex},
 };
 use ash::vk;
-use vkinitialization::device::Device;
-use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed};
+use vkallocator::MappedHostBuffer;
+use vkobjects::{
+  destroy, fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextBuffers {
@@ -19,26 +22,19 @@ pub struct TextBuffers {
   pub band_texture_extent: vk::Extent2D,
 
   pub device: DeviceTextBuffers,
-  pub cpu: CPUTextBuffers,
+  pub host: [HostTextBuffers; FRAMES_IN_FLIGHT],
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct CPUTextBuffers {
-  pub vertices: vk::Buffer,
-  pub indices: vk::Buffer,
+pub struct HostTextBuffers {
+  pub vertices: MappedHostBuffer<SlugVertex>,
+  pub indices: MappedHostBuffer<u32>,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub struct DeviceTextBuffers {
   pub vertices: vk::Buffer,
   pub indices: vk::Buffer,
-  pub cur_indices_count: u32,
-}
-
-pub struct TextData<'a> {
-  pub textures: SlugTextureData<'a>,
-  pub vertices: &'a [SlugVertex],
-  pub indices: &'a [u32],
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,7 +50,7 @@ impl TextBuffers {
   pub const BANDS_FORMAT: vk::Format = vk::Format::R32G32B32A32_UINT;
 
   pub fn new<'a>(
-    device: &Device,
+    device: &ash::Device,
     textures: &SlugTextureData<'a>,
     buffer_dimensions: TextBufferDimensions,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
@@ -101,12 +97,17 @@ impl TextBuffers {
       marker,
     )
     .on_err(|_| unsafe { destroy!(device => &band_texture, &curve_texture) })?;
-    let cpu_buffers = CPUTextBuffers::new(
+
+    let host_buffers = fill_destroyable_array_with_expression!(
       device,
-      buffer_dimensions.cpu_vertices_size,
-      buffer_dimensions.cpu_indices_size,
-      #[cfg(feature = "vl")]
-      marker,
+      HostTextBuffers::new(
+        device,
+        buffer_dimensions.cpu_vertices_size,
+        buffer_dimensions.cpu_indices_size,
+        #[cfg(feature = "vl")]
+        marker,
+      ),
+      FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe { destroy!(device => &device_buffers, &band_texture, &curve_texture) })?;
 
@@ -116,14 +117,14 @@ impl TextBuffers {
       band_texture,
       band_texture_extent,
       device: device_buffers,
-      cpu: cpu_buffers,
+      host: host_buffers,
     })
   }
 }
 
 impl DeviceTextBuffers {
   pub fn new(
-    device: &Device,
+    device: &ash::Device,
     vertices_size: u64,
     indices_size: u64,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
@@ -148,22 +149,18 @@ impl DeviceTextBuffers {
     )
     .on_err(|_| unsafe { destroy!(device => &vertices) })?;
 
-    Ok(Self {
-      vertices,
-      indices,
-      cur_indices_count: 0,
-    })
+    Ok(Self { vertices, indices })
   }
 }
 
-impl CPUTextBuffers {
+impl HostTextBuffers {
   pub fn new(
-    device: &Device,
+    device: &ash::Device,
     vertices_size: u64,
     indices_size: u64,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
-    let vertices: vk::Buffer = create_buffer(
+    let vertices_buffer: vk::Buffer = create_buffer(
       device,
       vertices_size,
       vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -172,7 +169,7 @@ impl CPUTextBuffers {
       #[cfg(feature = "vl")]
       c"CPU text vertices",
     )?;
-    let indices: vk::Buffer = create_buffer(
+    let indices_buffer: vk::Buffer = create_buffer(
       device,
       indices_size,
       vk::BufferUsageFlags::INDEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
@@ -181,7 +178,24 @@ impl CPUTextBuffers {
       #[cfg(feature = "vl")]
       c"CPU text indices",
     )
-    .on_err(|_| unsafe { destroy!(device => &vertices) })?;
+    .on_err(|_| unsafe { destroy!(device => &vertices_buffer) })?;
+
+    let vertices = MappedHostBuffer {
+      buffer: vertices_buffer,
+      data_ptr: NonNull::dangling(),
+      memory: vk::DeviceMemory::null(),
+      mem_host_coherent: false,
+      buffer_offset: 0,
+      buffer_size: 0,
+    };
+    let indices = MappedHostBuffer {
+      buffer: indices_buffer,
+      data_ptr: NonNull::dangling(),
+      memory: vk::DeviceMemory::null(),
+      mem_host_coherent: false,
+      buffer_offset: 0,
+      buffer_size: 0,
+    };
 
     Ok(Self { vertices, indices })
   }
@@ -191,7 +205,7 @@ impl DeviceManuallyDestroyed for TextBuffers {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.curve_texture.destroy_self(device);
     self.band_texture.destroy_self(device);
-    self.cpu.destroy_self(device);
+    self.host.destroy_self(device);
     self.device.destroy_self(device);
   }
 }
@@ -203,7 +217,7 @@ impl DeviceManuallyDestroyed for DeviceTextBuffers {
   }
 }
 
-impl DeviceManuallyDestroyed for CPUTextBuffers {
+impl DeviceManuallyDestroyed for HostTextBuffers {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.vertices.destroy_self(device);
     self.indices.destroy_self(device);

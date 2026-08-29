@@ -215,9 +215,14 @@ impl GraphicsCommandBufferPool {
       0,
       utility::any_as_u8_slice(&text_pc),
     );
-    device.cmd_bind_vertex_buffers(cb, 0, &[data.text.device.vertices], &[0]);
-    device.cmd_bind_index_buffer(cb, data.text.device.indices, 0, vk::IndexType::UINT32);
-    device.cmd_draw_indexed(cb, data.text.device.cur_indices_count, 1, 0, 0, 0);
+    device.cmd_bind_vertex_buffers(cb, 0, &[data.text.buffers.device.vertices], &[0]);
+    device.cmd_bind_index_buffer(
+      cb,
+      data.text.buffers.device.indices,
+      0,
+      vk::IndexType::UINT32,
+    );
+    device.cmd_draw_indexed(cb, data.text.device_index_count, 1, 0, 0, 0);
 
     device.cmd_end_rendering(cb);
 
@@ -245,6 +250,7 @@ impl GraphicsCommandBufferPool {
     swapchain_extent: vk::Extent2D,
 
     pipeline: &GraphicsPipeline,
+    text_pipeline: &TextPipeline,
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
@@ -344,32 +350,68 @@ impl GraphicsCommandBufferPool {
 
       // draw text ui
       if draw_text {
-        let position = RenderPosition::new(
-          [
-            ((data.text_ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
-            ((data.text_ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
-          ],
-          [
-            data.text_ui_size.width as f32 / RENDER_EXTENT.width as f32,
-            data.text_ui_size.height as f32 / RENDER_EXTENT.height as f32,
-          ],
-        );
-        device.cmd_bind_descriptor_sets(
-          cb,
-          vk::PipelineBindPoint::GRAPHICS,
-          pipeline.layout,
-          0,
-          &[descriptor_pool.text_ui_set],
-          &[],
-        );
-        device.cmd_push_constants(
-          cb,
-          pipeline.layout,
-          vk::ShaderStageFlags::VERTEX,
-          0,
-          utility::any_as_u8_slice(&position),
-        );
-        device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+        {
+          let position = RenderPosition::new(
+            [
+              ((data.text_ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
+              ((data.text_ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
+            ],
+            [
+              data.text_ui_size.width as f32 / RENDER_EXTENT.width as f32,
+              data.text_ui_size.height as f32 / RENDER_EXTENT.height as f32,
+            ],
+          );
+          device.cmd_bind_descriptor_sets(
+            cb,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipeline.layout,
+            0,
+            &[descriptor_pool.text_ui_set],
+            &[],
+          );
+          device.cmd_push_constants(
+            cb,
+            pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&position),
+          );
+          device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+        }
+
+        {
+          let text_pc = TextPushConstants::new(
+            RENDER_EXTENT,
+            [10.0, data.text_ui_rect.first_line.height() + 10.0],
+          );
+
+          device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+          device.cmd_bind_descriptor_sets(
+            cb,
+            vk::PipelineBindPoint::GRAPHICS,
+            text_pipeline.layout,
+            0,
+            &[descriptor_pool.text_set],
+            &[],
+          );
+          device.cmd_push_constants(
+            cb,
+            text_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&text_pc),
+          );
+          // this should be synchronized with host because of host write ordering guarantees
+          // https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-submission-host-writes
+          device.cmd_bind_vertex_buffers(cb, 0, &[*data.text.buffers.host[frame_i].vertices], &[0]);
+          device.cmd_bind_index_buffer(
+            cb,
+            *data.text.buffers.host[frame_i].indices,
+            0,
+            vk::IndexType::UINT32,
+          );
+          device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
+        }
       }
 
       device.cmd_end_rendering(cb);

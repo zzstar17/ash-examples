@@ -1,5 +1,6 @@
 mod ferris;
 mod font;
+mod last_frames_durations;
 mod render;
 mod slug;
 
@@ -21,6 +22,8 @@ use winit::{
   event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
 };
+
+use crate::last_frames_durations::LastFramesDurations;
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
@@ -168,6 +171,7 @@ struct App {
   ferris: Ferris,
   ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
+  last_frames_durations: LastFramesDurations<60>,
   time_since_last_fps_print: Duration,
   frame_i: usize,
 }
@@ -281,6 +285,7 @@ impl App {
       mouse_position: PhysicalPosition { x: 0.0, y: 0.0 },
       ferris_drag_mouse_pos: None,
       mouse_in_window: true,
+      last_frames_durations: LastFramesDurations::new(),
     }
   }
 }
@@ -349,6 +354,8 @@ impl ApplicationHandler for App {
         let time_passed = now - self.last_update;
         self.last_update = now;
 
+        self.last_frames_durations.update_new(time_passed);
+
         self.time_since_last_fps_print += time_passed;
         if self.time_since_last_fps_print >= PRINT_FPS_EVERY {
           self.time_since_last_fps_print -= PRINT_FPS_EVERY;
@@ -373,10 +380,11 @@ impl ApplicationHandler for App {
             }),
           );
 
-          if let Err(err) = status
-            .renderer
-            .render_next_frame(self.frame_i, &self.ferris)
-          {
+          if let Err(err) = status.renderer.render_next_frame(
+            self.frame_i,
+            &self.ferris,
+            self.last_frames_durations.get_min_max_average_fps(),
+          ) {
             match err {
               FrameRenderError::FailedToAcquireSwapchainImage(AcquireNextImageError::OutOfDate) => {
                 // window resizes can happen while this function is running and be not detected in time
