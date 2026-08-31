@@ -4,3 +4,6 @@
 /pipeline_cache
 /pipeline_cache_temp
 /.vscode
+/testing
+
+imgui.ini

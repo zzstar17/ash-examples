@@ -8,8 +8,10 @@ use winit::{
 };
 
 use crate::{
+  last_frames_durations::FPSDurations,
   render::{
     compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
+    gpu_data::sprite_buffers::SpriteTextureData,
     graphics, FrameRenderError, InitializationError, PostWindowInit,
   },
   WindowToComputeInfo,
@@ -64,8 +66,11 @@ impl ThreadsManager {
     };
     let particle_buffers = compute_thread.particle_buffers;
 
-    let renderer = graphics::Renderer::initialize(post_window_init, particle_buffers)?;
-    let mut sync_renderer = graphics::SyncRenderer::new(renderer)?;
+    let mut sprite_data = SpriteTextureData::read_texture_bytes_as_rgba8()?;
+
+    let renderer =
+      graphics::Renderer::initialize(post_window_init, particle_buffers, &mut sprite_data)?;
+    let mut sync_renderer = graphics::SyncRenderer::new(renderer, &sprite_data)?;
 
     let receiver_res = compute_thread_data.event_receiver.recv();
     let mut compute_initialized = false;
@@ -97,13 +102,17 @@ impl ThreadsManager {
     })
   }
 
-  pub fn render_next_frame(&mut self, cur_total_frame: usize) -> Result<(), FrameRenderError> {
+  pub fn render_next_frame(
+    &mut self,
+    cur_total_frame: usize,
+    fps: FPSDurations,
+  ) -> Result<(), FrameRenderError> {
     let compute_thread = self.compute_thread_data.as_ref().unwrap();
     let compute_message_rcv = &compute_thread.result_receiver;
 
     self
       .graphics_render
-      .render_next_frame(cur_total_frame, compute_message_rcv)?;
+      .render_next_frame(cur_total_frame, compute_message_rcv, fps)?;
 
     Ok(())
   }

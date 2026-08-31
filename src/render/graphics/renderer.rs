@@ -1,20 +1,23 @@
 use ash::vk;
 
+use vkallocator::HostMemorySyncError;
 use vkobjects::{
-  errors::OutOfMemoryError, fill_destroyable_array_with_expression, utility::OnErr,
-  DeviceManuallyDestroyed, ManuallyDestroyed,
+  fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed,
+  ManuallyDestroyed,
 };
 
 use crate::{
   destructor::Destructor,
+  last_frames_durations::FPSDurations,
   render::{
     command_pools::GraphicsCommandBufferPool,
     compute::{ParticleBuffers, ParticlesDraw},
     descriptor_sets::DescriptorPool,
-    errors::{GPUDataAllocationError, ImageError, SwapchainRecreationError},
+    errors::{ImageError, SwapchainRecreationError},
     format_conversions::{self, KNOWN_FORMATS},
+    gpu_data::{sprite_buffers::SpriteTextureData, GPUData, GPUDataAllocationError},
     initialization,
-    pipelines::{self, GraphicsPipeline},
+    pipelines::{self, GraphicsPipeline, TextPipeline},
     InitializationError, PostWindowInit, GRAPHICS_FRAMES_IN_FLIGHT, RENDER_EXTENT,
     SWAPCHAIN_IMAGE_USAGES,
   },
@@ -22,7 +25,6 @@ use crate::{
 };
 
 use super::{
-  gpu_data::GPUData,
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
@@ -49,6 +51,7 @@ pub struct Renderer {
   render_targets: RenderTargets,
 
   pipeline_cache: vk::PipelineCache,
+  text_pipeline: TextPipeline,
   pipeline: GraphicsPipeline,
   pub command_pools: [GraphicsCommandBufferPool; GRAPHICS_FRAMES_IN_FLIGHT],
 
@@ -63,6 +66,7 @@ impl Renderer {
   pub fn initialize(
     post_window: PostWindowInit,
     particle_buffers: ParticleBuffers,
+    sprite_data: &mut SpriteTextureData,
   ) -> Result<Self, InitializationError> {
     let mut destructor: Destructor<11> = Destructor::new();
 
@@ -98,21 +102,14 @@ impl Renderer {
         .unwrap()
     };
 
-    let (width, height, mut texture_data) = read_texture_bytes_as_rgba8().on_err(|_| unsafe {
-      destructor.fire(&post_window.device);
-      ManuallyDestroyed::destroy_self(&post_window);
-    })?;
-    let texture_extent = vk::Extent2D { width, height };
-    format_conversions::convert_rgba_data_to_format(&mut texture_data, texture_format);
+    format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
-    let (gpu_data, gpu_data_pending_initialization) = GPUData::new(
+    let gpu_data = GPUData::new(
       &post_window.device,
       &post_window.physical_device,
-      texture_extent,
       texture_format,
-      texture_data,
-      &post_window.queues,
+      sprite_data,
       #[cfg(feature = "vl")]
       &post_window.debug_utils_marker,
     )
@@ -121,7 +118,6 @@ impl Renderer {
       ManuallyDestroyed::destroy_self(&post_window);
     })?;
     destructor.push(&gpu_data);
-    destructor.push(&gpu_data_pending_initialization);
 
     // use same format for surface and the render target
     // see SWAPCHAIN_PREFERRED_IMAGE_FORMAT in render/mod.rs
@@ -160,11 +156,21 @@ impl Renderer {
     destructor.push(&pipeline_cache);
 
     let descriptor_pool =
-      DescriptorPool::new(&post_window.device, gpu_data.texture_view).on_err(|_| unsafe {
+      DescriptorPool::new(&post_window.device, &gpu_data).on_err(|_| unsafe {
         destructor.fire(&post_window.device);
         ManuallyDestroyed::destroy_self(&post_window);
       })?;
     destructor.push(&descriptor_pool);
+
+    let text_pipeline = TextPipeline::new(
+      &post_window.device,
+      pipeline_cache,
+      &descriptor_pool,
+      render_format,
+      RENDER_EXTENT,
+    )
+    .on_err(|_| unsafe { destructor.fire(&post_window.device) })?;
+    destructor.push(&text_pipeline);
 
     log::debug!("Creating pipeline");
     let graphics_pipeline = GraphicsPipeline::new(
@@ -196,14 +202,6 @@ impl Renderer {
     })?;
     destructor.push(command_pools.as_ptr());
 
-    unsafe {
-      gpu_data_pending_initialization
-        .wait_and_self_destroy(&post_window.device)
-        .on_err(|_| {
-          destructor.fire(&post_window.device);
-          ManuallyDestroyed::destroy_self(&post_window);
-        })?;
-    }
     let screenshot_buffer = ScreenshotBuffer::new(
       &post_window.device,
       &post_window.physical_device,
@@ -220,6 +218,7 @@ impl Renderer {
       init: post_window,
       command_pools,
       data: gpu_data,
+      text_pipeline,
       pipeline: graphics_pipeline,
       pipeline_cache,
       swapchains,
@@ -230,15 +229,68 @@ impl Renderer {
     })
   }
 
-  pub unsafe fn record_graphics(
+  pub fn write_host_device_text_data(
     &mut self,
+    frame_i: usize,
+    fps: FPSDurations,
+    gpu_bound: bool,
+  ) -> Result<(), HostMemorySyncError> {
+    self
+      .data
+      .text
+      .write_host_device_text_data(&self.init.device, frame_i, fps, gpu_bound)
+  }
+
+  pub unsafe fn full_record_upload_initial_staging(
+    &self,
+    frame_i: usize,
+    sprite_texture_bytes: &[u8],
+  ) -> Result<(), HostMemorySyncError> {
+    let pool = &self.command_pools[frame_i];
+    pool.begin_recording(&self.init.device)?;
+    self.data.write_and_record_initial_staging_data(
+      &self.init.device,
+      sprite_texture_bytes,
+      pool,
+    )?;
+    pool.end_recording(&self.init.device)?;
+    Ok(())
+  }
+
+  pub unsafe fn record_upload_device_text_data(
+    &mut self,
+    frame_i: usize,
+  ) -> Result<(), HostMemorySyncError> {
+    let pool = &self.command_pools[frame_i];
+
+    self
+      .data
+      .write_and_record_full_device_text_data(&self.init.device, pool)?;
+
+    Ok(())
+  }
+
+  pub unsafe fn record_graphics(
+    &self,
     frame_i: usize,
     image_i: usize,
     particles_draw: ParticlesDraw,
     save_to_screenshot_buffer: bool,
-  ) -> Result<(), OutOfMemoryError> {
-    self.command_pools[frame_i].reset(&self.init.device)?;
-    self.command_pools[frame_i].record_main(
+    update_text_ui: bool,
+    draw_text: bool,
+  ) {
+    let pool = &self.command_pools[frame_i];
+
+    if update_text_ui {
+      pool.record_update_text_ui(
+        &self.init.device,
+        &self.descriptor_pool,
+        &self.data,
+        &self.text_pipeline,
+      );
+    }
+
+    pool.record_main(
       frame_i,
       &self.init.device,
       &self.init.queues,
@@ -246,6 +298,7 @@ impl Renderer {
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
       &self.pipeline,
+      &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
       particles_draw,
@@ -254,8 +307,8 @@ impl Renderer {
       } else {
         None
       },
-    )?;
-    Ok(())
+      draw_text,
+    );
   }
 
   pub unsafe fn recreate_swapchain(
@@ -415,6 +468,7 @@ impl Renderer {
 
     self.command_pools.destroy_self(device);
 
+    self.text_pipeline.destroy_self(device);
     self.pipeline.destroy_self(device);
     self.pipeline_cache.destroy_self(device);
     self.descriptor_pool.destroy_self(device);

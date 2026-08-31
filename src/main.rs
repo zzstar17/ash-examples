@@ -1,6 +1,8 @@
 mod destructor;
+mod font;
 mod last_frames_durations;
 mod render;
+mod slug;
 mod threads_manager;
 
 use ash::vk;
@@ -33,6 +35,11 @@ const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
 const RESOLUTION: [u32; 2] = [800, 800];
 
+const TEXTURE_PATH: &str = "./sprites.png";
+
+// get first that exists
+const TEXT_FONT: [&str; 3] = ["Source Code Pro", "Consolas", "Arial"];
+
 const SCREENSHOT_SAVE_FILE: &str = "last_screenshot.png";
 
 // const BACKGROUND_COLOR: vk::ClearColorValue = vk::ClearColorValue {
@@ -51,7 +58,7 @@ const OUT_OF_BOUNDS_AREA_COLOR: vk::ClearColorValue = vk::ClearColorValue {
 // FIFO_KHR is required to be supported and functions as vsync
 // IMMEDIATE will be chosen over RELAXED_KHR if the latter is not supported
 // otherwise, presentation mode will fallback to FIFO_KHR
-const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::FIFO_RELAXED;
+const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::IMMEDIATE;
 
 // prints current frame 1 / <time since last frame> every x time
 const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);
@@ -70,6 +77,7 @@ const RENDER_UNTIL_FRAME: usize = usize::MAX;
 
 const DEBUG_PRINT_FRAME_INFO: bool = false;
 const LOG_SWAPCHAIN_WARNINGS: bool = false;
+const ENABLE_USE_DEBUG_SHADERS: bool = false;
 
 // This application doesn't use dynamic pipeline size, so resizing is expensive
 // If a small resize happens (for example while resizing with the mouse) this usually means that
@@ -386,8 +394,8 @@ impl ApplicationHandler for App {
         self.time_since_last_fps_print += time_passed;
         if self.time_since_last_fps_print >= PRINT_FPS_EVERY {
           self.time_since_last_fps_print -= PRINT_FPS_EVERY;
-          let (min, max, average) = self.last_frames_durations.get_min_max_average_fps();
-          println!("FPS: {:.4} {:.4} {:.4}", min, max, average);
+          let fps = self.last_frames_durations.get_min_max_average_fps();
+          println!("FPS: {:.4} {:.4} {:.4}", fps.min, fps.max, fps.average);
         }
 
         if self.frame_i <= RENDER_UNTIL_FRAME {
@@ -395,7 +403,10 @@ impl ApplicationHandler for App {
             log::debug!("Starting frame {}", self.frame_i);
           }
 
-          if let Err(err) = status.threads_manager.render_next_frame(self.frame_i) {
+          if let Err(err) = status.threads_manager.render_next_frame(
+            self.frame_i,
+            self.last_frames_durations.get_min_max_average_fps(),
+          ) {
             match err {
               FrameRenderError::FailedToAcquireSwapchainImage(AcquireNextImageError::OutOfDate) => {
                 // window resizes can happen while this function is running and be not detected in time

@@ -5,7 +5,6 @@ use ash::vk;
 mod compute;
 mod compute_transfer;
 mod graphics;
-pub mod initialization;
 
 pub use compute::ComputeCommandBufferPool;
 pub use compute_transfer::ComputeTransferCommandBufferPool;
@@ -87,7 +86,7 @@ fn allocate_primary_command_buffers(
   }
 }
 
-fn dependency_info<'a>(
+pub fn dependency_info<'a>(
   memory: &'a [vk::MemoryBarrier2],
   buffer: &'a [vk::BufferMemoryBarrier2],
   image: &'a [vk::ImageMemoryBarrier2],

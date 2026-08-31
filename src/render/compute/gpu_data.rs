@@ -9,7 +9,7 @@ use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 
 use crate::{
   render::{
-    compute::ParticleBuffers, create_objs::create_buffer, errors::GPUDataAllocationError,
+    compute::ParticleBuffers, create_objs::create_buffer, gpu_data::GPUDataAllocationError,
     vertices::Particle, COMPUTE_FRAMES_IN_FLIGHT,
   },
   RESOLUTION,

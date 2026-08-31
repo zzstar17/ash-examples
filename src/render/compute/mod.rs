@@ -131,8 +131,8 @@ pub fn start_compute(
       time_since_last_ups_print += time_passed;
       if time_since_last_ups_print >= PRINT_UPS_EVERY {
         time_since_last_ups_print -= PRINT_UPS_EVERY;
-        let (min, max, average) = last_frames_durations.get_min_max_average_fps();
-        println!("UPS: {:.4} {:.4} {:.4}", min, max, average);
+        let fps = last_frames_durations.get_min_max_average_fps();
+        println!("UPS: {:.4} {:.4} {:.4}", fps.min, fps.max, fps.average);
       }
 
       let window_info = {

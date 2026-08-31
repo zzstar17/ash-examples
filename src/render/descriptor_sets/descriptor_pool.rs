@@ -3,6 +3,8 @@ use std::{marker::PhantomData, ptr};
 use ash::vk;
 use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
+use crate::render::gpu_data::GPUData;
+
 use super::texture_write_descriptor_set;
 
 fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
@@ -30,21 +32,79 @@ fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemo
   unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
 }
 
+// lookup nearest float
+fn create_sampler_nearest_float(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
+  let sampler_create_info = vk::SamplerCreateInfo {
+    s_type: vk::StructureType::SAMPLER_CREATE_INFO,
+    p_next: ptr::null(),
+    flags: vk::SamplerCreateFlags::empty(),
+    mag_filter: vk::Filter::NEAREST,
+    min_filter: vk::Filter::NEAREST,
+    address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    anisotropy_enable: vk::FALSE,
+    max_anisotropy: 0.0,
+    border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
+    unnormalized_coordinates: vk::TRUE,
+    compare_enable: vk::FALSE,
+    compare_op: vk::CompareOp::NEVER,
+    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+    mip_lod_bias: 0.0,
+    max_lod: 0.0,
+    min_lod: 0.0,
+    _marker: PhantomData,
+  };
+  unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
+}
+
+// lookup nearest int
+fn create_sampler_nearest_int(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
+  let sampler_create_info = vk::SamplerCreateInfo {
+    s_type: vk::StructureType::SAMPLER_CREATE_INFO,
+    p_next: ptr::null(),
+    flags: vk::SamplerCreateFlags::empty(),
+    mag_filter: vk::Filter::NEAREST,
+    min_filter: vk::Filter::NEAREST,
+    address_mode_u: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    address_mode_v: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
+    anisotropy_enable: vk::FALSE,
+    max_anisotropy: 0.0,
+    border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+    unnormalized_coordinates: vk::TRUE,
+    compare_enable: vk::FALSE,
+    compare_op: vk::CompareOp::NEVER,
+    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+    mip_lod_bias: 0.0,
+    max_lod: 0.0,
+    min_lod: 0.0,
+    _marker: PhantomData,
+  };
+  unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
+}
+
 pub struct DescriptorPool {
-  pub texture_layout: vk::DescriptorSetLayout,
-  texture_sampler: vk::Sampler,
-  pub texture_set: vk::DescriptorSet,
+  pub sprites_layout: vk::DescriptorSetLayout,
+  sprites_sampler: vk::Sampler,
+  pub sprites_set: vk::DescriptorSet,
+  pub text_ui_set: vk::DescriptorSet,
+
+  pub text_layout: vk::DescriptorSetLayout,
+  pub text_curves_sampler: vk::Sampler,
+  pub text_bands_sampler: vk::Sampler,
+  pub text_set: vk::DescriptorSet,
 
   pool: vk::DescriptorPool,
 }
 
 impl DescriptorPool {
-  // this pool only allocates one set and does not reallocate
-  const SET_COUNT: u32 = Self::SIZES[0].descriptor_count;
+  // two for graphics one for text
+  const SET_COUNT: u32 = 3;
 
   const SIZES: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
     ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-    descriptor_count: 1,
+    descriptor_count: 4,
   }];
 
   fn graphics_layout_bindings<'a>(
@@ -60,10 +120,37 @@ impl DescriptorPool {
     }]
   }
 
-  pub fn new(device: &ash::Device, texture_view: vk::ImageView) -> Result<Self, OutOfMemoryError> {
-    let texture_sampler = create_texture_sampler(device)?;
+  fn text_layout_bindings<'a>(
+    curves_sampler: *const vk::Sampler,
+    bands_sampler: *const vk::Sampler,
+  ) -> [vk::DescriptorSetLayoutBinding<'a>; 2] {
+    [
+      vk::DescriptorSetLayoutBinding {
+        binding: 0,
+        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        descriptor_count: 1,
+        stage_flags: vk::ShaderStageFlags::FRAGMENT,
+        p_immutable_samplers: curves_sampler,
+        _marker: PhantomData,
+      },
+      vk::DescriptorSetLayoutBinding {
+        binding: 1,
+        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        descriptor_count: 1,
+        stage_flags: vk::ShaderStageFlags::FRAGMENT,
+        p_immutable_samplers: bands_sampler,
+        _marker: PhantomData,
+      },
+    ]
+  }
 
-    let texture_layout = Self::create_graphics_layout(device, texture_sampler)?;
+  pub fn new(device: &ash::Device, gpu_data: &GPUData) -> Result<Self, OutOfMemoryError> {
+    let sprites_sampler = create_texture_sampler(device)?;
+    let text_curves_sampler = create_sampler_nearest_float(device)?;
+    let text_bands_sampler = create_sampler_nearest_int(device)?;
+
+    let sprites_layout = Self::create_graphics_layout(device, sprites_sampler)?;
+    let text_layout = Self::create_text_layout(device, text_curves_sampler, text_bands_sampler)?;
 
     let pool = {
       let pool_create_info = vk::DescriptorPoolCreateInfo {
@@ -78,18 +165,33 @@ impl DescriptorPool {
       unsafe { device.create_descriptor_pool(&pool_create_info, None) }
     }?;
 
-    let set = allocate_sets(device, pool, &[texture_layout])?[0];
-    let write = texture_write_descriptor_set(set, texture_view, 0); // same binding as in layout
-                                                                    // update texture set
+    let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout])?;
+    let writes = [
+      texture_write_descriptor_set(sets[0], gpu_data.sprite_view, 0),
+      texture_write_descriptor_set(sets[1], gpu_data.text_ui_view, 0),
+      texture_write_descriptor_set(sets[2], gpu_data.text_curve_view, 0),
+      texture_write_descriptor_set(sets[2], gpu_data.text_band_view, 1),
+    ];
     unsafe {
-      let contextualized = write.contextualize();
-      device.update_descriptor_sets(&[contextualized], &[]);
+      let contextualized = [
+        writes[0].contextualize(),
+        writes[1].contextualize(),
+        writes[2].contextualize(),
+        writes[3].contextualize(),
+      ];
+      device.update_descriptor_sets(&contextualized, &[]);
     }
 
     Ok(Self {
-      texture_sampler,
-      texture_layout,
-      texture_set: set,
+      sprites_sampler,
+      sprites_layout,
+      sprites_set: sets[0],
+      text_ui_set: sets[1],
+
+      text_layout,
+      text_curves_sampler,
+      text_bands_sampler,
+      text_set: sets[2],
       pool,
     })
   }
@@ -102,14 +204,29 @@ impl DescriptorPool {
     let bindings = Self::graphics_layout_bindings(ptr);
     create_layout(device, &bindings)
   }
+
+  fn create_text_layout(
+    device: &ash::Device,
+    curves_sampler: vk::Sampler,
+    bands_sampler: vk::Sampler,
+  ) -> Result<vk::DescriptorSetLayout, OutOfMemoryError> {
+    let curves_sampler_ptr = &curves_sampler;
+    let bands_sampler_ptr = &bands_sampler;
+    let bindings = Self::text_layout_bindings(curves_sampler_ptr, bands_sampler_ptr);
+    create_layout(device, &bindings)
+  }
 }
 
 impl DeviceManuallyDestroyed for DescriptorPool {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     device.destroy_descriptor_pool(self.pool, None);
 
-    device.destroy_descriptor_set_layout(self.texture_layout, None);
-    device.destroy_sampler(self.texture_sampler, None);
+    device.destroy_descriptor_set_layout(self.sprites_layout, None);
+    device.destroy_sampler(self.sprites_sampler, None);
+
+    device.destroy_descriptor_set_layout(self.text_layout, None);
+    device.destroy_sampler(self.text_curves_sampler, None);
+    device.destroy_sampler(self.text_bands_sampler, None);
   }
 }
 

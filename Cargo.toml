@@ -19,6 +19,7 @@ winit = { version = "0.30.13", default-features = false, features = [
     "wayland-csd-adwaita",
 ] }
 image = "0.25.1"
+cgmath = "0.18.0"
 
 log = { version = "0.4" }
 env_logger = "0.11.0"
@@ -31,6 +32,10 @@ vkinitialization = { version = "0.1.11", git = "https://github.com/zzstar17/vkin
     "surface",
 ] }
 vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocator", default-features = false}
+
+harfrust = "0.13.0"
+ttf-parser = "0.25.1"
+font-kit = "0.14.3"
 
 # random utilities
 take_mut = "0.2.2"

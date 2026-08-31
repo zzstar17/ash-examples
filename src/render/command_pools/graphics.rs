@@ -6,10 +6,14 @@ use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
   render::{
+    command_pools::{
+      ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS, ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+    },
     compute::ParticlesDraw,
     descriptor_sets::DescriptorPool,
-    graphics::{GPUData, RenderTargets},
-    pipelines::{GraphicsPipeline, GraphicsPushConstants},
+    gpu_data::GPUData,
+    graphics::RenderTargets,
+    pipelines::{GraphicsPipeline, GraphicsPushConstants, TextPipeline, TextPushConstants},
     vertices::QUAD_INDICES,
     RENDER_EXTENT,
   },
@@ -18,6 +22,7 @@ use crate::{
 
 use super::dependency_info;
 
+#[derive(Debug, Clone, Copy)]
 pub struct GraphicsCommandBufferPool {
   pool: vk::CommandPool,
   pub main: vk::CommandBuffer,
@@ -41,7 +46,7 @@ impl GraphicsCommandBufferPool {
     )?;
 
     #[cfg(feature = "vl")]
-    let command_buffer_names = [c"primary"];
+    let command_buffer_names = [c"Main"];
     let main = super::allocate_primary_command_buffers(
       device,
       pool,
@@ -55,14 +60,189 @@ impl GraphicsCommandBufferPool {
     Ok(Self { pool, main })
   }
 
-  pub unsafe fn reset(&mut self, device: &ash::Device) -> Result<(), OutOfMemoryError> {
+  pub unsafe fn reset(&self, device: &ash::Device) -> Result<(), OutOfMemoryError> {
     device
       .reset_command_pool(self.pool, vk::CommandPoolResetFlags::empty())
       .map_err(|err| err.into())
   }
 
+  pub unsafe fn begin_recording(&self, device: &ash::Device) -> Result<(), OutOfMemoryError> {
+    let begin_info =
+      vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
+    device.begin_command_buffer(self.main, &begin_info)?;
+    Ok(())
+  }
+
+  pub unsafe fn record_copy_staging_buffer_to_image(
+    &self,
+    device: &ash::Device,
+    staging: vk::Buffer,
+    staging_offset: u64,
+    dst: vk::Image,
+    image_extent: vk::Extent2D,
+    final_layout: vk::ImageLayout,
+    img_src_stage_mask: vk::PipelineStageFlags2,
+    img_src_access_mask: vk::AccessFlags2,
+    img_dst_stage_mask: vk::PipelineStageFlags2,
+    img_dst_access_mask: vk::AccessFlags2,
+  ) {
+    let transfer_dst_layout = vk::ImageMemoryBarrier2 {
+      src_stage_mask: img_src_stage_mask,
+      dst_stage_mask: vk::PipelineStageFlags2::COPY,
+      src_access_mask: img_src_access_mask,
+      dst_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+      old_layout: vk::ImageLayout::UNDEFINED,
+      new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      image: dst,
+      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(
+      self.main,
+      &dependency_info(&[], &[], &[transfer_dst_layout]),
+    );
+
+    let copy_region = vk::BufferImageCopy {
+      buffer_offset: staging_offset,
+      buffer_row_length: 0,   // 0 because buffer is tightly packed
+      buffer_image_height: 0, // 0 because buffer is tightly packed
+      image_subresource: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
+      image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+      image_extent: vk::Extent3D {
+        width: image_extent.width,
+        height: image_extent.height,
+        depth: 1,
+      },
+    };
+    device.cmd_copy_buffer_to_image(
+      self.main,
+      staging,
+      dst,
+      vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      &[copy_region],
+    );
+
+    let change_to_final_layout = vk::ImageMemoryBarrier2 {
+      src_stage_mask: vk::PipelineStageFlags2::COPY,
+      dst_stage_mask: img_dst_stage_mask,
+      src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+      dst_access_mask: img_dst_access_mask,
+      old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      new_layout: final_layout,
+      src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+      image: dst,
+      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(
+      self.main,
+      &dependency_info(&[], &[], &[change_to_final_layout]),
+    );
+  }
+
+  pub unsafe fn record_update_text_ui(
+    &self,
+    device: &ash::Device,
+    descriptor_pool: &DescriptorPool,
+    data: &GPUData,
+    text_pipeline: &TextPipeline,
+  ) {
+    let cb = self.main;
+
+    let wait_ui = vk::ImageMemoryBarrier2 {
+      src_access_mask: vk::AccessFlags2::NONE,
+      dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+      src_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER, // previous main shader operation
+      dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+      old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+      new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+      image: data.text_ui,
+      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+
+    let clear_value = vk::ClearValue {
+      color: vk::ClearColorValue {
+        float32: [0.0, 0.0, 0.0, 0.1],
+      },
+    };
+    let color_attachments = [vk::RenderingAttachmentInfo {
+      image_view: data.text_ui_view,
+      image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+      resolve_mode: vk::ResolveModeFlags::NONE,
+      resolve_image_view: vk::ImageView::null(),
+      resolve_image_layout: vk::ImageLayout::UNDEFINED,
+      load_op: vk::AttachmentLoadOp::CLEAR,
+      store_op: vk::AttachmentStoreOp::STORE,
+      clear_value,
+      ..Default::default()
+    }];
+    let rendering_info = vk::RenderingInfo {
+      flags: vk::RenderingFlags::empty(),
+      render_area: vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: data.text_ui_size,
+      },
+      layer_count: 1,
+      view_mask: 0,
+      color_attachment_count: color_attachments.len() as u32,
+      p_color_attachments: color_attachments.as_ptr(),
+      p_depth_attachment: ptr::null(),
+      p_stencil_attachment: ptr::null(),
+      ..Default::default()
+    };
+    device.cmd_begin_rendering(cb, &rendering_info);
+
+    let text_pc =
+      TextPushConstants::new(RENDER_EXTENT, [0.0, data.text_ui_rect.first_line.height()]);
+
+    device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+    device.cmd_bind_descriptor_sets(
+      cb,
+      vk::PipelineBindPoint::GRAPHICS,
+      text_pipeline.layout,
+      0,
+      &[descriptor_pool.text_set],
+      &[],
+    );
+    device.cmd_push_constants(
+      cb,
+      text_pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&text_pc),
+    );
+    device.cmd_bind_vertex_buffers(cb, 0, &[data.text.buffers.device.vertices], &[0]);
+    device.cmd_bind_index_buffer(
+      cb,
+      data.text.buffers.device.indices,
+      0,
+      vk::IndexType::UINT32,
+    );
+    device.cmd_draw_indexed(cb, data.text.device_index_count, 1, 0, 0, 0);
+
+    device.cmd_end_rendering(cb);
+
+    let wait_ui = vk::ImageMemoryBarrier2 {
+      src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+      dst_access_mask: vk::AccessFlags2::SHADER_SAMPLED_READ,
+      src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+      dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
+      old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+      new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+      image: data.text_ui,
+      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+  }
+
   pub unsafe fn record_main(
-    &mut self,
+    &self,
     frame_i: usize,
     device: &ash::Device,
     queues: &SingleQueues,
@@ -72,17 +252,16 @@ impl GraphicsCommandBufferPool {
     swapchain_extent: vk::Extent2D,
 
     pipeline: &GraphicsPipeline,
+    text_pipeline: &TextPipeline,
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
     particles_draw: ParticlesDraw,
 
     screenshot_buffer: Option<vk::Buffer>,
-  ) -> Result<(), OutOfMemoryError> {
+    draw_text: bool,
+  ) {
     let cb = self.main;
-    let begin_info =
-      vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
-    device.begin_command_buffer(cb, &begin_info)?;
 
     let render_width = RENDER_EXTENT.width as i32;
     let render_height = RENDER_EXTENT.height as i32;
@@ -125,18 +304,8 @@ impl GraphicsCommandBufferPool {
       }
     }
 
-    // in this case the render pass takes care of all internal queue synchronization
-    // 1 mip_level / 1 array layer
-    let subresource_range = vk::ImageSubresourceRange {
-      aspect_mask: vk::ImageAspectFlags::COLOR,
-      base_mip_level: 0,
-      level_count: 1,
-      base_array_layer: 0,
-      layer_count: 1,
-    };
-
-    // wait previous copy on render target
     {
+      // wait previous copy on render target
       let wait_render_target = vk::ImageMemoryBarrier2 {
         src_access_mask: vk::AccessFlags2::NONE,
         dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -145,13 +314,11 @@ impl GraphicsCommandBufferPool {
         old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
         new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         image: render_targets.images[frame_i],
-        subresource_range,
+        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
-    }
 
-    {
       let clear_value = vk::ClearValue {
         color: BACKGROUND_COLOR,
       };
@@ -187,7 +354,7 @@ impl GraphicsCommandBufferPool {
         vk::PipelineBindPoint::GRAPHICS,
         pipeline.layout,
         0,
-        &[descriptor_pool.texture_set],
+        &[descriptor_pool.sprites_set],
         &[],
       );
       let push_constants = GraphicsPushConstants {
@@ -201,9 +368,86 @@ impl GraphicsCommandBufferPool {
         utility::any_as_u8_slice(&push_constants),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.vertex_buffer, particles_draw.buffer], &[0, 0]);
-      device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
+      device.cmd_bind_vertex_buffers(
+        cb,
+        0,
+        &[data.sprite_buffers.quad_vertices, particles_draw.buffer],
+        &[0, 0],
+      );
+      device.cmd_bind_index_buffer(
+        cb,
+        data.sprite_buffers.quad_indices,
+        0,
+        vk::IndexType::UINT16,
+      );
       device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, particles_draw.count, 0, 0, 0);
+
+      // draw text ui
+      if draw_text {
+        // todo: incorporate this with compute
+        // {
+        //   let position = RenderPosition::new(
+        //     [
+        //       ((data.text_ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
+        //       ((data.text_ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
+        //     ],
+        //     [
+        //       data.text_ui_size.width as f32 / RENDER_EXTENT.width as f32,
+        //       data.text_ui_size.height as f32 / RENDER_EXTENT.height as f32,
+        //     ],
+        //   );
+        //   device.cmd_bind_descriptor_sets(
+        //     cb,
+        //     vk::PipelineBindPoint::GRAPHICS,
+        //     pipeline.layout,
+        //     0,
+        //     &[descriptor_pool.text_ui_set],
+        //     &[],
+        //   );
+        //   device.cmd_push_constants(
+        //     cb,
+        //     pipeline.layout,
+        //     vk::ShaderStageFlags::VERTEX,
+        //     0,
+        //     utility::any_as_u8_slice(&position),
+        //   );
+        //   device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+        // }
+
+        {
+          let text_pc = TextPushConstants::new(
+            RENDER_EXTENT,
+            [10.0, data.text_ui_rect.first_line.height() + 10.0],
+          );
+
+          device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+          device.cmd_bind_descriptor_sets(
+            cb,
+            vk::PipelineBindPoint::GRAPHICS,
+            text_pipeline.layout,
+            0,
+            &[descriptor_pool.text_set],
+            &[],
+          );
+          device.cmd_push_constants(
+            cb,
+            text_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&text_pc),
+          );
+          // this should be synchronized with host because of host write ordering guarantees
+          // https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-submission-host-writes
+          device.cmd_bind_vertex_buffers(cb, 0, &[*data.text.buffers.host[frame_i].vertices], &[0]);
+          device.cmd_bind_index_buffer(
+            cb,
+            *data.text.buffers.host[frame_i].indices,
+            0,
+            vk::IndexType::UINT32,
+          );
+          device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
+        }
+      }
 
       device.cmd_end_rendering(cb);
     }
@@ -219,7 +463,7 @@ impl GraphicsCommandBufferPool {
         old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         image: render_targets.images[frame_i],
-        subresource_range,
+        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
@@ -239,7 +483,7 @@ impl GraphicsCommandBufferPool {
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         image: swapchain_image,
-        subresource_range,
+        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         _marker: PhantomData,
       };
       device.cmd_pipeline_barrier2(
@@ -252,7 +496,7 @@ impl GraphicsCommandBufferPool {
         swapchain_image,
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
         &OUT_OF_BOUNDS_AREA_COLOR,
-        &[subresource_range],
+        &[ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE],
       );
 
       let flush_clear = vk::MemoryBarrier2 {
@@ -271,18 +515,11 @@ impl GraphicsCommandBufferPool {
       device.cmd_pipeline_barrier2(cb, &dependency_info(&[flush_clear], &[], &[]));
     }
 
-    let layers = vk::ImageSubresourceLayers {
-      aspect_mask: vk::ImageAspectFlags::COLOR,
-      mip_level: 0,
-      base_array_layer: 0,
-      layer_count: 1,
-    };
-
     // screenshot
     if let Some(buffer) = screenshot_buffer {
       // full image
       let region = vk::BufferImageCopy {
-        image_subresource: layers,
+        image_subresource: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
         image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
         image_extent: vk::Extent3D {
           width: RENDER_EXTENT.width,
@@ -340,9 +577,9 @@ impl GraphicsCommandBufferPool {
       let x_offset = (render_width - swapchain_width).abs() / 2;
       let y_offset = (render_height - swapchain_height).abs() / 2;
       let region = vk::ImageCopy {
-        src_subresource: layers,
+        src_subresource: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
         src_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
-        dst_subresource: layers,
+        dst_subresource: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
         dst_offset: vk::Offset3D {
           x: x_offset,
           y: y_offset,
@@ -368,8 +605,8 @@ impl GraphicsCommandBufferPool {
         render_height,
         swapchain_width,
         swapchain_height,
-        layers,
-        layers,
+        ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
+        ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
       );
       device.cmd_blit_image(
         cb,
@@ -399,7 +636,7 @@ impl GraphicsCommandBufferPool {
         src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
         image: swapchain_image,
-        subresource_range,
+        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         _marker: PhantomData,
       };
       device.cmd_pipeline_barrier2(
@@ -407,9 +644,14 @@ impl GraphicsCommandBufferPool {
         &dependency_info(&[], &[], &[swapchain_presentation_layout]),
       );
     }
+  }
 
-    device.end_command_buffer(cb)?;
-    Ok(())
+  pub fn end_recording(&self, device: &ash::Device) -> Result<(), OutOfMemoryError> {
+    unsafe {
+      device
+        .end_command_buffer(self.main)
+        .map_err(|err| err.into())
+    }
   }
 }
 

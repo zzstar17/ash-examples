@@ -9,6 +9,8 @@ use vkinitialization::{
 };
 use vkobjects::errors::{DeviceIsLost, OutOfMemoryError, QueueSubmitError};
 
+use crate::render::gpu_data::GPUDataAllocationError;
+
 use super::{
   graphics::swapchain::{AcquireNextImageError, SwapchainCreationError},
   pipelines::{PipelineCacheError, PipelineCreationError},
@@ -89,6 +91,8 @@ pub enum InitializationError {
   DeviceIsLost(#[from] DeviceIsLost),
   #[error("Vulkan returned ERROR_UNKNOWN")]
   Unknown,
+  #[error("Vulkan returned VK_ERROR_VALIDATION_FAILED")]
+  ValidationFailed,
 }
 impl std::fmt::Debug for InitializationError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -144,6 +148,9 @@ pub enum FrameRenderError {
   FailedToAcquireSwapchainImage(#[from] AcquireNextImageError),
   #[error("Failed to recreate swapchain: {0}")]
   FailedToRecreateSwapchain(#[from] SwapchainRecreationError),
+
+  #[error("Failed to copy data to cpu buffers")]
+  FailedToUpdateHostBuffer(#[from] HostMemorySyncError),
 }
 impl std::fmt::Debug for FrameRenderError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -184,18 +191,4 @@ impl std::fmt::Debug for ImageError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     error_chain_fmt(self, f)
   }
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum GPUDataAllocationError {
-  #[error(transparent)]
-  StagingBufferError(#[from] DeviceMemoryInitializationError),
-  #[error("Failed to allocate one of the main device memory objects.\n{0}")]
-  AllocationError(#[from] AllocationError),
-  #[error("Failed to allocate one of the main host memory objects.\n{0}")]
-  HostAllocationError(#[from] HostAllocationError),
-  #[error(transparent)]
-  OutOfMemory(#[from] OutOfMemoryError),
-  #[error("Failed to submit allocation workload to a queue: {0}")]
-  QueueSubmitError(#[from] QueueSubmitError),
 }

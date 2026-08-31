@@ -4,6 +4,7 @@ mod create_objs;
 mod descriptor_sets;
 mod errors;
 mod format_conversions;
+pub mod gpu_data;
 pub mod graphics;
 mod initialization;
 mod pipelines;
