@@ -169,7 +169,7 @@ impl Renderer {
       DeviceExtensions {
         memory_priority: true,
         pageable_device_local_memory: true,
-        swapchain_maintenance1: true,
+        swapchain_maintenance1: false,
         ..Default::default()
       },
       DeviceFeatures {
@@ -178,7 +178,7 @@ impl Renderer {
         ..Default::default()
       },
       DeviceFeatures {
-        swapchain_maintenance1: true,
+        swapchain_maintenance1: false,
         ..Default::default()
       },
     )
@@ -251,7 +251,7 @@ impl Renderer {
       &debug_utils_marker,
     )
     .on_err(|_| unsafe { destructor.fire(&device) })
-    .map_err(|err| GPUDataAllocationError::from(err))?;
+    .map_err(GPUDataAllocationError::from)?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
 
