@@ -1,5 +1,4 @@
 mod gpu_data;
-mod render_pass;
 mod render_targets;
 mod renderer;
 mod screenshot_buffer;

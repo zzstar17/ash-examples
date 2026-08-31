@@ -2359,8 +2359,8 @@ dependencies = [
 
 [[package]]
 name = "vkinitialization"
-version = "0.1.9"
-source = "git+https://github.com/zzstar17/vkinitialization#a07cbfcf9f71355336fd30b2efb793582a910b1f"
+version = "0.1.11"
+source = "git+https://github.com/zzstar17/vkinitialization#fb57d011f04efd2dc5dbf303fccbf8f88ed3762d"
 dependencies = [
  "ash",
  "ash-window",

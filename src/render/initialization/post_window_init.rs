@@ -100,6 +100,7 @@ impl PostWindowInit {
       },
       DeviceFeatures {
         synchronization2: true,
+        dynamic_rendering: true,
         ..Default::default()
       },
       DeviceFeatures {

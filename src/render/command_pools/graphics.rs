@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, marker::PhantomData, ptr};
+use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk;
 use vkinitialization::device::{QueueFamilies, SingleQueues};
@@ -66,8 +66,6 @@ impl GraphicsCommandBufferPool {
     frame_i: usize,
     device: &ash::Device,
     queues: &SingleQueues,
-
-    render_pass: vk::RenderPass,
     render_targets: &RenderTargets,
 
     swapchain_image: vk::Image,
@@ -128,25 +126,61 @@ impl GraphicsCommandBufferPool {
     }
 
     // in this case the render pass takes care of all internal queue synchronization
+    // 1 mip_level / 1 array layer
+    let subresource_range = vk::ImageSubresourceRange {
+      aspect_mask: vk::ImageAspectFlags::COLOR,
+      base_mip_level: 0,
+      level_count: 1,
+      base_array_layer: 0,
+      layer_count: 1,
+    };
+
+    // wait previous copy on render target
+    {
+      let wait_render_target = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::NONE,
+        dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT), // previous copy operations
+        dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+        new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        image: render_targets.images[frame_i],
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
+    }
+
     {
       let clear_value = vk::ClearValue {
         color: BACKGROUND_COLOR,
       };
-      let render_pass_begin_info = vk::RenderPassBeginInfo {
-        s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
-        p_next: ptr::null(),
-        render_pass,
-        framebuffer: render_targets.framebuffers[frame_i],
-        // whole image
+      let color_attachments = [vk::RenderingAttachmentInfo {
+        image_view: render_targets.image_views[frame_i],
+        image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        resolve_mode: vk::ResolveModeFlags::NONE,
+        resolve_image_view: vk::ImageView::null(),
+        resolve_image_layout: vk::ImageLayout::UNDEFINED,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        clear_value,
+        ..Default::default()
+      }];
+      let rendering_info = vk::RenderingInfo {
+        flags: vk::RenderingFlags::empty(),
         render_area: vk::Rect2D {
           offset: vk::Offset2D { x: 0, y: 0 },
           extent: RENDER_EXTENT,
         },
-        clear_value_count: 1,
-        p_clear_values: &clear_value,
-        _marker: PhantomData,
+        layer_count: 1,
+        view_mask: 0,
+        color_attachment_count: color_attachments.len() as u32,
+        p_color_attachments: color_attachments.as_ptr(),
+        p_depth_attachment: ptr::null(),
+        p_stencil_attachment: ptr::null(),
+        ..Default::default()
       };
-      device.cmd_begin_render_pass(cb, &render_pass_begin_info, vk::SubpassContents::INLINE);
+      device.cmd_begin_rendering(cb, &rendering_info);
 
       device.cmd_bind_descriptor_sets(
         cb,
@@ -171,17 +205,25 @@ impl GraphicsCommandBufferPool {
       device.cmd_bind_index_buffer(cb, data.index_buffer, 0, vk::IndexType::UINT16);
       device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, particles_draw.count, 0, 0, 0);
 
-      device.cmd_end_render_pass(cb);
+      device.cmd_end_rendering(cb);
     }
 
-    // 1 mip_level / 1 array layer
-    let subresource_range = vk::ImageSubresourceRange {
-      aspect_mask: vk::ImageAspectFlags::COLOR,
-      base_mip_level: 0,
-      level_count: 1,
-      base_array_layer: 0,
-      layer_count: 1,
-    };
+    // wait to be ready to copy on render target
+    // change layout to transfer_src
+    {
+      let wait_render_target = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        dst_access_mask: vk::AccessFlags2::TRANSFER_READ,
+        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT),
+        old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+        image: render_targets.images[frame_i],
+        subresource_range,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
+    }
 
     // prepare and clear swapchain image
     {
