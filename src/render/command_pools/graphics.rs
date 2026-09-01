@@ -636,32 +636,25 @@ fn get_centered_blit_region(
 ) -> vk::ImageBlit {
   let width_diff = dst_width - src_width;
   let height_diff = dst_height - src_height;
-  let dst_start;
-  let dst_end;
-  match width_diff.cmp(&height_diff) {
+  let (dst_start, dst_end) = match width_diff.cmp(&height_diff) {
     Ordering::Greater => {
       // clamp to height
       let ratio = dst_height as f32 / src_height as f32;
       let resized_width = (src_width as f32 * ratio) as i32;
 
       let half = (dst_width - resized_width) / 2;
-      dst_start = [half, 0];
-      dst_end = [half + resized_width, dst_height];
+      ([half, 0], [half + resized_width, dst_height])
     }
-    Ordering::Equal => {
-      dst_start = [0, 0];
-      dst_end = [dst_width, dst_height];
-    }
+    Ordering::Equal => ([0, 0], [dst_width, dst_height]),
     Ordering::Less => {
       // clamp to width
       let ratio = dst_width as f32 / src_width as f32;
       let resized_height = (src_height as f32 * ratio) as i32;
 
       let half = (dst_height - resized_height) / 2;
-      dst_start = [0, half];
-      dst_end = [dst_width, half + resized_height];
+      ([0, half], [dst_width, half + resized_height])
     }
-  }
+  };
   vk::ImageBlit {
     src_subresource,
     src_offsets: [

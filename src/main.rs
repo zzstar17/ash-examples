@@ -128,7 +128,7 @@ impl RenderAreaDimensions {
     }
   }
 
-  pub fn into_apparent_coordinates(&self, window_coordinates: [f32; 2]) -> [f32; 2] {
+  pub fn get_apparent_coordinates(&self, window_coordinates: [f32; 2]) -> [f32; 2] {
     let offsetted_x = window_coordinates[0] - self.render_area_window_offset[0] as f32;
     let offsetted_y = window_coordinates[1] - self.render_area_window_offset[1] as f32;
     let apparent_x = offsetted_x / self.apparent_ratio;
@@ -314,16 +314,16 @@ impl ApplicationHandler for App {
     _device_id: winit::event::DeviceId,
     event: winit::event::DeviceEvent,
   ) {
+    #[allow(clippy::single_match)]
     match event {
-      DeviceEvent::MouseMotion { delta } => {
+      DeviceEvent::MouseMotion { delta } if !self.mouse_in_window => {
         // try to keep track of the mouse outside the window
-        if !self.mouse_in_window {
-          if let Some(pos) = self.ferris_drag_mouse_pos.as_mut() {
-            pos[0] += delta.0;
-            pos[1] += delta.1;
-          }
+        if let Some(pos) = self.ferris_drag_mouse_pos.as_mut() {
+          pos[0] += delta.0;
+          pos[1] += delta.1;
         }
       }
+
       _ => {}
     }
   }
@@ -362,6 +362,7 @@ impl ApplicationHandler for App {
           println!("FPS: {}", 1.0 / time_passed.as_secs_f32());
         }
 
+        #[allow(clippy::absurd_extreme_comparisons)]
         if self.frame_i <= RENDER_UNTIL_FRAME {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
@@ -376,7 +377,7 @@ impl ApplicationHandler for App {
               let mouse_coors = [mouse_coors[0] as f32, mouse_coors[1] as f32];
               status
                 .render_dimensions
-                .into_apparent_coordinates(mouse_coors)
+                .get_apparent_coordinates(mouse_coors)
             }),
           );
 
@@ -457,31 +458,28 @@ impl ApplicationHandler for App {
       WindowEvent::CursorLeft { .. } => {
         self.mouse_in_window = false;
       }
-      WindowEvent::MouseInput { state, button, .. } => {
-        if let MouseButton::Left = button {
-          match state {
-            ElementState::Pressed => {
-              let real_mouse_coors = self
-                .status
-                .unwrap_started()
-                .render_dimensions
-                .into_apparent_coordinates([
-                  self.mouse_position.x as f32,
-                  self.mouse_position.y as f32,
-                ]);
-              let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
-              let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
-              let squares = dist_x * dist_x + dist_y * dist_y;
-              if squares < 120.0 * 120.0 {
-                self.ferris_drag_mouse_pos = Some([self.mouse_position.x, self.mouse_position.y]);
-              }
-            }
-            ElementState::Released => {
-              self.ferris_drag_mouse_pos = None;
-            }
+      WindowEvent::MouseInput {
+        state,
+        button: MouseButton::Left,
+        ..
+      } => match state {
+        ElementState::Pressed => {
+          let real_mouse_coors = self
+            .status
+            .unwrap_started()
+            .render_dimensions
+            .get_apparent_coordinates([self.mouse_position.x as f32, self.mouse_position.y as f32]);
+          let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
+          let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
+          let squares = dist_x * dist_x + dist_y * dist_y;
+          if squares < 120.0 * 120.0 {
+            self.ferris_drag_mouse_pos = Some([self.mouse_position.x, self.mouse_position.y]);
           }
         }
-      }
+        ElementState::Released => {
+          self.ferris_drag_mouse_pos = None;
+        }
+      },
       WindowEvent::KeyboardInput { event, .. } => {
         let pressed = event.state.is_pressed();
         let repeating = event.repeat;
@@ -506,29 +504,28 @@ impl ApplicationHandler for App {
                 status.renderer.screenshot();
               }
             }
-            KeyCode::F3 | KeyCode::F10 => {
-              if pressed && !repeating {
-                // attempt to resize the window to native resolution
-                let old_size = status.renderer.window().inner_size();
-                if old_size.width != RESOLUTION[0] && old_size.height != RESOLUTION[1] {
-                  match status.renderer.window().request_inner_size(PhysicalSize {
-                    width: RESOLUTION[0],
-                    height: RESOLUTION[1],
-                  }) {
-                    Some(size) => {
-                      if size == old_size {
-                        println!("Attempted to resize to native resolution, however resizing is currently disallowed by the windowing system.");
-                      } else {
-                        println!("Attempted to resize to native resolution, however such command may have been ignored by the platform.");
-                      }
+            KeyCode::F3 | KeyCode::F10 if pressed && !repeating => {
+              // attempt to resize the window to native resolution
+              let old_size = status.renderer.window().inner_size();
+              if old_size.width != RESOLUTION[0] && old_size.height != RESOLUTION[1] {
+                match status.renderer.window().request_inner_size(PhysicalSize {
+                  width: RESOLUTION[0],
+                  height: RESOLUTION[1],
+                }) {
+                  Some(size) => {
+                    if size == old_size {
+                      println!("Attempted to resize to native resolution, however resizing is currently disallowed by the windowing system.");
+                    } else {
+                      println!("Attempted to resize to native resolution, however such command may have been ignored by the platform.");
                     }
-                    None => {
-                      println!("Successfully resized to native resolution");
-                    }
+                  }
+                  None => {
+                    println!("Successfully resized to native resolution");
                   }
                 }
               }
             }
+
             _ => {}
           }
         }
