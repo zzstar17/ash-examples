@@ -7,19 +7,19 @@ use crate::ENABLE_USE_DEBUG_SHADERS;
 
 use super::{load_shader, ShaderError};
 
-const VERT_SHADER_PATH: &str = "./shaders/vert.spv";
-const VERT_DEBUG_SHADER_PATH: &str = "./shaders/vert_debug.spv";
-const FRAG_SHADER_PATH: &str = "./shaders/frag.spv";
-const FRAG_DEBUG_SHADER_PATH: &str = "./shaders/frag_debug.spv";
+const VERT_SHADER_PATH: &str = "./shaders/slug_vertex.spv";
+const VERT_DEBUG_SHADER_PATH: &str = "./shaders/slug_vertex_debug.spv";
+const FRAG_SHADER_PATH: &str = "./shaders/slug_pixel.spv";
+const FRAG_DEBUG_SHADER_PATH: &str = "./shaders/slug_pixel_debug.spv";
 
 static MAIN_FN_NAME: &CStr = c"main";
 
-pub struct Shader {
+pub struct TextShader {
   pub vert: vk::ShaderModule,
   pub frag: vk::ShaderModule,
 }
 
-impl Shader {
+impl TextShader {
   pub fn load(device: &ash::Device) -> Result<Self, ShaderError> {
     let vert_path = Path::new(if ENABLE_USE_DEBUG_SHADERS {
       VERT_DEBUG_SHADER_PATH
@@ -38,7 +38,7 @@ impl Shader {
   }
 }
 
-impl Shader {
+impl TextShader {
   pub fn get_pipeline_shader_creation_info(&self) -> [vk::PipelineShaderStageCreateInfo<'_>; 2] {
     [
       vk::PipelineShaderStageCreateInfo {
@@ -67,7 +67,7 @@ impl Shader {
   }
 }
 
-impl DeviceManuallyDestroyed for Shader {
+impl DeviceManuallyDestroyed for TextShader {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     device.destroy_shader_module(self.vert, None);
     device.destroy_shader_module(self.frag, None);

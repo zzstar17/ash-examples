@@ -75,7 +75,7 @@ void main() {
   Particle p_out;
 
   // special case for ferris
-  if (i == 0) {
+  if (i == 1) {
     p_out.pos = pc.ferris_pos;
     data_out.particles[i] = p_out;
     return;
@@ -90,6 +90,12 @@ void main() {
     p_in = new_data_in.particles[new_particle_i];
   } else {
     p_in = data_in.particles[i];
+  }
+
+  // special case for text
+  if (i == 0) {
+    data_out.particles[i] = p_in;
+    return;
   }
 
   // 0.0 to 1.0

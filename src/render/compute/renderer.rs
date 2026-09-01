@@ -34,7 +34,13 @@ impl ComputeRenderer {
     particle_buffers: [vk::Buffer; ParticleBuffers::BUFFER_COUNT],
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
-    let gpu_data = ComputeGPUData::new(&device, &physical_device, particle_buffers, marker)?;
+    let gpu_data = ComputeGPUData::new(
+      &device,
+      &physical_device,
+      particle_buffers,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
     let descriptor_pool = ComputeDescriptorPool::new(&device).on_err(|_err| unsafe {
       gpu_data.destroy_self(&device);
     })?;

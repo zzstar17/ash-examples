@@ -75,7 +75,7 @@ impl ComputeCommandBufferPool {
     let push_constants = ComputePushConstants {
       render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
       ferris_pos: ferris_position,
-      particle_count: data.particles_len as u32,
+      particle_count: data.particles_len,
       new_particle_count: new_particles_count,
     };
     let new_particles_size = new_particles_count as u64 * size_of::<Particle>() as u64;
@@ -84,9 +84,10 @@ impl ComputeCommandBufferPool {
       if queues.transfer.family_index != queues.compute.family_index {
         let acquire = vk::BufferMemoryBarrier2 {
           src_access_mask: vk::AccessFlags2::empty(), // ownership acquire
-          dst_access_mask: vk::AccessFlags2::SHADER_READ,
+          dst_access_mask: vk::AccessFlags2::SHADER_READ.bitor(vk::AccessFlags2::TRANSFER_READ),
           src_stage_mask: vk::PipelineStageFlags2::empty(), // ownership acquire
-          dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+          dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
+            .bitor(vk::PipelineStageFlags2::TRANSFER),
           src_queue_family_index: queues.transfer.family_index,
           dst_queue_family_index: queues.compute.family_index,
           buffer: data.particles_new,
@@ -115,20 +116,26 @@ impl ComputeCommandBufferPool {
     // wait previous dispatch
     let cur_buffer_size = data.current_particles_size();
     if cur_buffer_size > 0 {
+      // wait for previous dispatch write
       let read_wait = vk::BufferMemoryBarrier2 {
-        src_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::SHADER_READ),
-        dst_access_mask: vk::AccessFlags2::SHADER_READ,
+        src_access_mask: vk::AccessFlags2::SHADER_WRITE,
+        dst_access_mask: vk::AccessFlags2::SHADER_READ.bitor(vk::AccessFlags2::TRANSFER_READ),
         src_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
-        dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+        dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
+          .bitor(vk::PipelineStageFlags2::TRANSFER),
         buffer: data.particles_compute[read_i],
         offset: 0,
         size: cur_buffer_size,
         ..Default::default()
       };
+      // wait for any previous reads or writes
       let write_wait = vk::BufferMemoryBarrier2 {
-        src_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::SHADER_READ),
+        src_access_mask: vk::AccessFlags2::SHADER_WRITE
+          .bitor(vk::AccessFlags2::SHADER_READ)
+          .bitor(vk::AccessFlags2::TRANSFER_READ),
         dst_access_mask: vk::AccessFlags2::SHADER_WRITE.bitor(vk::AccessFlags2::TRANSFER_READ),
-        src_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER,
+        src_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
+          .bitor(vk::PipelineStageFlags2::TRANSFER),
         dst_stage_mask: vk::PipelineStageFlags2::COMPUTE_SHADER
           .bitor(vk::PipelineStageFlags2::TRANSFER),
         buffer: data.particles_compute[write_i],

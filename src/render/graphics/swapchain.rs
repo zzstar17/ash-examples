@@ -20,7 +20,7 @@ use crate::{
     errors::error_chain_fmt,
     SWAPCHAIN_PREFERRED_IMAGE_FORMAT,
   },
-  PREFERRED_PRESENTATION_METHOD,
+  LOG_SWAPCHAIN_WARNINGS, PREFERRED_PRESENTATION_METHOD,
 };
 
 // VK_ERROR_NATIVE_WINDOW_IN_USE_KHR shouldn't happen unless some other program somehow hijacks
@@ -171,6 +171,9 @@ impl Swapchains {
     ))
   }
 
+  /// Destroy old swapchain if no images are in use
+  /// Returns a boolean indicated if the operation was succesful
+  /// Only works with the swapchain_maintenance1 extension
   pub fn attempt_destroy_old(
     &mut self,
     device: &Device,
@@ -181,7 +184,7 @@ impl Swapchains {
       // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
       if let Some(fences) = &old.image_finished_presenting_fence {
         unsafe {
-          match device.wait_for_fences(&fences, true, 0) {
+          match device.wait_for_fences(fences, true, 0) {
             Err(vkerr) => match vkerr {
               vk::Result::TIMEOUT => {
                 return Ok(false);
@@ -210,6 +213,7 @@ impl Swapchains {
     &mut self,
     physical_device: &PhysicalDevice,
     device: &Device,
+    presentation_queue: vk::Queue,
     cur_total_frame: usize,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
@@ -226,15 +230,15 @@ impl Swapchains {
       // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
       if let Some(fences) = &old.image_finished_presenting_fence {
         unsafe {
-          device.wait_for_fences(&fences, true, u64::MAX).expect(
+          device.wait_for_fences(fences, true, u64::MAX).expect(
             "Failed to wait for swapchain presentation fences during swapchain destruction",
           );
         }
       } else {
         unsafe {
-          device
-            .device_wait_idle()
-            .expect("Failed to wait for device idle during swapchain destruction");
+          device.queue_wait_idle(presentation_queue).expect(
+            "Failed to wait for presentation queue to become idle during swapchain destruction",
+          );
         }
       }
       unsafe {
@@ -299,6 +303,21 @@ impl Swapchains {
     if let Some(fences) = &self.current.image_finished_presenting_fence {
       let fence = [fences[image_index as usize]];
       unsafe {
+        if LOG_SWAPCHAIN_WARNINGS {
+          if let Err(vkerr) = device.wait_for_fences(&fence, true, 0) {
+            if vkerr == vk::Result::TIMEOUT {
+              log::warn!(
+                "Swapchain image's {} fence is not ready during queue present",
+                image_index
+              );
+              device.wait_for_fences(&fence, true, u64::MAX)?;
+            } else {
+              return Err(AcquireNextImageError::from(vkerr));
+            }
+          }
+        } else {
+          device.wait_for_fences(&fence, true, u64::MAX)?;
+        }
         device.reset_fences(&fence)?;
       }
       fence_present_info.swapchain_count = 1;
@@ -320,6 +339,7 @@ impl Swapchains {
     self.current.extent
   }
 
+  #[allow(dead_code)]
   pub fn get_image_views(&self) -> &[vk::ImageView] {
     &self.current.image_views
   }

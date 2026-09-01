@@ -11,6 +11,7 @@ use vkinitialization::{
 
 use crate::render::{
   format_conversions::KNOWN_FORMATS,
+  gpu_data::text_buffers::TextBuffers,
   pipelines::{ComputePushConstants, GraphicsPushConstants},
   TARGET_API_VERSION,
 };
@@ -43,6 +44,26 @@ fn check_physical_device_capabilities(
     .any(|&f| super::format_is_supported(instance, selection.physical_device, f))
   {
     log::error!("Skipped physical device: Device does not support any known format required by the application");
+    return Ok(false);
+  }
+
+  if !super::format_is_supported(
+    instance,
+    selection.physical_device,
+    TextBuffers::CURVES_FORMAT,
+  ) {
+    log::error!("Skipped physical device: Device does not support format {:?}, required by text curve texture", TextBuffers::CURVES_FORMAT);
+    return Ok(false);
+  }
+  if !super::format_is_supported(
+    instance,
+    selection.physical_device,
+    TextBuffers::BANDS_FORMAT,
+  ) {
+    log::error!(
+      "Skipped physical device: Device does not support format {:?}, required by text band texture",
+      TextBuffers::BANDS_FORMAT
+    );
     return Ok(false);
   }
 

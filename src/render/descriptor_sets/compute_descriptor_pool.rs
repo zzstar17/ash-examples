@@ -20,7 +20,7 @@ impl ComputeDescriptorPool {
   // each set has 1 storage buffer
   const SIZES: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
     ty: vk::DescriptorType::STORAGE_BUFFER,
-    descriptor_count: 6 as u32,
+    descriptor_count: 6,
   }];
 
   const SINGLE_STORAGE_BUFFER_LAYOUT: [vk::DescriptorSetLayoutBinding<'_>; 1] =

@@ -5,14 +5,18 @@ use std::{
 };
 
 use ash::vk;
+use vkallocator::HostMemorySyncError;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
 use winit::window::Window;
 
 use crate::{
+  last_frames_durations::FPSDurations,
   render::{
     compute::ComputeFrameResult,
     create_objs::{create_fence, create_semaphore},
-    graphics, FrameRenderError, InitializationError, GRAPHICS_FRAMES_IN_FLIGHT,
+    gpu_data::sprite_buffers::SpriteTextureData,
+    graphics::{self, Renderer},
+    FrameRenderError, InitializationError, GRAPHICS_FRAMES_IN_FLIGHT,
   },
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
@@ -34,23 +38,39 @@ pub struct SyncRenderer {
 
   save_next_frame: bool,
   saving_frame: Option<(usize, vk::Format)>, // Some((frame_i, save_format)) if frame's screenshot is being saved
+
+  // 1 frame delay
+  last_frame_ups: FPSDurations,
 }
 
 impl SyncRenderer {
-  pub fn new(renderer: graphics::Renderer) -> Result<Self, InitializationError> {
+  pub fn new(
+    renderer: graphics::Renderer,
+    sprite_texture_data: &SpriteTextureData,
+  ) -> Result<Self, InitializationError> {
     let device = &renderer.init.device;
-    let frame_fences = fill_destroyable_array_with_expression!(
+    let fence0 = create_fence(
       device,
-      create_fence(
-        device,
-        vk::FenceCreateFlags::SIGNALED,
-        #[cfg(feature = "vl")]
-        &renderer.init.debug_utils_marker,
-        #[cfg(feature = "vl")]
-        c"frame fence"
-      ),
-      GRAPHICS_FRAMES_IN_FLIGHT
+      vk::FenceCreateFlags::empty(),
+      #[cfg(feature = "vl")]
+      &renderer.init.debug_utils_marker,
+      #[cfg(feature = "vl")]
+      c"Frame fence 0",
     )?;
+    let fence1 = create_fence(
+      device,
+      vk::FenceCreateFlags::SIGNALED,
+      #[cfg(feature = "vl")]
+      &renderer.init.debug_utils_marker,
+      #[cfg(feature = "vl")]
+      c"Frame fence 1",
+    )
+    .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
+    let frame_fences = [fence0, fence1];
+
+    unsafe {
+      Self::submit_initial_staging_copy(&renderer, fence0, sprite_texture_data)?;
+    }
 
     let image_available = fill_destroyable_array_with_expression!(
       &renderer.init.device,
@@ -67,7 +87,7 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
-      last_frame_i: GRAPHICS_FRAMES_IN_FLIGHT - 1, // 1 so that the first frame starts at 0
+      last_frame_i: GRAPHICS_FRAMES_IN_FLIGHT - 1, // make sure render_next_frame waits for fence 0
       frame_fences,
       in_use_particle_buffers_by_frame: [None; GRAPHICS_FRAMES_IN_FLIGHT],
 
@@ -75,7 +95,28 @@ impl SyncRenderer {
       recreate_swapchain_next_frame: false,
       save_next_frame: false,
       saving_frame: None,
+
+      last_frame_ups: FPSDurations::default(),
     })
+  }
+
+  unsafe fn submit_initial_staging_copy(
+    renderer: &Renderer,
+    fence: vk::Fence,
+    sprite_texture_data: &SpriteTextureData,
+  ) -> Result<(), HostMemorySyncError> {
+    renderer.full_record_upload_initial_staging(0, &sprite_texture_data.bytes)?;
+
+    let command_buffers =
+      [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.command_pools[0].main)];
+    let submit_info = vk::SubmitInfo2::default().command_buffer_infos(&command_buffers);
+    renderer.init.device.queue_submit2(
+      renderer.init.queues.graphics.handle,
+      &[submit_info],
+      fence,
+    )?;
+
+    Ok(())
   }
 
   pub fn window_resized(&mut self) {
@@ -90,26 +131,47 @@ impl SyncRenderer {
     &mut self,
     cur_total_frame: usize,
     compute_message_rcv: &mpsc::Receiver<ComputeFrameResult>,
+    fps: FPSDurations,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % GRAPHICS_FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
-    unsafe {
-      self.renderer.init.device.wait_for_fences(
-        &[self.frame_fences[cur_frame_i]],
-        true,
-        u64::MAX,
-      )?;
-    }
+    let gpu_bound =
+      unsafe {
+        let gpu_bound = match self.renderer.init.device.wait_for_fences(
+          &[self.frame_fences[cur_frame_i]],
+          true,
+          0,
+        ) {
+          Ok(()) => false,
+          Err(vkerr) => match vkerr {
+            vk::Result::TIMEOUT => true,
+            other => return Err(other.into()),
+          },
+        };
+        if gpu_bound {
+          self.renderer.init.device.wait_for_fences(
+            &[self.frame_fences[cur_frame_i]],
+            true,
+            u64::MAX,
+          )?;
+        }
+        gpu_bound
+      };
     if let Some(buffer_i) = self.in_use_particle_buffers_by_frame[cur_frame_i] {
       self.renderer.particle_buffers.in_use_by_graphics[buffer_i].store(false, Ordering::Release);
     }
 
     // current frame resources are now safe to use as they are not being used by the GPU
 
+    self
+      .renderer
+      .write_host_device_text_data(cur_frame_i, fps, self.last_frame_ups, gpu_bound)?;
+
     let destroyed_old_swapchain = self
       .renderer
+      .init
       .swapchains
       .attempt_destroy_old(&self.renderer.init.device, cur_total_frame)?;
     if destroyed_old_swapchain {
@@ -149,6 +211,7 @@ impl SyncRenderer {
     let (cur_image_i, image_finished_presenting) = match unsafe {
       self
         .renderer
+        .init
         .swapchains
         .acquire_next_image(self.image_available[cur_frame_i])
     } {
@@ -188,35 +251,44 @@ impl SyncRenderer {
 
     // get compute data
 
-    let ComputeFrameResult { particles_draw } = compute_message_rcv
+    let ComputeFrameResult {
+      particles_draw,
+      ups,
+    } = compute_message_rcv
       .recv()
       .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
+    self.last_frame_ups = ups;
+
+    // commit in_use_by_graphics
+    self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
 
     // actual rendering
-
     unsafe {
+      let pool = self.renderer.command_pools[cur_frame_i];
+      pool.reset(&self.renderer.init.device)?;
+      pool.begin_recording(&self.renderer.init.device)?;
+
+      if cur_total_frame == 0 || cur_total_frame == 10000 {
+        self.renderer.record_upload_device_text_data(cur_frame_i)?;
+      }
+
       let mut record_screenshot = false;
       if self.save_next_frame && self.saving_frame.is_none() {
         self.save_next_frame = false;
         self.saving_frame = Some((cur_frame_i, self.renderer.render_format()));
         record_screenshot = true;
       }
-      self
-        .renderer
-        .record_graphics(
-          cur_frame_i,
-          cur_image_i as usize,
-          particles_draw,
-          record_screenshot,
-        )
-        .on_err(|_err| {
-          self.renderer.particle_buffers.in_use_by_graphics[particles_draw.buffer_i]
-            .store(false, Ordering::Release);
-        })?;
-    }
+      self.renderer.record_graphics(
+        cur_frame_i,
+        cur_image_i as usize,
+        particles_draw,
+        record_screenshot,
+        cur_total_frame == 0,
+        true,
+      );
 
-    // commit in_use_by_graphics
-    self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
+      pool.end_recording(&self.renderer.init.device)?;
+    }
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()
       .command_buffer(self.renderer.command_pools[cur_frame_i].main)];
@@ -264,7 +336,7 @@ impl SyncRenderer {
     }
 
     unsafe {
-      if let Err(err) = self.renderer.swapchains.queue_present(
+      if let Err(err) = self.renderer.init.swapchains.queue_present(
         &self.renderer.init.device,
         cur_image_i,
         self.renderer.init.queues.graphics.handle,

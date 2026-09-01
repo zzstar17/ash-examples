@@ -1,10 +1,12 @@
 mod cache;
 mod compute;
 mod graphics;
+mod text;
 
 pub use cache::{create_pipeline_cache, save_pipeline_cache, PipelineCacheError};
 pub use compute::{ComputePipeline, ComputePushConstants};
 pub use graphics::{GraphicsPipeline, GraphicsPushConstants};
+pub use text::{TextPipeline, TextPushConstants};
 use vkobjects::errors::OutOfMemoryError;
 
 use crate::render::shaders::ShaderError;

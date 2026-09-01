@@ -5,6 +5,13 @@ pub struct LastFramesDurations<const N: usize> {
   next_update_i: usize,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FPSDurations {
+  pub min: f64,
+  pub max: f64,
+  pub average: f64,
+}
+
 impl<const N: usize> LastFramesDurations<N> {
   pub fn new() -> Self {
     assert!(N > 0);
@@ -19,7 +26,7 @@ impl<const N: usize> LastFramesDurations<N> {
     self.next_update_i = (self.next_update_i + 1) % N;
   }
 
-  pub fn get_min_max_average_fps(&self) -> (f64, f64, f64) {
+  pub fn get_min_max_average_fps(&self) -> FPSDurations {
     let mut total = 0.0;
     let mut valid_count = 0usize;
     let mut min = f64::MAX;
@@ -42,12 +49,17 @@ impl<const N: usize> LastFramesDurations<N> {
     }
 
     if valid_count == 0 {
-      return (0.0, 0.0, 0.0);
+      return FPSDurations::default();
     }
 
     let min_fps = 1.0 / max;
     let max_fps = 1.0 / min;
     let average_fps = 1.0 / (total / valid_count as f64);
-    (min_fps, max_fps, average_fps)
+
+    FPSDurations {
+      min: min_fps,
+      max: max_fps,
+      average: average_fps,
+    }
   }
 }

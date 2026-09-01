@@ -1,13 +1,17 @@
-use std::{ptr, sync::mpsc, time::Duration};
+use std::{ops::BitOr, ptr, sync::mpsc, time::Duration};
 
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use vkobjects::{
   errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed, ManuallyDestroyed,
 };
-use winit::dpi::PhysicalSize;
+use winit::{
+  dpi::{PhysicalPosition, PhysicalSize},
+  event::ElementState,
+};
 
 use crate::{
+  last_frames_durations::FPSDurations,
   render::{
     compute::{
       particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeFrameResult,
@@ -16,7 +20,7 @@ use crate::{
     create_objs::{create_fence, create_semaphore},
     InitializationError, COMPUTE_FRAMES_IN_FLIGHT, RENDER_EXTENT,
   },
-  RESOLUTION,
+  WindowToComputeInfo, RESOLUTION,
 };
 
 use super::ferris::Ferris;
@@ -71,6 +75,7 @@ impl ComputeSyncRenderer {
     queues: SingleQueues,
     compute_result_sender: mpsc::SyncSender<ComputeFrameResult>,
     particle_buffers: ParticleBuffers,
+    text_ui_extent: vk::Extent2D,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([500.0, 400.0]);
@@ -111,9 +116,11 @@ impl ComputeSyncRenderer {
     let frame_fences = [frame0, frame1];
 
     // write initial data to gpu_data
-    renderer
-      .gpu_data
-      .write_particles_to_from_cpu_read(&renderer.device, ComputeGPUData::INITIAL_CAPACITY)?;
+    renderer.gpu_data.write_particles_to_from_cpu_read(
+      &renderer.device,
+      ComputeGPUData::INITIAL_CAPACITY,
+      text_ui_extent,
+    )?;
 
     unsafe {
       renderer.transfer_pool.record_copy_particles_new(
@@ -157,11 +164,17 @@ impl ComputeSyncRenderer {
   pub fn next_compute_frame(
     &mut self,
     time_since_last_update: Duration,
+    window_info: &WindowToComputeInfo,
+    ups: FPSDurations,
   ) -> Result<(), ComputeFrameRenderError> {
     let cur_read_i = self.last_write_i;
     let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
     self.last_write_i = cur_write_i;
 
+    if let Some(mouse_pos) = self.ferris.drag_mouse_pos.as_mut() {
+      mouse_pos[0] = window_info.mouse_position.x as f32;
+      mouse_pos[1] = window_info.mouse_position.y as f32;
+    }
     self.ferris.update(
       time_since_last_update,
       PhysicalSize {
@@ -263,7 +276,7 @@ impl ComputeSyncRenderer {
 
     let particle_copy_wait = [vk::SemaphoreSubmitInfo {
       semaphore: self.transfer_finished,
-      stage_mask: vk::PipelineStageFlags2::TRANSFER,
+      stage_mask: vk::PipelineStageFlags2::TRANSFER.bitor(vk::PipelineStageFlags2::COMPUTE_SHADER),
       ..Default::default()
     }];
     let empty: [vk::SemaphoreSubmitInfo<'_>; 0] = [];
@@ -277,7 +290,7 @@ impl ComputeSyncRenderer {
 
     let submit_info = vk::SubmitInfo2::default()
       .command_buffer_infos(&command_buffers)
-      .wait_semaphore_infos(&wait_semaphores);
+      .wait_semaphore_infos(wait_semaphores);
     unsafe {
       self.renderer.device.queue_submit2(
         self.renderer.queues.compute.handle,
@@ -314,6 +327,7 @@ impl ComputeSyncRenderer {
         buffer_size: this_frame_particles_buffer_size,
         count: this_frame_particles_count,
       },
+      ups,
     };
 
     match self.compute_result_sender.try_send(compute_result) {
@@ -332,6 +346,32 @@ impl ComputeSyncRenderer {
     }
 
     Ok(())
+  }
+
+  pub fn mouse_click(
+    &mut self,
+    state: ElementState,
+    position: PhysicalPosition<f64>,
+    window_info: &WindowToComputeInfo,
+  ) {
+    match state {
+      ElementState::Pressed => {
+        let real_mouse_coors = window_info
+          .render_dimensions
+          .get_apparent_coordinates(position);
+        let real_mouse_coors = [real_mouse_coors[0] as f32, real_mouse_coors[1] as f32];
+
+        let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
+        let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
+        let squares = dist_x * dist_x + dist_y * dist_y;
+        if squares < 120.0 * 120.0 {
+          self.ferris.drag_mouse_pos = Some(real_mouse_coors);
+        }
+      }
+      ElementState::Released => {
+        self.ferris.drag_mouse_pos = None;
+      }
+    }
   }
 }
 
