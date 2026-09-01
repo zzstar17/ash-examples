@@ -30,6 +30,7 @@ pub struct TextManager {
   pub host_index_count: u32,
 
   fps_offset: vk::Offset2D,
+  ups_offset: vk::Offset2D,
   gpu_idle_offset: vk::Offset2D,
 }
 
@@ -62,11 +63,16 @@ impl TextManager {
       &mut device_vertices,
       &mut device_indices,
     );
+    // simulate fps numbers
     let TextBuildBounds {
-      rect: rect_gpu_idle,
-      offset: gpu_idle_offset,
+      rect: rect_fps_values,
+      ..
+    } = slug.simulate_build_text("100.0, 100.0, 100.0", Self::FONT_SIZE, fps_offset);
+    let TextBuildBounds {
+      rect: rect_ups,
+      offset: ups_offset,
     } = slug.build_text(
-      "GPU bound: ",
+      "ups: ",
       Self::FONT_SIZE,
       vk::Offset2D {
         x: 0,
@@ -75,10 +81,24 @@ impl TextManager {
       &mut device_vertices,
       &mut device_indices,
     );
-    let mut full_size = MultilineRect::from_line_rects(&[rect_fps, rect_gpu_idle]);
+    let TextBuildBounds {
+      rect: rect_gpu_idle,
+      offset: gpu_idle_offset,
+    } = slug.build_text(
+      "GPU bound: ",
+      Self::FONT_SIZE,
+      vk::Offset2D {
+        x: 0,
+        y: -line_dist - line_dist,
+      },
+      &mut device_vertices,
+      &mut device_indices,
+    );
+    let mut full_size =
+      MultilineRect::from_line_rects(&[rect_fps, rect_fps_values, rect_ups, rect_gpu_idle]);
 
     // todo: fix full slug size calculations
-    full_size.total.max.x += 10.0;
+    full_size.total.max.x += 20.0;
     full_size.total.max.y += 20.0;
 
     let textures = slug.get_texture_data();
@@ -122,6 +142,7 @@ impl TextManager {
         host_index_count: 0,
 
         fps_offset,
+        ups_offset,
         gpu_idle_offset,
       },
       full_size,
@@ -324,16 +345,25 @@ impl TextManager {
     device: &ash::Device,
     frame_i: usize,
     fps: FPSDurations,
+    ups: FPSDurations,
     gpu_bound: bool,
   ) -> Result<(), HostMemorySyncError> {
     self.host_vertices.clear();
     self.host_indices.clear();
 
     let fps_text = format!("{:.1}, {:.1}, {:.1}", fps.min, fps.max, fps.average);
+    let ups_text = format!("{:.1}, {:.1}, {:.1}", ups.min, ups.max, ups.average);
     self.slug.build_text(
       &fps_text,
       Self::FONT_SIZE,
       self.fps_offset,
+      &mut self.host_vertices,
+      &mut self.host_indices,
+    );
+    self.slug.build_text(
+      &ups_text,
+      Self::FONT_SIZE,
+      self.ups_offset,
       &mut self.host_vertices,
       &mut self.host_indices,
     );

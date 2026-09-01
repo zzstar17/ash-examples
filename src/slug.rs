@@ -841,6 +841,91 @@ impl<'a> SlugRendering<'a> {
     }
   }
 
+  /// Same as build_text but do not add vertices/indices
+  pub fn simulate_build_text(
+    &mut self,
+    text: &str,
+    font_size: usize,
+    // unscaled offset
+    offset: vk::Offset2D,
+  ) -> TextBuildBounds {
+    let mut text_buffer = self.text_buffer.take().unwrap();
+
+    text_buffer.push_str(text);
+
+    text_buffer.set_direction(harfrust::Direction::LeftToRight);
+
+    let glyph_buffer = self.shaper.shape(text_buffer, ShapeOptions::new());
+    let scale = font_size as f32 / (self.shaper.units_per_em() as f32);
+
+    let mut cursor_x = offset.x;
+    let mut cursor_y = offset.y;
+    let mut full_text_bounds = PointRect::REVERSED_INFINITY;
+    for (info, pos) in glyph_buffer
+      .glyph_infos()
+      .iter()
+      .zip(glyph_buffer.glyph_positions().iter())
+    {
+      let glyph_id = info.glyph_id as u16;
+      // None if glyph is empty space (has no bounding box)
+      let glyph_processed_opt = match self.processed_glyph_map.get(&glyph_id) {
+        Some(opt) => *opt,
+        None => {
+          // add new glyph to map
+          let processed_opt = self
+            .glyph_processor
+            .process_new_glyph(self.font_face, glyph_id);
+          self.processed_glyph_map.insert(glyph_id, processed_opt);
+          processed_opt
+        }
+      };
+      let glyph_processed_data = match glyph_processed_opt {
+        // full data
+        Some(values) => values,
+        None => {
+          // empty glyph -> skip
+          cursor_x += pos.x_advance;
+          cursor_y += pos.y_advance;
+          continue;
+        }
+      };
+
+      let bbox = glyph_processed_data.bounding_box;
+
+      // Object-space position (Y-up screen pixels)
+      let ox: i32 = cursor_x + pos.x_offset;
+      let oy = cursor_y + pos.y_offset;
+      let x0_unscaled = ox + bbox.x_min as i32;
+      let y0_unscaled = oy + bbox.y_min as i32;
+      let x1_unscaled = ox + bbox.x_max as i32;
+      let y1_unscaled = oy + bbox.y_max as i32;
+      let area = PointRect {
+        min: Point2 {
+          x: x0_unscaled as f32 * scale,
+          y: -y1_unscaled as f32 * scale,
+        },
+        max: Point2 {
+          x: x1_unscaled as f32 * scale,
+          y: -y0_unscaled as f32 * scale,
+        },
+      };
+      full_text_bounds = full_text_bounds.or(area);
+
+      cursor_x += pos.x_advance;
+      cursor_y += pos.y_advance;
+    }
+
+    self.text_buffer = Some(glyph_buffer.clear());
+
+    TextBuildBounds {
+      offset: vk::Offset2D {
+        x: cursor_x,
+        y: cursor_y,
+      },
+      rect: full_text_bounds,
+    }
+  }
+
   pub fn get_line_dist(&self, mult: f32) -> i32 {
     (self.font_ascender * mult) as i32
   }

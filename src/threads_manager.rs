@@ -3,6 +3,7 @@ use std::{
   thread,
 };
 
+use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
 use winit::{
   dpi::PhysicalPosition, event::ElementState, event_loop::ActiveEventLoop, window::Window,
 };
@@ -11,7 +12,8 @@ use crate::{
   last_frames_durations::FPSDurations,
   render::{
     compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
-    gpu_data::sprite_buffers::SpriteTextureData,
+    format_conversions::{self, KNOWN_FORMATS},
+    gpu_data::{sprite_buffers::SpriteTextureData, GPUData},
     graphics, FrameRenderError, InitializationError, PostWindowInit,
   },
   WindowToComputeInfo,
@@ -50,13 +52,46 @@ impl ThreadsManager {
   ) -> Result<Self, InitializationError> {
     let post_window_init = PostWindowInit::initialize(pre_window, event_loop)?;
 
+    let mut sprite_data = SpriteTextureData::read_texture_bytes_as_rgba8()?;
+
+    let swapchain_format = post_window_init.swapchains.get_format();
+    let texture_format = if KNOWN_FORMATS.contains(&swapchain_format) {
+      swapchain_format
+    } else {
+      KNOWN_FORMATS
+        .into_iter()
+        .find(|&f| {
+          crate::render::initialization::format_is_supported(
+            &post_window_init.instance,
+            *post_window_init.physical_device,
+            f,
+          )
+        })
+        .unwrap()
+    };
+
+    format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
+    log::info!("Creating texture with the format {:?}", texture_format);
+
+    let gpu_data = GPUData::new(
+      &post_window_init.device,
+      &post_window_init.physical_device,
+      texture_format,
+      &sprite_data,
+      #[cfg(feature = "vl")]
+      &post_window_init.debug_utils_marker,
+    )?;
+
     let compute_thread = compute::start_compute(
       post_window_init.device.clone(),
       post_window_init.physical_device.clone(),
       post_window_init.queues,
-      post_window_init.debug_utils_marker.clone(),
       window_info,
-    )?;
+      &gpu_data,
+      #[cfg(feature = "vl")]
+      post_window_init.debug_utils_marker.clone(),
+    )
+    .on_err(|_err| unsafe { gpu_data.destroy_self(&post_window_init.device) })?;
 
     let compute_thread_data = ComputeThreadData {
       handle: compute_thread.handle,
@@ -66,10 +101,8 @@ impl ThreadsManager {
     };
     let particle_buffers = compute_thread.particle_buffers;
 
-    let mut sprite_data = SpriteTextureData::read_texture_bytes_as_rgba8()?;
-
-    let renderer =
-      graphics::Renderer::initialize(post_window_init, particle_buffers, &mut sprite_data)?;
+    // takes ownership of gpu_data
+    let renderer = graphics::Renderer::initialize(post_window_init, particle_buffers, gpu_data)?;
     let mut sync_renderer = graphics::SyncRenderer::new(renderer, &sprite_data)?;
 
     let receiver_res = compute_thread_data.event_receiver.recv();

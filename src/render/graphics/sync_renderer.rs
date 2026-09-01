@@ -38,6 +38,9 @@ pub struct SyncRenderer {
 
   save_next_frame: bool,
   saving_frame: Option<(usize, vk::Format)>, // Some((frame_i, save_format)) if frame's screenshot is being saved
+
+  // 1 frame delay
+  last_frame_ups: FPSDurations,
 }
 
 impl SyncRenderer {
@@ -92,6 +95,8 @@ impl SyncRenderer {
       recreate_swapchain_next_frame: false,
       save_next_frame: false,
       saving_frame: None,
+
+      last_frame_ups: FPSDurations::default(),
     })
   }
 
@@ -162,10 +167,11 @@ impl SyncRenderer {
 
     self
       .renderer
-      .write_host_device_text_data(cur_frame_i, fps, gpu_bound)?;
+      .write_host_device_text_data(cur_frame_i, fps, self.last_frame_ups, gpu_bound)?;
 
     let destroyed_old_swapchain = self
       .renderer
+      .init
       .swapchains
       .attempt_destroy_old(&self.renderer.init.device, cur_total_frame)?;
     if destroyed_old_swapchain {
@@ -205,6 +211,7 @@ impl SyncRenderer {
     let (cur_image_i, image_finished_presenting) = match unsafe {
       self
         .renderer
+        .init
         .swapchains
         .acquire_next_image(self.image_available[cur_frame_i])
     } {
@@ -244,9 +251,13 @@ impl SyncRenderer {
 
     // get compute data
 
-    let ComputeFrameResult { particles_draw } = compute_message_rcv
+    let ComputeFrameResult {
+      particles_draw,
+      ups,
+    } = compute_message_rcv
       .recv()
       .map_err(|_err| FrameRenderError::ComputeThreadDisconnected)?;
+    self.last_frame_ups = ups;
 
     // commit in_use_by_graphics
     self.in_use_particle_buffers_by_frame[cur_frame_i] = Some(particles_draw.buffer_i);
@@ -325,7 +336,7 @@ impl SyncRenderer {
     }
 
     unsafe {
-      if let Err(err) = self.renderer.swapchains.queue_present(
+      if let Err(err) = self.renderer.init.swapchains.queue_present(
         &self.renderer.init.device,
         cur_image_i,
         self.renderer.init.queues.graphics.handle,

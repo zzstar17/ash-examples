@@ -165,11 +165,14 @@ impl GraphicsCommandBufferPool {
     };
     device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
 
-    let clear_value = vk::ClearValue {
-      color: vk::ClearColorValue {
-        float32: [0.0, 0.0, 0.0, 0.1],
-      },
-    };
+    let mut color = BACKGROUND_COLOR;
+    color.float32[3] = 0.4; // change opacity
+    let clear_value = vk::ClearValue { color };
+    // let clear_value = vk::ClearValue {
+    //   color: vk::ClearColorValue {
+    //     float32: [1.0, 1.0, 1.0, 0.2],
+    //   },
+    // };
     let color_attachments = [vk::RenderingAttachmentInfo {
       image_view: data.text_ui_view,
       image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -357,8 +360,9 @@ impl GraphicsCommandBufferPool {
         &[descriptor_pool.sprites_set],
         &[],
       );
-      let push_constants = GraphicsPushConstants {
+      let mut push_constants = GraphicsPushConstants {
         render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
+        text_size: [f32::NAN, f32::NAN],
       };
       device.cmd_push_constants(
         cb,
@@ -384,35 +388,29 @@ impl GraphicsCommandBufferPool {
 
       // draw text ui
       if draw_text {
-        // todo: incorporate this with compute
-        // {
-        //   let position = RenderPosition::new(
-        //     [
-        //       ((data.text_ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
-        //       ((data.text_ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
-        //     ],
-        //     [
-        //       data.text_ui_size.width as f32 / RENDER_EXTENT.width as f32,
-        //       data.text_ui_size.height as f32 / RENDER_EXTENT.height as f32,
-        //     ],
-        //   );
-        //   device.cmd_bind_descriptor_sets(
-        //     cb,
-        //     vk::PipelineBindPoint::GRAPHICS,
-        //     pipeline.layout,
-        //     0,
-        //     &[descriptor_pool.text_ui_set],
-        //     &[],
-        //   );
-        //   device.cmd_push_constants(
-        //     cb,
-        //     pipeline.layout,
-        //     vk::ShaderStageFlags::VERTEX,
-        //     0,
-        //     utility::any_as_u8_slice(&position),
-        //   );
-        //   device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
-        // }
+        {
+          device.cmd_bind_descriptor_sets(
+            cb,
+            vk::PipelineBindPoint::GRAPHICS,
+            pipeline.layout,
+            0,
+            &[descriptor_pool.text_ui_set],
+            &[],
+          );
+          push_constants.text_size = [
+            data.text_ui_size.width as f32,
+            data.text_ui_size.height as f32,
+          ];
+          device.cmd_push_constants(
+            cb,
+            pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&push_constants),
+          );
+          // draw only first
+          device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+        }
 
         {
           let text_pc = TextPushConstants::new(

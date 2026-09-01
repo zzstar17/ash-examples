@@ -10,7 +10,7 @@ use vkallocator::{DetailedMemory, HostMemorySyncError, MappedHostBuffer};
 use crate::{
   render::{
     compute::ParticleBuffers, create_objs::create_buffer, gpu_data::GPUDataAllocationError,
-    vertices::Particle, COMPUTE_FRAMES_IN_FLIGHT,
+    vertices::Particle, COMPUTE_FRAMES_IN_FLIGHT, RENDER_EXTENT,
   },
   RESOLUTION,
 };
@@ -54,7 +54,8 @@ impl DeviceManuallyDestroyed for Buffers {
 }
 
 impl ComputeGPUData {
-  pub const INITIAL_CAPACITY: usize = 32000;
+  // 1 for text and 1 for ferris
+  pub const INITIAL_CAPACITY: usize = 32000 + 2;
   pub const INITIAL_SIZE: u64 = (Self::INITIAL_CAPACITY * size_of::<Particle>()) as u64;
 
   fn create_buffers(
@@ -241,10 +242,12 @@ impl ComputeGPUData {
     shifted
   }
 
+  // todo: first two "particles" should be a special case
   pub fn write_particles_to_from_cpu_read(
     &mut self,
     device: &Device,
     new_count: usize,
+    text_ui_extent: vk::Extent2D,
   ) -> Result<(), HostMemorySyncError> {
     // divide adding new particles somehow?
     assert!(new_count * size_of::<Particle>() <= self.particles_from_cpu_read_cur_size as usize);
@@ -254,8 +257,21 @@ impl ComputeGPUData {
     }
 
     let mut particles = Vec::with_capacity(new_count);
+    // text ui
+    particles.push(Particle {
+      pos: [
+        ((text_ui_extent.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
+        ((text_ui_extent.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
+      ],
+      vel: [0.0, 0.0],
+    });
+    // ferris
+    particles.push(Particle {
+      pos: [0.0, 0.0],
+      vel: [0.0, 0.0],
+    });
     let mut rng: rand::prelude::ThreadRng = rand::rng();
-    for _ in 0..new_count {
+    for _ in 2..new_count {
       particles.push(Particle {
         pos: [
           rng.random::<f32>() / ((RESOLUTION[0] - 11) as f32 / RESOLUTION[0] as f32),

@@ -156,8 +156,13 @@ impl GPUData {
     let staging_size = (sprite_texture_data.bytes.len() as u64 + VERTICES_SIZE + QUAD_INDICES_SIZE)
       .max(staging_size_required);
 
-    let staging_alloc =
-      allocations::allocate_staging_memory(device, physical_device, staging_size, marker)?;
+    let staging_alloc = allocations::allocate_staging_memory(
+      device,
+      physical_device,
+      staging_size,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
     let device_alloc = allocations::allocate_device(
       device,
       physical_device,

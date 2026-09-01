@@ -3,11 +3,14 @@ use vkinitialization::{
   device::{Device, DeviceExtensions, DeviceFeatures, PhysicalDevice, SingleQueues},
   Surface,
 };
-use vkobjects::{destroy, utility::OnErr, ManuallyDestroyed};
+use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed, ManuallyDestroyed};
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  render::{compute::ferris::Ferris, initialization, InitializationError},
+  render::{
+    compute::ferris::Ferris, graphics::swapchain::Swapchains, initialization, InitializationError,
+    SWAPCHAIN_IMAGE_USAGES,
+  },
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, WINDOW_TITLE,
 };
 
@@ -24,6 +27,7 @@ pub struct PostWindowInit {
 
   pub window: Window,
   pub surface: Surface,
+  pub swapchains: Swapchains,
 }
 
 impl PostWindowInit {
@@ -126,6 +130,22 @@ impl PostWindowInit {
       debug_utils_marker.set_queue_labels(queues);
     }
 
+    let swapchains = Swapchains::new(
+      &instance,
+      &physical_device,
+      &device,
+      0,
+      &surface,
+      window.inner_size(),
+      SWAPCHAIN_IMAGE_USAGES,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
+    )
+    .on_err(|_| unsafe {
+      ManuallyDestroyed::destroy_self(&device);
+      destroy_previous();
+    })?;
+
     Ok(Self {
       window,
       surface,
@@ -138,6 +158,7 @@ impl PostWindowInit {
       physical_device,
       device,
       queues,
+      swapchains,
     })
   }
 }
@@ -145,6 +166,8 @@ impl PostWindowInit {
 impl ManuallyDestroyed for PostWindowInit {
   unsafe fn destroy_self(&self) {
     unsafe {
+      self.swapchains.destroy_self(&self.device);
+
       ManuallyDestroyed::destroy_self(&self.surface);
       ManuallyDestroyed::destroy_self(&self.device);
 

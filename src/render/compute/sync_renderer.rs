@@ -11,6 +11,7 @@ use winit::{
 };
 
 use crate::{
+  last_frames_durations::FPSDurations,
   render::{
     compute::{
       particle_buffers::ParticleManager, renderer::ComputeRenderer, ComputeFrameResult,
@@ -74,6 +75,7 @@ impl ComputeSyncRenderer {
     queues: SingleQueues,
     compute_result_sender: mpsc::SyncSender<ComputeFrameResult>,
     particle_buffers: ParticleBuffers,
+    text_ui_extent: vk::Extent2D,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, InitializationError> {
     let ferris = Ferris::new([500.0, 400.0]);
@@ -114,9 +116,11 @@ impl ComputeSyncRenderer {
     let frame_fences = [frame0, frame1];
 
     // write initial data to gpu_data
-    renderer
-      .gpu_data
-      .write_particles_to_from_cpu_read(&renderer.device, ComputeGPUData::INITIAL_CAPACITY)?;
+    renderer.gpu_data.write_particles_to_from_cpu_read(
+      &renderer.device,
+      ComputeGPUData::INITIAL_CAPACITY,
+      text_ui_extent,
+    )?;
 
     unsafe {
       renderer.transfer_pool.record_copy_particles_new(
@@ -161,6 +165,7 @@ impl ComputeSyncRenderer {
     &mut self,
     time_since_last_update: Duration,
     window_info: &WindowToComputeInfo,
+    ups: FPSDurations,
   ) -> Result<(), ComputeFrameRenderError> {
     let cur_read_i = self.last_write_i;
     let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
@@ -322,6 +327,7 @@ impl ComputeSyncRenderer {
         buffer_size: this_frame_particles_buffer_size,
         count: this_frame_particles_count,
       },
+      ups,
     };
 
     match self.compute_result_sender.try_send(compute_result) {

@@ -14,9 +14,7 @@ use crate::{
     compute::{ParticleBuffers, ParticlesDraw},
     descriptor_sets::DescriptorPool,
     errors::{ImageError, SwapchainRecreationError},
-    format_conversions::{self, KNOWN_FORMATS},
-    gpu_data::{sprite_buffers::SpriteTextureData, GPUData, GPUDataAllocationError},
-    initialization,
+    gpu_data::{GPUData, GPUDataAllocationError},
     pipelines::{self, GraphicsPipeline, TextPipeline},
     InitializationError, PostWindowInit, GRAPHICS_FRAMES_IN_FLIGHT, RENDER_EXTENT,
     SWAPCHAIN_IMAGE_USAGES,
@@ -25,15 +23,12 @@ use crate::{
 };
 
 use super::{
-  render_targets::RenderTargets,
-  screenshot_buffer::ScreenshotBuffer,
-  swapchain::{SwapchainCreationError, Swapchains},
+  render_targets::RenderTargets, screenshot_buffer::ScreenshotBuffer,
+  swapchain::SwapchainCreationError,
 };
 
 pub struct Renderer {
   pub init: PostWindowInit,
-
-  pub swapchains: Swapchains,
   render_targets: RenderTargets,
 
   pipeline_cache: vk::PipelineCache,
@@ -52,64 +47,16 @@ impl Renderer {
   pub fn initialize(
     post_window: PostWindowInit,
     particle_buffers: ParticleBuffers,
-    sprite_data: &mut SpriteTextureData,
+    gpu_data: GPUData,
   ) -> Result<Self, InitializationError> {
     let mut destructor: Destructor<11> = Destructor::new();
-
-    let swapchains = Swapchains::new(
-      &post_window.instance,
-      &post_window.physical_device,
-      &post_window.device,
-      0,
-      &post_window.surface,
-      post_window.window.inner_size(),
-      SWAPCHAIN_IMAGE_USAGES,
-      #[cfg(feature = "vl")]
-      &post_window.debug_utils_marker,
-    )
-    .on_err(|_| unsafe {
-      ManuallyDestroyed::destroy_self(&post_window);
-    })?;
-    destructor.push(&swapchains);
-
-    let swapchain_format = swapchains.get_format();
-    let texture_format = if KNOWN_FORMATS.contains(&swapchain_format) {
-      swapchain_format
-    } else {
-      KNOWN_FORMATS
-        .into_iter()
-        .find(|&f| {
-          initialization::format_is_supported(
-            &post_window.instance,
-            *post_window.physical_device,
-            f,
-          )
-        })
-        .unwrap()
-    };
-
-    format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
-    log::info!("Creating texture with the format {:?}", texture_format);
-
-    let gpu_data = GPUData::new(
-      &post_window.device,
-      &post_window.physical_device,
-      texture_format,
-      sprite_data,
-      #[cfg(feature = "vl")]
-      &post_window.debug_utils_marker,
-    )
-    .on_err(|_| unsafe {
-      destructor.fire(&post_window.device);
-      ManuallyDestroyed::destroy_self(&post_window);
-    })?;
     destructor.push(&gpu_data);
 
     // use same format for surface and the render target
     // see SWAPCHAIN_PREFERRED_IMAGE_FORMAT in render/mod.rs
     // vkCmdCopyImage does not convert formats, while vkCmdBlitImage does, so using different formats
     // would mean not using vkCmdCopyImage at all anymore
-    let render_format = swapchains.get_format();
+    let render_format = post_window.swapchains.get_format();
 
     let render_targets = RenderTargets::new(
       &post_window.device,
@@ -207,7 +154,6 @@ impl Renderer {
       text_pipeline,
       pipeline: graphics_pipeline,
       pipeline_cache,
-      swapchains,
       descriptor_pool,
       render_targets,
       screenshot_buffer,
@@ -219,12 +165,13 @@ impl Renderer {
     &mut self,
     frame_i: usize,
     fps: FPSDurations,
+    ups: FPSDurations,
     gpu_bound: bool,
   ) -> Result<(), HostMemorySyncError> {
     self
       .data
       .text
-      .write_host_device_text_data(&self.init.device, frame_i, fps, gpu_bound)
+      .write_host_device_text_data(&self.init.device, frame_i, fps, ups, gpu_bound)
   }
 
   pub unsafe fn full_record_upload_initial_staging(
@@ -281,8 +228,8 @@ impl Renderer {
       &self.init.device,
       &self.init.queues,
       &self.render_targets,
-      self.swapchains.get_images()[image_i],
-      self.swapchains.get_extent(),
+      self.init.swapchains.get_images()[image_i],
+      self.init.swapchains.get_extent(),
       &self.pipeline,
       &self.text_pipeline,
       &self.descriptor_pool,
@@ -310,7 +257,7 @@ impl Renderer {
     }
 
     // old swapchain becomes retired
-    let (changes, destroyed_old) = self.swapchains.recreate(
+    let (changes, destroyed_old) = self.init.swapchains.recreate(
       &self.init.physical_device,
       &self.init.device,
       self.init.queues.graphics.handle,
@@ -335,7 +282,7 @@ impl Renderer {
         .init
         .device
         .device_wait_idle()
-        .on_err(|_| self.swapchains.revert_recreate(&self.init.device))
+        .on_err(|_| self.init.swapchains.revert_recreate(&self.init.device))
         .map_err(|vkerr| match vkerr {
           vk::Result::ERROR_OUT_OF_DEVICE_MEMORY | vk::Result::ERROR_OUT_OF_HOST_MEMORY => {
             SwapchainCreationError::OutOfMemory(vkerr.into())
@@ -345,7 +292,7 @@ impl Renderer {
         })?;
 
       // recreate all objects that depend on image format (but not on extent)
-      let new_format = self.swapchains.get_format();
+      let new_format = self.init.swapchains.get_format();
       let new_render_targets = RenderTargets::new(
         &self.init.device,
         &self.init.physical_device,
@@ -353,19 +300,19 @@ impl Renderer {
         #[cfg(feature = "vl")]
         &self.init.debug_utils_marker,
       )
-      .on_err(|_| self.swapchains.revert_recreate(&self.init.device))?;
+      .on_err(|_| self.init.swapchains.revert_recreate(&self.init.device))?;
 
       log::info!("[Frame {}] Recreating pipeline", cur_total_frame);
       match self.pipeline.recreate(
         &self.init.device,
         self.pipeline_cache,
-        self.swapchains.get_format(),
+        self.init.swapchains.get_format(),
         RENDER_EXTENT,
       ) {
         Ok(v) => v,
         Err(err) => unsafe {
           new_render_targets.destroy_self(&self.init.device);
-          self.swapchains.revert_recreate(&self.init.device);
+          self.init.swapchains.revert_recreate(&self.init.device);
 
           return Err(err.into());
         },
@@ -392,7 +339,7 @@ impl Renderer {
   }
 
   pub fn render_format(&self) -> vk::Format {
-    self.swapchains.get_format()
+    self.init.swapchains.get_format()
   }
 
   // safety: screenshot buffer should not be in use
@@ -462,7 +409,6 @@ impl Renderer {
     self.data.destroy_self(device);
 
     self.render_targets.destroy_self(device);
-    self.swapchains.destroy_self(device);
 
     ManuallyDestroyed::destroy_self(&self.init);
   }

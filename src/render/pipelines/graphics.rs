@@ -28,9 +28,11 @@ pub struct GraphicsPipeline {
   old: Option<vk::Pipeline>,
 }
 
+#[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct GraphicsPushConstants {
   pub render_dimensions: [f32; 2],
+  pub text_size: [f32; 2],
 }
 
 impl GraphicsPipeline {

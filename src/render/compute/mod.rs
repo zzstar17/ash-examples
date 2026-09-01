@@ -23,8 +23,10 @@ pub use sync_renderer::ComputeSyncRenderer;
 use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 
 use crate::{
-  last_frames_durations::LastFramesDurations,
-  render::{compute::sync_renderer::ComputeFrameRenderError, InitializationError},
+  last_frames_durations::{FPSDurations, LastFramesDurations},
+  render::{
+    compute::sync_renderer::ComputeFrameRenderError, gpu_data::GPUData, InitializationError,
+  },
   WindowToComputeInfo, KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
 
@@ -40,6 +42,7 @@ pub enum ComputeToGraphicsEvent {
 #[derive(Debug, Clone, Copy)]
 pub struct ComputeFrameResult {
   pub particles_draw: ParticlesDraw,
+  pub ups: FPSDurations,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,8 +65,9 @@ pub fn start_compute(
   device: Device,
   physical_device: PhysicalDevice,
   queues: SingleQueues,
-  #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
   window_info: Arc<RwLock<WindowToComputeInfo>>,
+  gpu_data: &GPUData,
+  #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
 ) -> Result<ComputeThread, OutOfMemoryError> {
   let (data_sender, data_receiver) = mpsc::sync_channel(1);
   // events from compute queue
@@ -78,6 +82,8 @@ pub fn start_compute(
   )?;
   let particle_buffers_to_compute = particle_buffers.clone();
 
+  let text_ui_size = gpu_data.text_ui_size;
+
   let handle = thread::spawn(move || {
     log::info!("Starting compute thread");
 
@@ -87,6 +93,8 @@ pub fn start_compute(
       queues,
       data_sender,
       particle_buffers_to_compute,
+      text_ui_size,
+      #[cfg(feature = "vl")]
       &marker,
     ) {
       Ok(v) => {
@@ -127,12 +135,12 @@ pub fn start_compute(
       last_update = now;
 
       last_frames_durations.update_new(time_passed);
+      let ups = last_frames_durations.get_min_max_average_fps();
 
       time_since_last_ups_print += time_passed;
       if time_since_last_ups_print >= PRINT_UPS_EVERY {
         time_since_last_ups_print -= PRINT_UPS_EVERY;
-        let fps = last_frames_durations.get_min_max_average_fps();
-        println!("UPS: {:.4} {:.4} {:.4}", fps.min, fps.max, fps.average);
+        println!("UPS: {:.4} {:.4} {:.4}", ups.min, ups.max, ups.average);
       }
 
       let window_info = {
@@ -164,7 +172,7 @@ pub fn start_compute(
         }
       }
 
-      if let Err(err) = sync_renderer.next_compute_frame(time_passed, &window_info) {
+      if let Err(err) = sync_renderer.next_compute_frame(time_passed, &window_info, ups) {
         match err {
           ComputeFrameRenderError::SenderDisconnected => {
             log::error!("Main thread disconnected");
