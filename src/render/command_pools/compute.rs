@@ -75,7 +75,7 @@ impl ComputeCommandBufferPool {
     let push_constants = ComputePushConstants {
       render_dimensions: [RESOLUTION[0] as f32, RESOLUTION[1] as f32],
       ferris_pos: ferris_position,
-      particle_count: data.particles_len as u32,
+      particle_count: data.particles_len,
       new_particle_count: new_particles_count,
     };
     let new_particles_size = new_particles_count as u64 * size_of::<Particle>() as u64;

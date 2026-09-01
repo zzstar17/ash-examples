@@ -53,7 +53,7 @@ impl ThreadsManager {
     let compute_thread = compute::start_compute(
       post_window_init.device.clone(),
       post_window_init.physical_device.clone(),
-      post_window_init.queues.clone(),
+      post_window_init.queues,
       post_window_init.debug_utils_marker.clone(),
       window_info,
     )?;

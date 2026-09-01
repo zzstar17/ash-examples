@@ -23,7 +23,7 @@ impl ScreenshotBuffer {
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let buffer = create_buffer(
-      &device,
+      device,
       Self::BUFFER_SIZE,
       vk::BufferUsageFlags::TRANSFER_DST,
       #[cfg(feature = "vl")]

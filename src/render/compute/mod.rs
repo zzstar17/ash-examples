@@ -72,7 +72,7 @@ pub fn start_compute(
   let (graphics_event_sender, graphics_event_receiver) = mpsc::channel();
 
   let particle_buffers = ParticleBuffers::new(
-    &*device,
+    &device,
     #[cfg(feature = "vl")]
     &marker,
   )?;
@@ -157,7 +157,7 @@ pub fn start_compute(
               state,
               window_info
                 .render_dimensions
-                .into_apparent_coordinates(position)
+                .get_apparent_coordinates(position)
             );
             sync_renderer.mouse_click(state, position, &window_info);
           }

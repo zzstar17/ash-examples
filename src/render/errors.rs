@@ -1,8 +1,6 @@
 use ash::vk;
 use raw_window_handle::HandleError;
-use vkallocator::{
-  AllocationError, DeviceMemoryInitializationError, HostAllocationError, HostMemorySyncError,
-};
+use vkallocator::{AllocationError, HostMemorySyncError};
 use vkinitialization::{
   device::{device_selector::PhysicalDeviceSelectionError, DeviceCreationError},
   InstanceCreationError,
@@ -122,6 +120,7 @@ impl From<vk::Result> for InitializationError {
       vk::Result::ERROR_UNKNOWN => InitializationError::Unknown,
       // validation layers may say more on this
       vk::Result::ERROR_INITIALIZATION_FAILED => InitializationError::Unknown,
+      vk::Result::ERROR_VALIDATION_FAILED_EXT => InitializationError::ValidationFailed,
       _ => {
         log::error!(
           "Unhandled vk::Result {} during general initialization",

@@ -137,7 +137,7 @@ impl RenderAreaDimensions {
     }
   }
 
-  pub fn into_apparent_coordinates(&self, window_coordinates: PhysicalPosition<f64>) -> [f64; 2] {
+  pub fn get_apparent_coordinates(&self, window_coordinates: PhysicalPosition<f64>) -> [f64; 2] {
     let offsetted_x = window_coordinates.x - self.render_area_window_offset[0] as f64;
     let offsetted_y = window_coordinates.y - self.render_area_window_offset[1] as f64;
     let apparent_x = offsetted_x / self.apparent_ratio;
@@ -320,7 +320,7 @@ impl ApplicationHandler for App {
     if !self.status.started() {
       log::debug!("Starting application");
       take_mut::take(&mut self.status, |status| {
-        match status.start(event_loop, &mut self.compute_info) {
+        match status.start(event_loop, &self.compute_info) {
           Ok(v) => v,
           Err(err) => {
             log::error!("Failed to start rendering\n{}", err);
@@ -341,23 +341,22 @@ impl ApplicationHandler for App {
     _device_id: winit::event::DeviceId,
     event: winit::event::DeviceEvent,
   ) {
+    #[allow(clippy::single_match)]
     match event {
-      DeviceEvent::MouseMotion { delta } => {
+      DeviceEvent::MouseMotion { delta } if !self.mouse_in_window => {
         // try to keep track of the mouse outside the window
-        if !self.mouse_in_window {
-          let mut write = match self.compute_info.write() {
-            Err(err) => {
-              log::error!("Window device event: Window input is poisoned {:?}", err);
-              event_loop.exit();
-              return;
-            }
-            Ok(v) => v,
-          };
-          write.mouse_position.x += delta.0;
-          write.mouse_position.y += delta.1;
-          self.mouse_position.x += delta.0;
-          self.mouse_position.y += delta.1;
-        }
+        let mut write = match self.compute_info.write() {
+          Err(err) => {
+            log::error!("Window device event: Window input is poisoned {:?}", err);
+            event_loop.exit();
+            return;
+          }
+          Ok(v) => v,
+        };
+        write.mouse_position.x += delta.0;
+        write.mouse_position.y += delta.1;
+        self.mouse_position.x += delta.0;
+        self.mouse_position.y += delta.1;
       }
       _ => {}
     }
@@ -398,6 +397,7 @@ impl ApplicationHandler for App {
           println!("FPS: {:.4} {:.4} {:.4}", fps.min, fps.max, fps.average);
         }
 
+        #[allow(clippy::absurd_extreme_comparisons)]
         if self.frame_i <= RENDER_UNTIL_FRAME {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
@@ -485,17 +485,19 @@ impl ApplicationHandler for App {
       WindowEvent::CursorLeft { .. } => {
         self.mouse_in_window = false;
       }
-      WindowEvent::MouseInput { state, button, .. } => {
-        if let MouseButton::Left = button {
-          if let Err(err) = self
-            .status
-            .unwrap_started()
-            .threads_manager
-            .mouse_click(state, self.mouse_position)
-          {
-            log::error!("Window event: Failed to forward event to compute {:?}", err);
-            event_loop.exit();
-          }
+      WindowEvent::MouseInput {
+        state,
+        button: MouseButton::Left,
+        ..
+      } => {
+        if let Err(err) = self
+          .status
+          .unwrap_started()
+          .threads_manager
+          .mouse_click(state, self.mouse_position)
+        {
+          log::error!("Window event: Failed to forward event to compute {:?}", err);
+          event_loop.exit();
         }
       }
       WindowEvent::KeyboardInput { event, .. } => {
@@ -522,28 +524,26 @@ impl ApplicationHandler for App {
                 status.threads_manager.screenshot();
               }
             }
-            KeyCode::F3 | KeyCode::F10 => {
-              if pressed && !repeating {
-                // attempt to resize the window to native resolution
-                let old_size = status.threads_manager.window().inner_size();
-                if old_size.width != RESOLUTION[0] && old_size.height != RESOLUTION[1] {
-                  match status
-                    .threads_manager
-                    .window()
-                    .request_inner_size(PhysicalSize {
-                      width: RESOLUTION[0],
-                      height: RESOLUTION[1],
-                    }) {
-                    Some(size) => {
-                      if size == old_size {
-                        println!("Attempted to resize to native resolution, however resizing is currently disallowed by the windowing system.");
-                      } else {
-                        println!("Attempted to resize to native resolution, however such command may have been ignored by the platform.");
-                      }
+            KeyCode::F3 | KeyCode::F10 if pressed && !repeating => {
+              // attempt to resize the window to native resolution
+              let old_size = status.threads_manager.window().inner_size();
+              if old_size.width != RESOLUTION[0] && old_size.height != RESOLUTION[1] {
+                match status
+                  .threads_manager
+                  .window()
+                  .request_inner_size(PhysicalSize {
+                    width: RESOLUTION[0],
+                    height: RESOLUTION[1],
+                  }) {
+                  Some(size) => {
+                    if size == old_size {
+                      println!("Attempted to resize to native resolution, however resizing is currently disallowed by the windowing system.");
+                    } else {
+                      println!("Attempted to resize to native resolution, however such command may have been ignored by the platform.");
                     }
-                    None => {
-                      println!("Successfully resized to native resolution");
-                    }
+                  }
+                  None => {
+                    println!("Successfully resized to native resolution");
                   }
                 }
               }

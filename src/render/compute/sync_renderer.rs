@@ -285,7 +285,7 @@ impl ComputeSyncRenderer {
 
     let submit_info = vk::SubmitInfo2::default()
       .command_buffer_infos(&command_buffers)
-      .wait_semaphore_infos(&wait_semaphores);
+      .wait_semaphore_infos(wait_semaphores);
     unsafe {
       self.renderer.device.queue_submit2(
         self.renderer.queues.compute.handle,
@@ -352,7 +352,7 @@ impl ComputeSyncRenderer {
       ElementState::Pressed => {
         let real_mouse_coors = window_info
           .render_dimensions
-          .into_apparent_coordinates(position);
+          .get_apparent_coordinates(position);
         let real_mouse_coors = [real_mouse_coors[0] as f32, real_mouse_coors[1] as f32];
 
         let dist_x = real_mouse_coors[0] - self.ferris.pos[0];

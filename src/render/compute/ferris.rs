@@ -134,10 +134,9 @@ impl Ferris {
       height: render_dimensions.height as f32,
     };
 
-    let normal_pos = [
+    [
       self.pos[0] / render_dimensions_f.width,
       self.pos[1] / render_dimensions_f.height,
-    ];
-    normal_pos
+    ]
   }
 }

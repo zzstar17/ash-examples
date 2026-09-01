@@ -30,20 +30,6 @@ use super::{
   swapchain::{SwapchainCreationError, Swapchains},
 };
 
-const TEXTURE_PATH: &str = "./sprites.png";
-
-fn read_texture_bytes_as_rgba8() -> Result<(u32, u32, Vec<u8>), image::ImageError> {
-  let img = image::ImageReader::open(TEXTURE_PATH)?
-    .decode()?
-    .into_rgba8();
-  let width = img.width();
-  let height = img.height();
-
-  let bytes = img.into_raw();
-  assert!(bytes.len() == width as usize * height as usize * 4);
-  Ok((width, height, bytes))
-}
-
 pub struct Renderer {
   pub init: PostWindowInit,
 
@@ -136,7 +122,7 @@ impl Renderer {
       destructor.fire(&post_window.device);
       ManuallyDestroyed::destroy_self(&post_window);
     })
-    .map_err(|err| GPUDataAllocationError::from(err))?;
+    .map_err(GPUDataAllocationError::from)?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
 

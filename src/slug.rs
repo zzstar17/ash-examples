@@ -1,6 +1,5 @@
 use ash::vk;
 use cgmath::{EuclideanSpace, Point2};
-use core::f32;
 use harfrust::{ShapeOptions, Shaper, UnicodeBuffer};
 use std::{collections::HashMap, fmt::Debug, mem::offset_of, ptr};
 use ttf_parser::Face;
@@ -156,7 +155,7 @@ impl<'a> ttf_parser::OutlineBuilder for SlugCurveExtractor<'a> {
   }
 
   fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
-    let to = Point2 { x: x, y: y };
+    let to = Point2 { x, y };
     self.curves.push(QuadCurve {
       p0: self.cur_location,
       p1: Point2 { x: x1, y: y1 },
@@ -222,6 +221,7 @@ fn build_glyph_bands(
     {
       let b0 = (((cymin - min.y) / height) * BAND_COUNT as f32) as usize;
       let b1 = (((cymax - min.y) / height) * BAND_COUNT as f32) as usize;
+      #[allow(clippy::needless_range_loop)]
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         bands[b].push(c_i);
       }
@@ -231,6 +231,7 @@ fn build_glyph_bands(
     {
       let b0 = ((cxmin - min.x) / width * BAND_COUNT as f32) as usize;
       let b1 = ((cxmax - min.x) / width * BAND_COUNT as f32) as usize;
+      #[allow(clippy::needless_range_loop)]
       for b in b0..=(b1.min(BAND_COUNT - 1)) {
         bands[BAND_COUNT + b].push(c_i);
       }
@@ -255,7 +256,7 @@ fn build_glyph_bands(
     });
   }
 
-  return bands;
+  bands
 }
 
 pub const TEX_WIDTH: usize = 4096;
@@ -594,7 +595,7 @@ pub struct MultilineRect {
 
 impl MultilineRect {
   pub fn from_line_rects(rects: &[PointRect]) -> Self {
-    assert!(rects.len() > 0);
+    assert!(!rects.is_empty());
     let first_line = rects[0];
     let mut total = first_line;
     for line in rects[1..].iter() {
@@ -649,7 +650,7 @@ impl<'a> SlugRendering<'a> {
 
       let processed_glyph = self
         .glyph_processor
-        .process_new_glyph(&self.font_face, glyph_id);
+        .process_new_glyph(self.font_face, glyph_id);
       self.processed_glyph_map.insert(glyph_id, processed_glyph);
     }
 
@@ -697,7 +698,7 @@ impl<'a> SlugRendering<'a> {
           // add new glyph to map
           let processed_opt = self
             .glyph_processor
-            .process_new_glyph(&self.font_face, glyph_id);
+            .process_new_glyph(self.font_face, glyph_id);
           self.processed_glyph_map.insert(glyph_id, processed_opt);
           processed_opt
         }
@@ -854,7 +855,7 @@ impl<'a> SlugRendering<'a> {
     indices: &mut Vec<u32>,
   ) -> MultilineRect {
     assert!(
-      text.len() > 0,
+      !text.is_empty(),
       "Slug build lines text must be at least one line"
     );
 

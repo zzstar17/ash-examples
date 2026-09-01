@@ -184,7 +184,7 @@ impl Swapchains {
       // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
       if let Some(fences) = &old.image_finished_presenting_fence {
         unsafe {
-          match device.wait_for_fences(&fences, true, 0) {
+          match device.wait_for_fences(fences, true, 0) {
             Err(vkerr) => match vkerr {
               vk::Result::TIMEOUT => {
                 return Ok(false);
@@ -230,7 +230,7 @@ impl Swapchains {
       // https://docs.vulkan.org/guide/latest/swapchain_semaphore_reuse.html#_vk_ext_swapchain_maintenance1_extension
       if let Some(fences) = &old.image_finished_presenting_fence {
         unsafe {
-          device.wait_for_fences(&fences, true, u64::MAX).expect(
+          device.wait_for_fences(fences, true, u64::MAX).expect(
             "Failed to wait for swapchain presentation fences during swapchain destruction",
           );
         }
