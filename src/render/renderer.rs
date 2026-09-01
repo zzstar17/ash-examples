@@ -560,7 +560,6 @@ impl Drop for Renderer {
       self.screenshot_buffer.destroy_self(&self.device);
 
       self.graphics_pools.destroy_self(&self.device);
-      // self.device_copy_pool.destroy_self(&self.device);
 
       self.text_pipeline.destroy_self(&self.device);
       self.pipeline.destroy_self(&self.device);

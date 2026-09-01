@@ -46,7 +46,7 @@ pub enum FontError {
 
 // hopefully in the future there will be some centralized function that loads all required
 // files at once
-pub fn load_font<'a>() -> Result<FontBytes, FontError> {
+pub fn load_font() -> Result<FontBytes, FontError> {
   let source = SystemSource::new();
   let (family, family_name) = search_family(&source)?;
 
