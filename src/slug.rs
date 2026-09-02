@@ -266,7 +266,7 @@ pub struct SlugGlyphProcessor {
   glyph_curve_buffer: Vec<QuadCurve>,
 
   pub curve_tex_data: Vec<[f32; 4]>,
-  pub band_tex_data: Vec<u32>,
+  pub band_tex_data: Vec<[u32; 4]>,
 
   total_curve_texels: usize,
   pub curve_tex_height: usize,
@@ -332,7 +332,7 @@ impl SlugGlyphProcessor {
 
     let new_band_tex_height = (self.total_band_texels / TEX_WIDTH) + 1;
     if new_band_tex_height > self.band_tex_height {
-      let expand_len = TEX_WIDTH * (new_band_tex_height - self.band_tex_height) * 4;
+      let expand_len = TEX_WIDTH * (new_band_tex_height - self.band_tex_height);
       self.band_tex_data.reserve_exact(expand_len);
       unsafe {
         let end_ptr = self
@@ -381,32 +381,33 @@ impl SlugGlyphProcessor {
     let header_count = glyph_band_curve_indices.len();
 
     // Ensure headers don't straddle a row boundary
-    let cur_x = self.band_texel_i % TEX_WIDTH;
-    if cur_x + header_count > TEX_WIDTH {
-      self.band_texel_i = ((self.band_texel_i / TEX_WIDTH) + 1) * TEX_WIDTH;
+    let mut band_loc_x = self.band_texel_i % TEX_WIDTH;
+    let mut band_loc_y = self.band_texel_i / TEX_WIDTH;
+    if band_loc_x + header_count > TEX_WIDTH {
+      band_loc_x = 0;
+      band_loc_y += 1;
+      self.band_texel_i = band_loc_y * TEX_WIDTH;
     }
-
-    let band_loc_x = (self.band_texel_i % TEX_WIDTH) as u16;
-    let band_loc_y = (self.band_texel_i / TEX_WIDTH).try_into().unwrap();
 
     // Write band headers
     let mut curve_list_offset = header_count;
     for (i, band_indices) in glyph_band_curve_indices.iter().enumerate() {
-      let tl = self.band_texel_i + i;
-      let di = tl * 4;
-      self.band_tex_data[di] = band_indices.len() as u32;
-      self.band_tex_data[di + 1] = curve_list_offset as u32;
+      let texel_offset = self.band_texel_i + i;
+      // header texel: (curveCount, offsetFromGlyphLoc, 0, 0)
+      self.band_tex_data[texel_offset][0] = band_indices.len() as u32;
+      self.band_tex_data[texel_offset][1] = curve_list_offset as u32;
 
+      // Write curve ref texels
       let list_start = self.band_texel_i + curve_list_offset;
       for (j, curve_i) in band_indices.iter().enumerate() {
         let curve_texel = glyph_curve_start_i + curve_i * 2;
         let curve_tex_x = curve_texel % TEX_WIDTH;
         let curve_tex_y = curve_texel / TEX_WIDTH;
 
-        let tl = list_start + j;
-        let di = tl * 4;
-        self.band_tex_data[di] = curve_tex_x as u32;
-        self.band_tex_data[di + 1] = curve_tex_y as u32;
+        let texel_offset = list_start + j;
+        // curve ref texel: (curveTexX, curveTexY, 0, 0)
+        self.band_tex_data[texel_offset][0] = curve_tex_x as u32;
+        self.band_tex_data[texel_offset][1] = curve_tex_y as u32;
       }
 
       curve_list_offset += band_indices.len();
@@ -414,7 +415,7 @@ impl SlugGlyphProcessor {
 
     self.band_texel_i += curve_list_offset;
 
-    (band_loc_x, band_loc_y)
+    (band_loc_x as u16, band_loc_y.try_into().unwrap())
   }
 
   pub fn process_new_glyph(&mut self, face: &Face, glyph_id: u16) -> Option<ProcessedGlyphData> {
@@ -552,21 +553,21 @@ impl SlugVertex {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SlugTextureData<'a> {
+  /// curve_tex_data.len() == TEX_WIDTH * self.curve_tex_height
   pub curve_tex_data: &'a [[f32; 4]],
-  pub band_tex_data: &'a [u32],
+  /// band_tex_data.len()  == TEX_WIDTH * self.band_tex_height
+  pub band_tex_data: &'a [[u32; 4]],
   pub curve_tex_height: usize,
   pub band_tex_height: usize,
 }
 
 impl<'a> SlugTextureData<'a> {
   pub fn curve_tex_size(&self) -> u64 {
-    let curve_len = TEX_WIDTH * self.curve_tex_height * 4;
-    (curve_len * size_of::<f32>()) as u64
+    (self.curve_tex_data.len() * size_of::<[f32; 4]>()) as u64
   }
 
   pub fn band_tex_size(&self) -> u64 {
-    let band_len = TEX_WIDTH * self.band_tex_height * 4;
-    (band_len * size_of::<u32>()) as u64
+    (self.band_tex_data.len() * size_of::<[u32; 4]>()) as u64
   }
 }
 
