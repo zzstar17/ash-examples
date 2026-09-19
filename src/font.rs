@@ -50,7 +50,9 @@ pub fn load_font() -> Result<FontBytes, FontError> {
   let source = SystemSource::new();
   let (family, family_name) = search_family(&source)?;
 
-  let (font_path, font_index) = &family
+  log::debug!("Available fonts from chosen family:\n{:#?}", family.fonts());
+
+  let (font_path, mut font_index) = &family
     .fonts()
     .iter()
     .find_map(|handle| match handle {
@@ -59,7 +61,7 @@ pub fn load_font() -> Result<FontBytes, FontError> {
           .as_os_str()
           .to_str()
           .expect("Failed to font path str to str");
-        if path_str.contains("REGULAR") || path_str.contains("regular") {
+        if path_str.contains("REGULAR") || path_str.contains("egular") {
           Some((path, *font_index))
         } else {
           None
@@ -71,6 +73,11 @@ pub fn load_font() -> Result<FontBytes, FontError> {
       Handle::Path { path, font_index } => (path, *font_index),
       Handle::Memory { .. } => panic!(),
     });
+
+  // not sure what index referes to in this case
+  if !font_path.ends_with(".ttc") {
+    font_index = 0;
+  }
 
   let font_bytes = std::fs::read(font_path)
     .map_err(|err| FontError::SystemReadError(err, (*font_path).clone()))?
@@ -85,6 +92,6 @@ pub fn load_font() -> Result<FontBytes, FontError> {
 
   Ok(FontBytes {
     bytes: font_bytes,
-    font_index: *font_index,
+    font_index: font_index,
   })
 }
