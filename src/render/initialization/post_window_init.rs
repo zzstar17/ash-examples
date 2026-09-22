@@ -8,8 +8,10 @@ use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   render::{
-    compute::ferris::Ferris, graphics::swapchain::Swapchains, initialization, InitializationError,
-    SWAPCHAIN_IMAGE_USAGES,
+    compute::ferris::Ferris,
+    graphics::swapchain::Swapchains,
+    initialization::{self, SyncQueues},
+    InitializationError, SWAPCHAIN_IMAGE_USAGES,
   },
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, WINDOW_TITLE,
 };
@@ -24,6 +26,7 @@ pub struct PostWindowInit {
   pub physical_device: PhysicalDevice,
   pub device: Device,
   pub queues: SingleQueues,
+  pub sync_queues: SyncQueues,
 
   pub window: Window,
   pub surface: Surface,
@@ -114,13 +117,6 @@ impl PostWindowInit {
     )
     .on_err(|_| destroy_previous())?;
 
-    if queues.compute.handle == queues.graphics.handle {
-      // todo: accessing graphics and compute queues at the same time
-      log::error!("Device contains only one queue, for which case is currently unimplemented");
-      destroy_previous();
-      return Err(InitializationError::NoCompatibleDevices);
-    }
-
     let physical_device = physical_device_creation.physical_device;
 
     #[cfg(feature = "vl")]
@@ -146,6 +142,8 @@ impl PostWindowInit {
       destroy_previous();
     })?;
 
+    let sync_queues = SyncQueues::from_single_queues(queues);
+
     Ok(Self {
       window,
       surface,
@@ -159,6 +157,7 @@ impl PostWindowInit {
       device,
       queues,
       swapchains,
+      sync_queues,
     })
   }
 }

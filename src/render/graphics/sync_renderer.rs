@@ -16,6 +16,7 @@ use crate::{
     create_objs::{create_fence, create_semaphore},
     gpu_data::sprite_buffers::SpriteTextureData,
     graphics::{self, Renderer},
+    initialization::GraphicsSyncQueues,
     FrameRenderError, InitializationError, GRAPHICS_FRAMES_IN_FLIGHT,
   },
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
@@ -23,6 +24,7 @@ use crate::{
 
 pub struct SyncRenderer {
   pub renderer: graphics::Renderer,
+  sync_queues: GraphicsSyncQueues,
 
   last_frame_i: usize,
   // frame resources are free
@@ -68,8 +70,13 @@ impl SyncRenderer {
     .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
     let frame_fences = [fence0, fence1];
 
+    let sync_queues = GraphicsSyncQueues {
+      graphics: renderer.init.sync_queues.graphics.clone(),
+      transfer: renderer.init.sync_queues.transfer.clone(),
+    };
+
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, sprite_texture_data)?;
+      Self::submit_initial_staging_copy(&renderer, &sync_queues, fence0, sprite_texture_data)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -87,6 +94,7 @@ impl SyncRenderer {
 
     Ok(Self {
       renderer,
+      sync_queues,
       last_frame_i: GRAPHICS_FRAMES_IN_FLIGHT - 1, // make sure render_next_frame waits for fence 0
       frame_fences,
       in_use_particle_buffers_by_frame: [None; GRAPHICS_FRAMES_IN_FLIGHT],
@@ -102,6 +110,7 @@ impl SyncRenderer {
 
   unsafe fn submit_initial_staging_copy(
     renderer: &Renderer,
+    sync_queues: &GraphicsSyncQueues,
     fence: vk::Fence,
     sprite_texture_data: &SpriteTextureData,
   ) -> Result<(), HostMemorySyncError> {
@@ -110,11 +119,15 @@ impl SyncRenderer {
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.command_pools[0].main)];
     let submit_info = vk::SubmitInfo2::default().command_buffer_infos(&command_buffers);
-    renderer.init.device.queue_submit2(
-      renderer.init.queues.graphics.handle,
-      &[submit_info],
-      fence,
-    )?;
+
+    let queue_lock = sync_queues
+      .graphics
+      .lock()
+      .expect("Failed to lock graphics queue during initial staging data copy");
+    renderer
+      .init
+      .device
+      .queue_submit2(queue_lock.handle, &[submit_info], fence)?;
 
     Ok(())
   }
@@ -328,23 +341,28 @@ impl SyncRenderer {
       .wait_semaphore_infos(&wait_semaphores)
       .signal_semaphore_infos(&signal_semaphores);
     unsafe {
+      let graphics_queue_lock = self
+        .sync_queues
+        .graphics
+        .lock()
+        .expect("Failed to lock graphics queue during usual submit");
       self.renderer.init.device.queue_submit2(
-        self.renderer.init.queues.graphics.handle,
+        graphics_queue_lock.handle,
         &[submit_info],
         self.frame_fences[cur_frame_i],
       )?;
-    }
 
-    unsafe {
       if let Err(err) = self.renderer.init.swapchains.queue_present(
         &self.renderer.init.device,
         cur_image_i,
-        self.renderer.init.queues.graphics.handle,
+        graphics_queue_lock.handle,
         &[image_finished_presenting],
       ) {
         self.recreate_swapchain_next_frame = true;
         return Err(err.into());
       }
+
+      drop(graphics_queue_lock);
     }
 
     Ok(())

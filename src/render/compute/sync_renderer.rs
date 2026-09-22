@@ -18,6 +18,7 @@ use crate::{
       ComputeGPUData, ParticleBuffers, ParticlesDraw,
     },
     create_objs::{create_fence, create_semaphore},
+    initialization::ComputeSyncQueues,
     InitializationError, COMPUTE_FRAMES_IN_FLIGHT, RENDER_EXTENT,
   },
   WindowToComputeInfo, RESOLUTION,
@@ -34,6 +35,7 @@ pub struct ComputeSyncRenderer {
   particle_manager: ParticleManager,
 
   renderer: ComputeRenderer,
+  sync_queues: ComputeSyncQueues,
 
   last_write_i: usize,
   frame_fences: [vk::Fence; COMPUTE_FRAMES_IN_FLIGHT],
@@ -73,6 +75,7 @@ impl ComputeSyncRenderer {
     device: Device,
     physical_device: PhysicalDevice,
     queues: SingleQueues,
+    sync_queues: ComputeSyncQueues,
     compute_result_sender: mpsc::SyncSender<ComputeFrameResult>,
     particle_buffers: ParticleBuffers,
     text_ui_extent: vk::Extent2D,
@@ -140,9 +143,14 @@ impl ComputeSyncRenderer {
         ..Default::default()
       };
 
+      let queue_lock = sync_queues
+        .transfer
+        .lock()
+        .expect("Failed to lock compute transfer");
       renderer
         .device
-        .queue_submit(queues.transfer.handle, &[submit_info], vk::Fence::null())?;
+        .queue_submit(queue_lock.handle, &[submit_info], vk::Fence::null())?;
+      drop(queue_lock);
     }
 
     let particle_manager = ParticleManager::new(particle_buffers.in_use_by_graphics);
@@ -158,6 +166,7 @@ impl ComputeSyncRenderer {
       save_gpu_contents_next_frame: true,
       saving_gpu_contents: None,
       particle_manager,
+      sync_queues,
     })
   }
 
@@ -291,12 +300,20 @@ impl ComputeSyncRenderer {
     let submit_info = vk::SubmitInfo2::default()
       .command_buffer_infos(&command_buffers)
       .wait_semaphore_infos(wait_semaphores);
+
     unsafe {
-      self.renderer.device.queue_submit2(
-        self.renderer.queues.compute.handle,
+      let queue_lock = self
+        .sync_queues
+        .compute
+        .lock()
+        .expect("Failed to lock compute queue");
+      let result = self.renderer.device.queue_submit2(
+        queue_lock.handle,
         &[submit_info],
         self.frame_fences[cur_write_i],
-      )
+      );
+      drop(queue_lock);
+      result
     }
     .on_err(|_err| self.particle_manager.compute_fail())?;
     self.tick_i += 1;

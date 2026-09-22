@@ -25,7 +25,8 @@ use vkinitialization::device::{Device, PhysicalDevice, SingleQueues};
 use crate::{
   last_frames_durations::{FPSDurations, LastFramesDurations},
   render::{
-    compute::sync_renderer::ComputeFrameRenderError, gpu_data::GPUData, InitializationError,
+    compute::sync_renderer::ComputeFrameRenderError, gpu_data::GPUData,
+    initialization::ComputeSyncQueues, InitializationError,
   },
   WindowToComputeInfo, KEEP_FRAME_DURATION_COUNT_UPS, MAX_UPS, PRINT_UPS_EVERY,
 };
@@ -65,6 +66,7 @@ pub fn start_compute(
   device: Device,
   physical_device: PhysicalDevice,
   queues: SingleQueues,
+  compute_sync_queues: ComputeSyncQueues,
   window_info: Arc<RwLock<WindowToComputeInfo>>,
   gpu_data: &GPUData,
   #[cfg(feature = "vl")] marker: vkinitialization::DebugUtilsMarker,
@@ -91,6 +93,7 @@ pub fn start_compute(
       device,
       physical_device,
       queues,
+      compute_sync_queues,
       data_sender,
       particle_buffers_to_compute,
       text_ui_size,

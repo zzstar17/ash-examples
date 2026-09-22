@@ -4,11 +4,12 @@ use std::{
   mem,
   ops::Deref,
   ptr::{self, addr_of},
+  sync::Mutex,
 };
 
 pub use ash::vk;
 use vkinitialization::{
-  device::{Device, PhysicalDevice, QueueFamilies},
+  device::{Device, PhysicalDevice, Queue, QueueFamilies},
   Surface, SurfaceError,
 };
 use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
@@ -213,7 +214,7 @@ impl Swapchains {
     &mut self,
     physical_device: &PhysicalDevice,
     device: &Device,
-    presentation_queue: vk::Queue,
+    presentation_queue: &Mutex<Queue>,
     cur_total_frame: usize,
     surface: &Surface,
     window_size: PhysicalSize<u32>,
@@ -236,9 +237,13 @@ impl Swapchains {
         }
       } else {
         unsafe {
-          device.queue_wait_idle(presentation_queue).expect(
+          let queue_lock = presentation_queue
+            .lock()
+            .expect("Failed to lock presentation queue during swapchain recreation");
+          device.queue_wait_idle(queue_lock.handle).expect(
             "Failed to wait for presentation queue to become idle during swapchain destruction",
           );
+          drop(queue_lock);
         }
       }
       unsafe {

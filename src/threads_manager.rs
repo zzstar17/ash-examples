@@ -14,7 +14,9 @@ use crate::{
     compute::{self, ComputeFrameResult, ComputeToGraphicsEvent, GraphicsToComputeEvent},
     format_conversions::{self, KNOWN_FORMATS},
     gpu_data::{sprite_buffers::SpriteTextureData, GPUData},
-    graphics, FrameRenderError, InitializationError, PostWindowInit,
+    graphics,
+    initialization::ComputeSyncQueues,
+    FrameRenderError, InitializationError, PostWindowInit,
   },
   WindowToComputeInfo,
 };
@@ -82,10 +84,15 @@ impl ThreadsManager {
       &post_window_init.debug_utils_marker,
     )?;
 
+    let compute_sync_queues = ComputeSyncQueues {
+      compute: post_window_init.sync_queues.compute.clone(),
+      transfer: post_window_init.sync_queues.transfer.clone(),
+    };
     let compute_thread = compute::start_compute(
       post_window_init.device.clone(),
       post_window_init.physical_device.clone(),
       post_window_init.queues,
+      compute_sync_queues,
       window_info,
       &gpu_data,
       #[cfg(feature = "vl")]
