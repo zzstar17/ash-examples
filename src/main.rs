@@ -37,7 +37,15 @@ const RESOLUTION: [u32; 2] = [800, 800];
 const TEXTURE_PATH: &str = "./sprites.png";
 
 // get first that exists
-const TEXT_FONT: [&str; 3] = ["Source Code Pro", "Consolas", "Arial"];
+const TEXT_FONT: [&str; 7] = [
+  "Source Code Pro",
+  "Hack",
+  "Consolas",
+  "Arial",
+  "Helvetica",
+  "NotoSans",
+  "FreeSans",
+];
 
 const SCREENSHOT_SAVE_FILE: &str = "last_screenshot.png";
 

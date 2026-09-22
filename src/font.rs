@@ -1,4 +1,4 @@
-use std::{io, path::PathBuf, sync::LazyLock};
+use std::{cmp::Ordering, io, path::PathBuf, sync::LazyLock};
 
 use font_kit::{family_handle::FamilyHandle, handle::Handle, source::SystemSource};
 
@@ -44,33 +44,55 @@ pub enum FontError {
   SystemReadError(#[source] io::Error, PathBuf),
 }
 
+fn unwrap_handle(handle: &Handle) -> (&PathBuf, u32) {
+  match handle {
+    Handle::Path { path, font_index } => (path, *font_index),
+    Handle::Memory { .. } => panic!(),
+  }
+}
+
+fn choose_font(fonts: &[Handle]) -> (&PathBuf, u32) {
+  // choose font that contains "regular"
+  for handle in fonts.iter() {
+    let (path, font_index) = unwrap_handle(handle);
+
+    let path_str = path
+      .as_os_str()
+      .to_str()
+      .expect("Failed to font path str to str");
+    if path_str.contains("REGULAR") || path_str.contains("egular") {
+      return (path, font_index);
+    }
+  }
+
+  // sort by path len first and by index after
+  let min_handle = fonts.iter().min_by(|a, b| {
+    let (path_a, index_a) = unwrap_handle(a);
+    let (path_b, index_b) = unwrap_handle(b);
+
+    match path_a.as_os_str().len().cmp(&path_b.as_os_str().len()) {
+      Ordering::Equal => index_a.cmp(&index_b),
+      other => other,
+    }
+  });
+
+  unwrap_handle(min_handle.expect("No fonts found in family"))
+}
+
 // hopefully in the future there will be some centralized function that loads all required
 // files at once
 pub fn load_font() -> Result<FontBytes, FontError> {
   let source = SystemSource::new();
   let (family, family_name) = search_family(&source)?;
 
-  let (font_path, font_index) = &family
-    .fonts()
-    .iter()
-    .find_map(|handle| match handle {
-      Handle::Path { path, font_index } => {
-        let path_str = path
-          .as_os_str()
-          .to_str()
-          .expect("Failed to font path str to str");
-        if path_str.contains("REGULAR") || path_str.contains("regular") {
-          Some((path, *font_index))
-        } else {
-          None
-        }
-      }
-      Handle::Memory { .. } => panic!(),
-    })
-    .unwrap_or_else(|| match &family.fonts()[0] {
-      Handle::Path { path, font_index } => (path, *font_index),
-      Handle::Memory { .. } => panic!(),
-    });
+  log::debug!("Available fonts from chosen family:\n{:#?}", family.fonts());
+
+  let (font_path, mut font_index) = choose_font(family.fonts());
+
+  // not sure what index refers to in this case
+  if !font_path.ends_with(".ttc") {
+    font_index = 0;
+  }
 
   let font_bytes = std::fs::read(font_path)
     .map_err(|err| FontError::SystemReadError(err, (*font_path).clone()))?
@@ -85,6 +107,6 @@ pub fn load_font() -> Result<FontBytes, FontError> {
 
   Ok(FontBytes {
     bytes: font_bytes,
-    font_index: *font_index,
+    font_index: font_index,
   })
 }
