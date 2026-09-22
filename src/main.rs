@@ -501,7 +501,7 @@ impl ApplicationHandler for App {
           .status
           .unwrap_started()
           .threads_manager
-          .mouse_click(state, self.mouse_position)
+          .mouse_click(state)
         {
           log::error!("Window event: Failed to forward event to compute {:?}", err);
           event_loop.exit();

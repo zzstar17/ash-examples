@@ -180,9 +180,12 @@ impl ComputeSyncRenderer {
     let cur_write_i = (self.last_write_i + 1) % COMPUTE_FRAMES_IN_FLIGHT;
     self.last_write_i = cur_write_i;
 
+    let mouse_apparent_coors = window_info
+      .render_dimensions
+      .get_apparent_coordinates(window_info.mouse_position);
     if let Some(mouse_pos) = self.ferris.drag_mouse_pos.as_mut() {
-      mouse_pos[0] = window_info.mouse_position.x as f32;
-      mouse_pos[1] = window_info.mouse_position.y as f32;
+      mouse_pos[0] = mouse_apparent_coors[0] as f32;
+      mouse_pos[1] = mouse_apparent_coors[1] as f32;
     }
     self.ferris.update(
       time_since_last_update,
@@ -373,16 +376,16 @@ impl ComputeSyncRenderer {
   ) {
     match state {
       ElementState::Pressed => {
-        let real_mouse_coors = window_info
+        let apparent_coors = window_info
           .render_dimensions
           .get_apparent_coordinates(position);
-        let real_mouse_coors = [real_mouse_coors[0] as f32, real_mouse_coors[1] as f32];
+        let apparent_coors = [apparent_coors[0] as f32, apparent_coors[1] as f32];
 
-        let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
-        let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
+        let dist_x = apparent_coors[0] - self.ferris.pos[0];
+        let dist_y = apparent_coors[1] - self.ferris.pos[1];
         let squares = dist_x * dist_x + dist_y * dist_y;
         if squares < 120.0 * 120.0 {
-          self.ferris.drag_mouse_pos = Some(real_mouse_coors);
+          self.ferris.drag_mouse_pos = Some(apparent_coors);
         }
       }
       ElementState::Released => {

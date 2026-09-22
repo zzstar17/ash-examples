@@ -8,7 +8,7 @@ use ash::vk;
 pub use gpu_data::ComputeGPUData;
 pub use particle_buffers::ParticleBuffers;
 use vkobjects::errors::OutOfMemoryError;
-use winit::{dpi::PhysicalPosition, event::ElementState};
+use winit::event::ElementState;
 
 use std::{
   sync::{
@@ -33,7 +33,7 @@ use crate::{
 
 pub enum GraphicsToComputeEvent {
   Terminate,
-  MouseClick((ElementState, PhysicalPosition<f64>)),
+  MouseClick(ElementState),
 }
 
 pub enum ComputeToGraphicsEvent {
@@ -146,6 +146,11 @@ pub fn start_compute(
         println!("UPS: {:.4} {:.4} {:.4}", ups.min, ups.max, ups.average);
       }
 
+      // reading this is a bit awkward considering this loop also reads events
+      // the idea is that compute_info in main::App gets updated multiple times and only read once here
+      // to not flood the event channels
+      //
+      // coordinates are in real (monitor) values, so they get converted in this thread to match the render_area domain
       let window_info = {
         let read = match window_info.read() {
           Err(err) => {
@@ -162,15 +167,15 @@ pub fn start_compute(
           GraphicsToComputeEvent::Terminate => {
             break 'compute_loop;
           }
-          GraphicsToComputeEvent::MouseClick((state, position)) => {
+          GraphicsToComputeEvent::MouseClick(state) => {
             println!(
               "mouse click! {:?}, {:?}",
               state,
               window_info
                 .render_dimensions
-                .get_apparent_coordinates(position)
+                .get_apparent_coordinates(window_info.mouse_position)
             );
-            sync_renderer.mouse_click(state, position, &window_info);
+            sync_renderer.mouse_click(state, window_info.mouse_position, &window_info);
           }
         }
       }

@@ -4,9 +4,7 @@ use std::{
 };
 
 use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
-use winit::{
-  dpi::PhysicalPosition, event::ElementState, event_loop::ActiveEventLoop, window::Window,
-};
+use winit::{event::ElementState, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   last_frames_durations::FPSDurations,
@@ -160,14 +158,13 @@ impl ThreadsManager {
   pub fn mouse_click(
     &self,
     pressed: ElementState,
-    position: PhysicalPosition<f64>,
   ) -> Result<(), mpsc::SendError<GraphicsToComputeEvent>> {
     self
       .compute_thread_data
       .as_ref()
       .unwrap()
       .event_sender
-      .send(GraphicsToComputeEvent::MouseClick((pressed, position)))
+      .send(GraphicsToComputeEvent::MouseClick(pressed))
   }
 
   pub fn window(&self) -> &Window {
