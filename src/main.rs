@@ -1,5 +1,6 @@
 mod ferris;
 mod font;
+mod keys;
 mod last_frames_durations;
 mod render;
 
@@ -22,7 +23,7 @@ use winit::{
   keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::last_frames_durations::LastFramesDurations;
+use crate::{keys::Keys, last_frames_durations::LastFramesDurations};
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
@@ -31,7 +32,7 @@ const WINDOW_TITLE: &str = "Bouncy Ferris";
 const INITIAL_WINDOW_WIDTH: u32 = 800;
 const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
-const RESOLUTION: [u32; 2] = [800, 800];
+const RESOLUTION: [u32; 2] = [1920, 1080];
 
 const TEXTURE_PATH: &str = "./ferris.png";
 
@@ -175,6 +176,7 @@ struct App {
   window_resize_handler: WindowResizeHandler,
   mouse_position: PhysicalPosition<f64>,
   mouse_in_window: bool,
+  keys: Keys,
   ferris: Ferris,
   ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
@@ -232,10 +234,14 @@ impl RenderStatus {
     Ok(RenderStatus::Initialized(render))
   }
 
-  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<Self, InitializationError> {
+  pub fn start(
+    self,
+    event_loop: &ActiveEventLoop,
+    ferris_initial_pos: [f32; 2],
+  ) -> Result<Self, InitializationError> {
     match self {
       RenderStatus::Initialized(init) => {
-        let renderer = init.start(event_loop)?;
+        let renderer = init.start(event_loop, ferris_initial_pos)?;
 
         let window_dimensions = renderer.window().inner_size();
         Ok(Self::Started(StartedStatus {
@@ -293,6 +299,7 @@ impl App {
       ferris_drag_mouse_pos: None,
       mouse_in_window: true,
       last_frames_durations: LastFramesDurations::new(),
+      keys: Keys::new(),
     }
   }
 }
@@ -301,11 +308,13 @@ impl ApplicationHandler for App {
   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
     if !self.status.started() {
       log::debug!("Starting application");
-      take_mut::take(&mut self.status, |status| match status.start(event_loop) {
-        Ok(v) => v,
-        Err(err) => {
-          log::error!("Failed to start rendering\n{}", err);
-          std::process::exit(1);
+      take_mut::take(&mut self.status, |status| {
+        match status.start(event_loop, self.ferris.pos) {
+          Ok(v) => v,
+          Err(err) => {
+            log::error!("Failed to start rendering\n{}", err);
+            std::process::exit(1);
+          }
         }
       });
     } else {
@@ -390,7 +399,9 @@ impl ApplicationHandler for App {
 
           if let Err(err) = status.renderer.render_next_frame(
             self.frame_i,
+            time_passed,
             &self.ferris,
+            &self.keys,
             self.last_frames_durations.get_min_max_average_fps(),
           ) {
             match err {
@@ -479,7 +490,7 @@ impl ApplicationHandler for App {
           let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
           let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
           let squares = dist_x * dist_x + dist_y * dist_y;
-          if squares < 120.0 * 120.0 {
+          if squares < 600.0 * 600.0 {
             self.ferris_drag_mouse_pos = Some([self.mouse_position.x, self.mouse_position.y]);
           }
         }
@@ -492,6 +503,9 @@ impl ApplicationHandler for App {
         let repeating = event.repeat;
         // todo: implement step frame by frame functionality
         if let PhysicalKey::Code(code) = event.physical_key {
+          // a bit of a bad way to do this, key event can be deleted between frames
+          self.keys.update_from_event(code, event.state);
+
           match code {
             // close on escape
             KeyCode::Escape => event_loop.exit(),

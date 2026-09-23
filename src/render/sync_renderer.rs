@@ -1,14 +1,22 @@
-use std::{marker::PhantomData, ptr};
+use std::{f32, marker::PhantomData, ptr, time::Duration};
 
 use ash::vk;
+use cgmath::Point3;
 use vkallocator::HostMemorySyncError;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
-use winit::{dpi::PhysicalSize, window::Window};
+use winit::window::Window;
 
 use crate::{
   ferris::Ferris,
+  keys::{KeyState::Pressed, Keys},
   last_frames_durations::FPSDurations,
-  render::{create_objs::create_fence, gpu_data::sprite_buffers::SpriteTextureData},
+  render::{
+    camera::{Camera, RenderCamera},
+    create_objs::create_fence,
+    gpu_data::sprite_buffers::SpriteTextureData,
+    obj_3d::Render3dObj,
+    RENDER_SIZE,
+  },
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
@@ -31,12 +39,17 @@ pub struct SyncRenderer {
 
   save_next_frame: bool,
   saving_frame: Option<(usize, vk::Format)>, // Some((frame_i, save_format)) if frame's screenshot is being saved
+
+  // todo: temporarily here
+  ferris_obj: Render3dObj,
+  camera: RenderCamera,
 }
 
 impl SyncRenderer {
   pub fn new(
     renderer: Renderer,
     sprite_texture_data: &SpriteTextureData,
+    ferris_initial_pos: [f32; 2],
   ) -> Result<Self, InitializationError> {
     let device = &renderer.device;
     let fence0 = create_fence(
@@ -75,6 +88,15 @@ impl SyncRenderer {
     )
     .on_err(|_| unsafe { frame_fences.destroy_self(device) })?;
 
+    let aspect_ratio = RENDER_EXTENT.width as f32 / RENDER_EXTENT.height as f32;
+
+    let camera = RenderCamera::new(
+      Camera::new(1.0, f32::consts::PI / -2.0, 0.0),
+      0.8,
+      aspect_ratio,
+      0.0003,
+    );
+
     Ok(Self {
       renderer,
       last_frame_i: FRAMES_IN_FLIGHT - 1, // make sure render_next_frame waits for fence 0
@@ -84,6 +106,13 @@ impl SyncRenderer {
       recreate_swapchain_next_frame: false,
       save_next_frame: false,
       saving_frame: None,
+
+      ferris_obj: Render3dObj::new(Point3::new(
+        ferris_initial_pos[0],
+        ferris_initial_pos[1],
+        -3.0,
+      )),
+      camera: camera,
     })
   }
 
@@ -115,11 +144,22 @@ impl SyncRenderer {
   pub fn render_next_frame(
     &mut self,
     cur_total_frame: usize,
+    time_since_last_update: Duration,
     ferris: &Ferris,
+    keys: &Keys,
     fps: FPSDurations,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
+
+    self.update_from_keys(keys, time_since_last_update);
+
+    self.ferris_obj.move_to(Point3::new(
+      ferris.pos[0] / RENDER_SIZE.x,
+      ferris.pos[1] / RENDER_SIZE.y,
+      -3.0,
+    ));
+    let matrix = self.camera.projection_view() * self.ferris_obj.model();
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     let gpu_bound = unsafe {
@@ -148,7 +188,7 @@ impl SyncRenderer {
 
     self
       .renderer
-      .write_host_device_text_data(cur_frame_i, fps, gpu_bound)?;
+      .write_host_device_text_data(cur_frame_i, fps, gpu_bound, &self.camera)?;
 
     let destroyed_old_swapchain = self
       .renderer
@@ -246,10 +286,7 @@ impl SyncRenderer {
       self.renderer.record_graphics(
         cur_frame_i,
         cur_image_i as usize,
-        &ferris.get_render_position(PhysicalSize {
-          width: RENDER_EXTENT.width,
-          height: RENDER_EXTENT.height,
-        }),
+        &matrix,
         record_screenshot,
         cur_total_frame == 0,
         true,
@@ -316,6 +353,41 @@ impl SyncRenderer {
     }
 
     Ok(())
+  }
+
+  fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {
+    if keys.a ^ keys.d {
+      if keys.a == Pressed {
+        self.camera.move_left(&time_since_last_update)
+      } else {
+        self.camera.move_right(&time_since_last_update)
+      }
+    }
+    if keys.w ^ keys.s {
+      if keys.w == Pressed {
+        self.camera.move_forward(&time_since_last_update)
+      } else {
+        self.camera.move_backwards(&time_since_last_update)
+      }
+    }
+    if keys.space ^ keys.l_shift {
+      if keys.space == Pressed {
+        self.camera.move_up(&time_since_last_update)
+      } else {
+        self.camera.move_down(&time_since_last_update)
+      }
+    }
+    if keys.q ^ keys.e {
+      if keys.q == Pressed {
+        self
+          .camera
+          .rotate(-10.0 * time_since_last_update.as_millis() as f32, 0.0);
+      } else {
+        self
+          .camera
+          .rotate(10.0 * time_since_last_update.as_millis() as f32, 0.0)
+      }
+    }
   }
 
   pub fn screenshot(&mut self) {

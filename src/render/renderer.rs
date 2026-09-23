@@ -1,6 +1,7 @@
 use std::mem::MaybeUninit;
 
 use ash::vk;
+use cgmath::Matrix4;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use vkallocator::HostMemorySyncError;
 use vkinitialization::{
@@ -17,6 +18,7 @@ use crate::{
   ferris::Ferris,
   last_frames_durations::FPSDurations,
   render::{
+    camera::RenderCamera,
     command_pools::graphics::GraphicsCommandBufferPool,
     gpu_data::{sprite_buffers::SpriteTextureData, GPUDataAllocationError},
     pipelines::TextPipeline,
@@ -31,7 +33,6 @@ use super::{
   gpu_data::GPUData,
   initialization::{self},
   pipelines::{self, GraphicsPipeline},
-  render_object::RenderPosition,
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
@@ -330,11 +331,12 @@ impl Renderer {
     frame_i: usize,
     fps: FPSDurations,
     gpu_bound: bool,
+    camera: &RenderCamera,
   ) -> Result<(), HostMemorySyncError> {
     self
       .data
       .text
-      .write_host_device_text_data(&self.device, frame_i, fps, gpu_bound)
+      .write_host_device_text_data(&self.device, frame_i, fps, gpu_bound, camera)
   }
 
   pub unsafe fn full_record_upload_initial_staging(
@@ -368,7 +370,7 @@ impl Renderer {
     &self,
     frame_i: usize,
     image_i: usize,
-    position: &RenderPosition,
+    ferris_matrix: &Matrix4<f32>,
     save_to_screenshot_buffer: bool,
     update_text_ui: bool,
     draw_text: bool,
@@ -394,7 +396,7 @@ impl Renderer {
       &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
-      position,
+      ferris_matrix,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)
       } else {

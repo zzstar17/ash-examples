@@ -1,3 +1,4 @@
+mod camera;
 mod command_pools;
 mod create_objs;
 mod descriptor_sets;
@@ -5,6 +6,7 @@ mod errors;
 mod format_conversions;
 mod gpu_data;
 mod initialization;
+mod obj_3d;
 mod pipelines;
 mod render_object;
 mod render_targets;
@@ -16,11 +18,11 @@ mod sync_renderer;
 mod vertices;
 
 use ash::vk;
+use cgmath::Vector2;
 use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
 pub use initialization::{RenderInit, RenderInitError};
-pub use render_object::RenderPosition;
 pub use swapchain::AcquireNextImageError;
 pub use sync_renderer::SyncRenderer;
 
@@ -36,6 +38,9 @@ const RENDER_EXTENT: vk::Extent2D = vk::Extent2D {
   width: RESOLUTION[0],
   height: RESOLUTION[1],
 };
+
+const RENDER_SIZE: Vector2<f32> =
+  Vector2::new(RENDER_EXTENT.width as f32, RENDER_EXTENT.height as f32);
 
 // minimum memory size of an image that can be rendered to with the specified resolution
 const IMAGE_WITH_RESOLUTION_MINIMAL_SIZE: u64 =

@@ -7,11 +7,11 @@ use std::{
 };
 
 use ash::vk::{self, Handle};
+use cgmath::Matrix4;
 
 use crate::{
   render::{
     descriptor_sets::DescriptorPool,
-    render_object::RenderPosition,
     shaders::{self, Shader},
     vertices::Vertex,
   },
@@ -20,6 +20,10 @@ use crate::{
 use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
 
 use super::PipelineCreationError;
+
+pub struct GraphicsPushConstants {
+  pub matrix: Matrix4<f32>,
+}
 
 pub struct GraphicsPipeline {
   pub layout: vk::PipelineLayout,
@@ -113,7 +117,7 @@ impl GraphicsPipeline {
     let push_constant_range = vk::PushConstantRange {
       stage_flags: vk::ShaderStageFlags::VERTEX,
       offset: 0,
-      size: size_of::<RenderPosition>() as u32,
+      size: size_of::<GraphicsPushConstants>() as u32,
     };
     let layout_create_info = vk::PipelineLayoutCreateInfo {
       s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
@@ -264,8 +268,8 @@ const fn no_depth_rasterization_state<'a>() -> vk::PipelineRasterizationStateCre
     p_next: ptr::null(),
     flags: vk::PipelineRasterizationStateCreateFlags::empty(),
     depth_clamp_enable: vk::FALSE,
-    cull_mode: vk::CullModeFlags::NONE,
-    front_face: vk::FrontFace::CLOCKWISE, // doesn't matter if cull_mode is none
+    cull_mode: vk::CullModeFlags::FRONT,
+    front_face: vk::FrontFace::COUNTER_CLOCKWISE,
     line_width: 1.0,
     polygon_mode: vk::PolygonMode::FILL,
     rasterizer_discard_enable: vk::FALSE,

@@ -12,6 +12,7 @@ use crate::{
   font,
   last_frames_durations::FPSDurations,
   render::{
+    camera::RenderCamera,
     command_pools::{self, graphics::GraphicsCommandBufferPool},
     gpu_data::{
       text_buffers::{TextBufferDimensions, TextBuffers},
@@ -34,13 +35,15 @@ pub struct TextManager {
 
   fps_offset: vk::Offset2D,
   gpu_idle_offset: vk::Offset2D,
+  camera_pos_offset: vk::Offset2D,
+  camera_front_offset: vk::Offset2D,
 }
 
 impl TextManager {
   const FONT_SIZE: usize = 30;
 
   // capacity in glyphs
-  const HOST_BUFFER_VERTICES_GLYPH_CAPACITY: usize = 80;
+  const HOST_BUFFER_VERTICES_GLYPH_CAPACITY: usize = 180;
   const HOST_BUFFER_INDICES_GLYPH_CAPACITY: usize = Self::HOST_BUFFER_VERTICES_GLYPH_CAPACITY;
 
   pub fn new(
@@ -66,11 +69,6 @@ impl TextManager {
       &mut device_vertices,
       &mut device_indices,
     );
-    // simulate fps numbers
-    let TextBuildResult {
-      rect: rect_fps_values,
-      ..
-    } = slug.simulate_build_text("1000.0, 1000.0, 1000.0", Self::FONT_SIZE, fps_offset);
     let TextBuildResult {
       rect: rect_gpu_idle,
       end_offset: gpu_idle_offset,
@@ -85,7 +83,47 @@ impl TextManager {
       &mut device_vertices,
       &mut device_indices,
     );
-    let mut full_size = rect_fps.or(rect_gpu_idle).or(rect_fps_values);
+    let TextBuildResult {
+      rect: rect_camera_pos,
+      end_offset: camera_pos_offset,
+      ..
+    } = slug.build_text(
+      "Camera pos: ",
+      Self::FONT_SIZE,
+      vk::Offset2D {
+        x: 0,
+        y: -line_dist * 2,
+      },
+      &mut device_vertices,
+      &mut device_indices,
+    );
+    let TextBuildResult {
+      rect: rect_camera_front,
+      end_offset: camera_front_offset,
+      ..
+    } = slug.build_text(
+      "Camera front vector: ",
+      Self::FONT_SIZE,
+      vk::Offset2D {
+        x: 0,
+        y: -line_dist * 3,
+      },
+      &mut device_vertices,
+      &mut device_indices,
+    );
+    // simulate longest line
+    let TextBuildResult {
+      rect: rect_longest, ..
+    } = slug.simulate_build_text(
+      "-1000.0, -1000.0, -1000.0",
+      Self::FONT_SIZE,
+      camera_front_offset,
+    );
+    let mut full_size = rect_fps
+      .or(rect_gpu_idle)
+      .or(rect_longest)
+      .or(rect_camera_pos)
+      .or(rect_camera_front);
 
     // todo: fix full slug size calculations
     full_size.max[0] += 10.0;
@@ -136,6 +174,8 @@ impl TextManager {
 
         fps_offset,
         gpu_idle_offset,
+        camera_pos_offset,
+        camera_front_offset,
       },
       (line_size, full_size),
       device_staging_required,
@@ -338,6 +378,7 @@ impl TextManager {
     frame_i: usize,
     fps: FPSDurations,
     gpu_bound: bool,
+    camera: &RenderCamera,
   ) -> Result<(), HostMemorySyncError> {
     self.host_vertices.clear();
     self.host_indices.clear();
@@ -354,6 +395,30 @@ impl TextManager {
       if gpu_bound { "yes" } else { "no" },
       Self::FONT_SIZE,
       self.gpu_idle_offset,
+      &mut self.host_vertices,
+      &mut self.host_indices,
+    );
+    let camera_pos = camera.position();
+    let camera_pos_text = &format!(
+      "({:.3}, {:.3}, {:.3})",
+      camera_pos.x, camera_pos.y, camera_pos.z
+    );
+    self.slug.build_text(
+      &camera_pos_text,
+      Self::FONT_SIZE,
+      self.camera_pos_offset,
+      &mut self.host_vertices,
+      &mut self.host_indices,
+    );
+    let camera_front = camera.front();
+    let camera_front_text = &format!(
+      "({:.3}, {:.3}, {:.3})",
+      camera_front.x, camera_front.y, camera_front.z
+    );
+    self.slug.build_text(
+      &camera_front_text,
+      Self::FONT_SIZE,
+      self.camera_front_offset,
       &mut self.host_vertices,
       &mut self.host_indices,
     );

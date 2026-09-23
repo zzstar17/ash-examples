@@ -3,7 +3,7 @@ mod graphics;
 mod text;
 
 pub use cache::{create_pipeline_cache, save_pipeline_cache, PipelineCacheError};
-pub use graphics::GraphicsPipeline;
+pub use graphics::{GraphicsPipeline, GraphicsPushConstants};
 pub use text::TextPipeline;
 use vkobjects::errors::OutOfMemoryError;
 

@@ -2,9 +2,8 @@ use std::time::Duration;
 
 use winit::dpi::PhysicalSize;
 
-use crate::render::RenderPosition;
-
 pub struct Ferris {
+  // 0 to render_size
   pub pos: [f32; 2],
   // speed in pixels per second
   pub vel: [f32; 2],
@@ -126,22 +125,5 @@ impl Ferris {
     }
 
     (new_pos, direction_changed)
-  }
-
-  pub fn get_render_position(&self, render_size: PhysicalSize<u32>) -> RenderPosition {
-    let render_dimensions_f = PhysicalSize {
-      width: render_size.width as f32,
-      height: render_size.height as f32,
-    };
-
-    let normal_pos = [
-      self.pos[0] / render_dimensions_f.width,
-      self.pos[1] / render_dimensions_f.height,
-    ];
-    let ratio = [
-      Ferris::WIDTH as f32 / render_dimensions_f.width,
-      Ferris::HEIGHT as f32 / render_dimensions_f.height,
-    ];
-    RenderPosition::new(normal_pos, ratio)
   }
 }

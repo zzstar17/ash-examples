@@ -2,6 +2,7 @@ use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk;
 use ash_slug::SlugPushConstants;
+use cgmath::{Matrix4, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
@@ -12,10 +13,10 @@ use crate::{
     },
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
-    pipelines::{GraphicsPipeline, TextPipeline},
-    render_object::{RenderPosition, QUAD_INDICES},
+    pipelines::{GraphicsPipeline, GraphicsPushConstants, TextPipeline},
+    render_object::QUAD_INDICES,
     render_targets::RenderTargets,
-    RENDER_EXTENT,
+    RENDER_EXTENT, RENDER_SIZE,
   },
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
 };
@@ -197,11 +198,8 @@ impl GraphicsCommandBufferPool {
     };
     device.cmd_begin_rendering(cb, &rendering_info);
 
-    let text_pc = SlugPushConstants::new_2d(
-      RENDER_EXTENT.width as f32,
-      RENDER_EXTENT.height as f32,
-      [0.0, data.text_ui_line_size],
-    );
+    let text_pc =
+      SlugPushConstants::new_2d(RENDER_SIZE.x, RENDER_SIZE.y, [0.0, data.text_ui_line_size]);
 
     device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
     device.cmd_bind_descriptor_sets(
@@ -258,7 +256,7 @@ impl GraphicsCommandBufferPool {
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
-    position: &RenderPosition, // Ferris's position
+    ferris_matrix: &Matrix4<f32>, // Ferris's position
 
     screenshot_buffer: Option<vk::Buffer>,
     draw_text: bool,
@@ -279,6 +277,10 @@ impl GraphicsCommandBufferPool {
       mip_level: 0,
       base_array_layer: 0,
       layer_count: 1,
+    };
+
+    let graphics_push_constants = GraphicsPushConstants {
+      matrix: *ferris_matrix,
     };
 
     // wait previous copy on render target
@@ -340,7 +342,7 @@ impl GraphicsCommandBufferPool {
         pipeline.layout,
         vk::ShaderStageFlags::VERTEX,
         0,
-        utility::any_as_u8_slice(position),
+        utility::any_as_u8_slice(&graphics_push_constants),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
       device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.quad_vertices], &[0]);
@@ -352,19 +354,27 @@ impl GraphicsCommandBufferPool {
       );
       device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
 
-      // draw text ui
+      // draw text ui 2d sprite on screen
       if draw_text {
         {
-          let position = RenderPosition::new(
-            [
-              ((data.text_ui_size.width as f32 / 2.0) + 10.0) / RENDER_EXTENT.width as f32,
-              ((data.text_ui_size.height as f32 / 2.0) + 10.0) / RENDER_EXTENT.height as f32,
-            ],
-            [
-              data.text_ui_size.width as f32 / RENDER_EXTENT.width as f32,
-              data.text_ui_size.height as f32 / RENDER_EXTENT.height as f32,
-            ],
-          );
+          let ratio_x = data.text_ui_size.width as f32 / RENDER_SIZE.x;
+          let ratio_y = data.text_ui_size.height as f32 / RENDER_SIZE.y;
+          let offset_pixels_x = 10.0;
+          let offset_pixels_y = 10.0;
+          // top left + pixels
+          let offset_x = -1.0 + ratio_x + (offset_pixels_x * 2.0 / RENDER_SIZE.x);
+          let offset_y = -1.0 + ratio_y + (offset_pixels_y * 2.0 / RENDER_SIZE.y);
+
+          // column major orthogonal projection with translation
+          // (image on screen)
+          let matrix = Matrix4 {
+            x: Vector4::new(ratio_x, 0.0, 0.0, 0.0),
+            y: Vector4::new(0.0, ratio_y, 0.0, 0.0),
+            z: Vector4::new(0.0, 0.0, 0.0, 0.0),
+            w: Vector4::new(offset_x, offset_y, 0.0, 1.0),
+          };
+          let pc = GraphicsPushConstants { matrix };
+
           device.cmd_bind_descriptor_sets(
             cb,
             vk::PipelineBindPoint::GRAPHICS,
@@ -378,15 +388,15 @@ impl GraphicsCommandBufferPool {
             pipeline.layout,
             vk::ShaderStageFlags::VERTEX,
             0,
-            utility::any_as_u8_slice(&position),
+            utility::any_as_u8_slice(&pc),
           );
           device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
         }
 
         {
           let text_pc = SlugPushConstants::new_2d(
-            RENDER_EXTENT.width as f32,
-            RENDER_EXTENT.height as f32,
+            RENDER_SIZE.x,
+            RENDER_SIZE.y,
             [10.0, data.text_ui_line_size + 10.0],
           );
 

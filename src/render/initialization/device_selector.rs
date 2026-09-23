@@ -10,8 +10,8 @@ use vkinitialization::{
 };
 
 use crate::render::{
-  format_conversions::KNOWN_FORMATS, gpu_data::text_buffers::TextBuffers, RenderPosition,
-  TARGET_API_VERSION,
+  format_conversions::KNOWN_FORMATS, gpu_data::text_buffers::TextBuffers,
+  pipelines::GraphicsPushConstants, TARGET_API_VERSION,
 };
 
 fn supports_swapchain(device: vk::PhysicalDevice, surface: &Surface) -> Result<bool, SurfaceError> {
@@ -78,7 +78,7 @@ fn check_physical_device_capabilities(
   }
 
   if (selection.properties.p10.limits.max_push_constants_size as usize)
-    < size_of::<RenderPosition>()
+    < size_of::<GraphicsPushConstants>()
   {
     log::warn!("Skipped physical device: Device does not support required push constant size");
     return Ok(false);
