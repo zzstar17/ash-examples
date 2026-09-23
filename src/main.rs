@@ -1,11 +1,10 @@
-mod ferris;
 mod font;
 mod keys;
 mod last_frames_durations;
 mod render;
+mod scene;
 
 use ash::vk;
-use ferris::Ferris;
 use render::{
   AcquireNextImageError, FrameRenderError, InitializationError, RenderInit, RenderInitError,
   SyncRenderer,
@@ -18,12 +17,12 @@ use winit::{
   application::ApplicationHandler,
   dpi::{PhysicalPosition, PhysicalSize},
   error::EventLoopError,
-  event::{DeviceEvent, ElementState, MouseButton, WindowEvent},
+  event::{DeviceEvent, WindowEvent},
   event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::{keys::Keys, last_frames_durations::LastFramesDurations};
+use crate::{keys::Keys, last_frames_durations::LastFramesDurations, scene::Scene};
 
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
@@ -136,14 +135,6 @@ impl RenderAreaDimensions {
     }
   }
 
-  pub fn get_apparent_coordinates(&self, window_coordinates: [f32; 2]) -> [f32; 2] {
-    let offsetted_x = window_coordinates[0] - self.render_area_window_offset[0] as f32;
-    let offsetted_y = window_coordinates[1] - self.render_area_window_offset[1] as f32;
-    let apparent_x = offsetted_x / self.apparent_ratio;
-    let apparent_y = offsetted_y / self.apparent_ratio;
-    [apparent_x, apparent_y]
-  }
-
   fn calculate_render_ratio(
     render_width: f32,
     render_height: f32,
@@ -177,7 +168,7 @@ struct App {
   mouse_position: PhysicalPosition<f64>,
   mouse_in_window: bool,
   keys: Keys,
-  ferris: Ferris,
+  scene: Scene,
   ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
   last_frames_durations: LastFramesDurations<60>,
@@ -234,14 +225,10 @@ impl RenderStatus {
     Ok(RenderStatus::Initialized(render))
   }
 
-  pub fn start(
-    self,
-    event_loop: &ActiveEventLoop,
-    ferris_initial_pos: [f32; 2],
-  ) -> Result<Self, InitializationError> {
+  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<Self, InitializationError> {
     match self {
       RenderStatus::Initialized(init) => {
-        let renderer = init.start(event_loop, ferris_initial_pos)?;
+        let renderer = init.start(event_loop)?;
 
         let window_dimensions = renderer.window().inner_size();
         Ok(Self::Started(StartedStatus {
@@ -281,17 +268,17 @@ impl App {
       },
     };
 
-    let ferris = Ferris::new([0.2, 0.0], [80.0, 80.0]);
-
     let last_update = Instant::now();
     let time_since_last_fps_print = Duration::ZERO;
 
     let frame_i: usize = 0;
 
+    let scene = Scene::new();
+
     Self {
       status,
       window_resize_handler,
-      ferris,
+      scene,
       last_update,
       time_since_last_fps_print,
       frame_i,
@@ -308,13 +295,11 @@ impl ApplicationHandler for App {
   fn resumed(&mut self, event_loop: &ActiveEventLoop) {
     if !self.status.started() {
       log::debug!("Starting application");
-      take_mut::take(&mut self.status, |status| {
-        match status.start(event_loop, self.ferris.pos) {
-          Ok(v) => v,
-          Err(err) => {
-            log::error!("Failed to start rendering\n{}", err);
-            std::process::exit(1);
-          }
+      take_mut::take(&mut self.status, |status| match status.start(event_loop) {
+        Ok(v) => v,
+        Err(err) => {
+          log::error!("Failed to start rendering\n{}", err);
+          std::process::exit(1);
         }
       });
     } else {
@@ -383,25 +368,11 @@ impl ApplicationHandler for App {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
           }
-          self.ferris.update(
-            time_passed,
-            PhysicalSize {
-              width: RESOLUTION[0],
-              height: RESOLUTION[1],
-            },
-            self.ferris_drag_mouse_pos.map(|mouse_coors| {
-              let mouse_coors = [mouse_coors[0] as f32, mouse_coors[1] as f32];
-              status
-                .render_dimensions
-                .get_apparent_coordinates(mouse_coors)
-            }),
-          );
+          self.scene.update(time_passed, &self.keys);
 
           if let Err(err) = status.renderer.render_next_frame(
             self.frame_i,
-            time_passed,
-            &self.ferris,
-            &self.keys,
+            &self.scene,
             self.last_frames_durations.get_min_max_average_fps(),
           ) {
             match err {
@@ -476,28 +447,6 @@ impl ApplicationHandler for App {
       WindowEvent::CursorLeft { .. } => {
         self.mouse_in_window = false;
       }
-      WindowEvent::MouseInput {
-        state,
-        button: MouseButton::Left,
-        ..
-      } => match state {
-        ElementState::Pressed => {
-          let real_mouse_coors = self
-            .status
-            .unwrap_started()
-            .render_dimensions
-            .get_apparent_coordinates([self.mouse_position.x as f32, self.mouse_position.y as f32]);
-          let dist_x = real_mouse_coors[0] - self.ferris.pos[0];
-          let dist_y = real_mouse_coors[1] - self.ferris.pos[1];
-          let squares = dist_x * dist_x + dist_y * dist_y;
-          if squares < 600.0 * 600.0 {
-            self.ferris_drag_mouse_pos = Some([self.mouse_position.x, self.mouse_position.y]);
-          }
-        }
-        ElementState::Released => {
-          self.ferris_drag_mouse_pos = None;
-        }
-      },
       WindowEvent::KeyboardInput { event, .. } => {
         let pressed = event.state.is_pressed();
         let repeating = event.repeat;

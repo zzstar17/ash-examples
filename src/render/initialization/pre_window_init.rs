@@ -65,15 +65,11 @@ impl RenderInit {
     })
   }
 
-  pub fn start(
-    self,
-    event_loop: &ActiveEventLoop,
-    ferris_initial_pos: [f32; 2],
-  ) -> Result<SyncRenderer, InitializationError> {
+  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<SyncRenderer, InitializationError> {
     let mut sprite_data = SpriteTextureData::read_texture_bytes_as_rgba8()?;
 
     let renderer = Renderer::initialize(self, event_loop, &mut sprite_data)?;
-    SyncRenderer::new(renderer, &sprite_data, ferris_initial_pos)
+    SyncRenderer::new(renderer, &sprite_data)
   }
 
   // take values out without calling drop

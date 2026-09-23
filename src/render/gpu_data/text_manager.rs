@@ -12,13 +12,13 @@ use crate::{
   font,
   last_frames_durations::FPSDurations,
   render::{
-    camera::RenderCamera,
     command_pools::{self, graphics::GraphicsCommandBufferPool},
     gpu_data::{
       text_buffers::{TextBufferDimensions, TextBuffers},
       GPUDataAllocationError,
     },
   },
+  scene::Scene,
 };
 
 pub struct TextManager {
@@ -378,7 +378,7 @@ impl TextManager {
     frame_i: usize,
     fps: FPSDurations,
     gpu_bound: bool,
-    camera: &RenderCamera,
+    scene: &Scene,
   ) -> Result<(), HostMemorySyncError> {
     self.host_vertices.clear();
     self.host_indices.clear();
@@ -398,7 +398,7 @@ impl TextManager {
       &mut self.host_vertices,
       &mut self.host_indices,
     );
-    let camera_pos = camera.position();
+    let camera_pos = scene.camera.position();
     let camera_pos_text = &format!(
       "({:.3}, {:.3}, {:.3})",
       camera_pos.x, camera_pos.y, camera_pos.z
@@ -410,7 +410,7 @@ impl TextManager {
       &mut self.host_vertices,
       &mut self.host_indices,
     );
-    let camera_front = camera.front();
+    let camera_front = scene.camera.front();
     let camera_front_text = &format!(
       "({:.3}, {:.3}, {:.3})",
       camera_front.x, camera_front.y, camera_front.z

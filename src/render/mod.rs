@@ -1,4 +1,3 @@
-mod camera;
 mod command_pools;
 mod create_objs;
 mod descriptor_sets;
@@ -6,9 +5,7 @@ mod errors;
 mod format_conversions;
 mod gpu_data;
 mod initialization;
-mod obj_3d;
 mod pipelines;
-mod render_object;
 mod render_targets;
 mod renderer;
 mod screenshot_buffer;

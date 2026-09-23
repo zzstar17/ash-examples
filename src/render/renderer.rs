@@ -15,14 +15,13 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  ferris::Ferris,
   last_frames_durations::FPSDurations,
   render::{
-    camera::RenderCamera,
     command_pools::graphics::GraphicsCommandBufferPool,
     gpu_data::{sprite_buffers::SpriteTextureData, GPUDataAllocationError},
     pipelines::TextPipeline,
   },
+  scene::Scene,
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -110,8 +109,8 @@ impl Renderer {
         height: INITIAL_WINDOW_HEIGHT,
       })
       .with_min_inner_size(PhysicalSize {
-        width: Ferris::WIDTH,
-        height: Ferris::HEIGHT,
+        width: 40,
+        height: 40,
       });
     // .with_resizable(false)
     let window = event_loop.create_window(window_attributes)?;
@@ -331,12 +330,12 @@ impl Renderer {
     frame_i: usize,
     fps: FPSDurations,
     gpu_bound: bool,
-    camera: &RenderCamera,
+    scene: &Scene,
   ) -> Result<(), HostMemorySyncError> {
     self
       .data
       .text
-      .write_host_device_text_data(&self.device, frame_i, fps, gpu_bound, camera)
+      .write_host_device_text_data(&self.device, frame_i, fps, gpu_bound, scene)
   }
 
   pub unsafe fn full_record_upload_initial_staging(

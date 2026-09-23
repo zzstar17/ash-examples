@@ -8,7 +8,7 @@ use crate::{
   render::{
     create_objs::{create_buffer, create_image},
     gpu_data::{GPUDataAllocationError, TEXTURE_USAGES},
-    render_object::{QUAD_INDICES_SIZE, VERTICES_SIZE},
+    vertices::{QUAD_INDICES_SIZE, QUAD_VERTICES_SIZE},
   },
   TEXTURE_PATH,
 };
@@ -67,7 +67,7 @@ impl SpriteBuffers {
 
     let quad_vertices: vk::Buffer = create_buffer(
       device,
-      VERTICES_SIZE,
+      QUAD_VERTICES_SIZE,
       vk::BufferUsageFlags::VERTEX_BUFFER.bitor(vk::BufferUsageFlags::TRANSFER_DST),
       #[cfg(feature = "vl")]
       marker,

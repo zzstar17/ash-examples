@@ -13,10 +13,9 @@ use crate::render::{
     text_buffers::TextBuffers,
     text_manager::TextManager,
   },
-  render_object::{QUAD_INDICES, QUAD_INDICES_SIZE, VERTICES, VERTICES_SIZE},
+  vertices::{QUAD_INDICES, QUAD_INDICES_SIZE, QUAD_VERTICES, QUAD_VERTICES_SIZE},
 };
 use ash::vk;
-use ash_slug::PointRect;
 use vkinitialization::device::{Device, PhysicalDevice};
 use vkobjects::{
   const_flag_bitor, destroy,
@@ -152,8 +151,9 @@ impl GPUData {
       c"Text UI",
     )?;
 
-    let staging_size = (sprite_texture_data.bytes.len() as u64 + VERTICES_SIZE + QUAD_INDICES_SIZE)
-      .max(staging_size_required);
+    let staging_size =
+      (sprite_texture_data.bytes.len() as u64 + QUAD_VERTICES_SIZE + QUAD_INDICES_SIZE)
+        .max(staging_size_required);
 
     let staging_alloc =
       allocations::allocate_staging_memory(device, physical_device, staging_size, marker)?;
@@ -204,7 +204,7 @@ impl GPUData {
     let sprite_texture_data_size = sprite_texture_bytes.len() as u64;
 
     let vertices_offset = 0;
-    let indices_offset = VERTICES_SIZE;
+    let indices_offset = QUAD_VERTICES_SIZE;
     let sprite_texture_offset = QUAD_INDICES_SIZE + indices_offset;
     let initial_copy_size = sprite_texture_offset + sprite_texture_data_size;
 
@@ -219,9 +219,9 @@ impl GPUData {
     };
     unsafe {
       ptr::copy_nonoverlapping(
-        VERTICES.as_ptr() as *const u8,
+        QUAD_VERTICES.as_ptr() as *const u8,
         staging_ptr.add(vertices_offset as usize).as_ptr(),
-        VERTICES_SIZE as usize,
+        QUAD_VERTICES_SIZE as usize,
       );
       ptr::copy_nonoverlapping(
         QUAD_INDICES.as_ptr() as *const u8,
@@ -245,7 +245,7 @@ impl GPUData {
         let region = vk::BufferCopy {
           src_offset: vertices_offset,
           dst_offset: 0,
-          size: VERTICES_SIZE,
+          size: QUAD_VERTICES_SIZE,
         };
         device.cmd_copy_buffer(
           cb,
