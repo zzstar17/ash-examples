@@ -6,7 +6,7 @@ pub mod text_manager;
 use std::{ops::BitOr, ptr};
 
 use crate::{
-  asset_loader::{LoadedModels, SpriteTextureData},
+  asset_loader::{texture_loader::TextureData, LoadedModels},
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
     create_objs::{create_image, create_image_view},
@@ -117,7 +117,7 @@ impl GPUData {
     physical_device: &PhysicalDevice,
     render_format: vk::Format,
     loaded_models: &LoadedModels,
-    sprite_texture_data: &SpriteTextureData,
+    sprite_texture_data: &TextureData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let sprite_buffers = SpriteBuffers::new(

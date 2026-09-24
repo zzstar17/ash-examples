@@ -17,6 +17,7 @@ use crate::{
     render_targets::RenderTargets,
     RENDER_EXTENT, RENDER_SIZE,
   },
+  scene::DrawMatrices,
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
 };
 
@@ -255,7 +256,7 @@ impl GraphicsCommandBufferPool {
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
-    ferris_matrix: &Matrix4<f32>, // Ferris's position
+    matrices: &DrawMatrices,
 
     screenshot_buffer: Option<vk::Buffer>,
     draw_text: bool,
@@ -276,10 +277,6 @@ impl GraphicsCommandBufferPool {
       mip_level: 0,
       base_array_layer: 0,
       layer_count: 1,
-    };
-
-    let graphics_push_constants = GraphicsPushConstants {
-      matrix: *ferris_matrix,
     };
 
     // wait previous copy on render target
@@ -336,6 +333,12 @@ impl GraphicsCommandBufferPool {
         &[descriptor_pool.sprites_set],
         &[],
       );
+
+      let graphics_push_constants = GraphicsPushConstants {
+        matrix: matrices.ferris,
+        tex_offset: data.sprite_buffers.texture_offsets.ferris.offset,
+        tex_size: data.sprite_buffers.texture_offsets.ferris.size,
+      };
       device.cmd_push_constants(
         cb,
         pipeline.layout,
@@ -343,6 +346,7 @@ impl GraphicsCommandBufferPool {
         0,
         utility::any_as_u8_slice(&graphics_push_constants),
       );
+
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
       device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
       device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
@@ -352,6 +356,50 @@ impl GraphicsCommandBufferPool {
         1,
         0,
         0,
+        0,
+      );
+
+      // niko
+      let graphics_push_constants = GraphicsPushConstants {
+        matrix: matrices.niko,
+        tex_offset: data.sprite_buffers.texture_offsets.niko.offset,
+        tex_size: data.sprite_buffers.texture_offsets.niko.size,
+      };
+      device.cmd_push_constants(
+        cb,
+        pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(&graphics_push_constants),
+      );
+      device.cmd_draw_indexed(
+        cb,
+        data.sprite_buffers.models.niko.indices_len as u32,
+        1,
+        data.sprite_buffers.models.niko.indices_offset as u32,
+        data.sprite_buffers.models.niko.vertices_offset as i32,
+        0,
+      );
+
+      // kakyoin
+      let graphics_push_constants = GraphicsPushConstants {
+        matrix: matrices.kakyoin,
+        tex_offset: data.sprite_buffers.texture_offsets.kakyoin.offset,
+        tex_size: data.sprite_buffers.texture_offsets.kakyoin.size,
+      };
+      device.cmd_push_constants(
+        cb,
+        pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(&graphics_push_constants),
+      );
+      device.cmd_draw_indexed(
+        cb,
+        data.sprite_buffers.models.kakyoin.indices_len as u32,
+        1,
+        data.sprite_buffers.models.kakyoin.indices_offset as u32,
+        data.sprite_buffers.models.kakyoin.vertices_offset as i32,
         0,
       );
 
@@ -374,7 +422,15 @@ impl GraphicsCommandBufferPool {
             z: Vector4::new(0.0, 0.0, 0.0, 0.0),
             w: Vector4::new(offset_x, offset_y, 0.0, 1.0),
           };
-          let pc = GraphicsPushConstants { matrix };
+
+          let pc = GraphicsPushConstants {
+            matrix,
+            tex_offset: [0.0, 0.0],
+            tex_size: [
+              data.text_ui_size.width as f32,
+              data.text_ui_size.height as f32,
+            ],
+          };
 
           device.cmd_bind_descriptor_sets(
             cb,

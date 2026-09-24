@@ -3,16 +3,11 @@ use std::ops::BitXor;
 use winit::{event::ElementState, keyboard::KeyCode};
 
 /// State of each key
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Default)]
 pub enum KeyState {
   Pressed,
+  #[default]
   Released,
-}
-
-impl Default for KeyState {
-  fn default() -> Self {
-    KeyState::Released
-  }
 }
 
 impl BitXor for KeyState {
@@ -32,11 +27,11 @@ impl From<ElementState> for KeyState {
   }
 }
 
-impl Into<bool> for KeyState {
-  fn into(self) -> bool {
-    match self {
-      Self::Pressed => true,
-      Self::Released => false,
+impl From<KeyState> for bool {
+  fn from(val: KeyState) -> Self {
+    match val {
+      KeyState::Pressed => true,
+      KeyState::Released => false,
     }
   }
 }

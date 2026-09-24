@@ -1,3 +1,4 @@
+mod asset_constants;
 mod asset_loader;
 mod font;
 mod keys;
@@ -25,6 +26,8 @@ use winit::{
 
 use crate::{keys::Keys, last_frames_durations::LastFramesDurations, scene::Scene};
 
+pub use asset_constants::*;
+
 const APPLICATION_NAME: &CStr = c"Bouncy Ferris";
 const APPLICATION_VERSION: u32 = vk::make_api_version(0, 1, 0, 0);
 
@@ -33,9 +36,6 @@ const INITIAL_WINDOW_WIDTH: u32 = 800;
 const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
 const RESOLUTION: [u32; 2] = [1920, 1080];
-
-const NIKO_MODEL_PATH: &str = "./assets/niko.obj";
-const TEXTURE_PATH: &str = "./ferris.png";
 
 // get first that exists
 const TEXT_FONT: [&str; 7] = [

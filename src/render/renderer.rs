@@ -1,7 +1,4 @@
-use std::mem::MaybeUninit;
-
 use ash::vk;
-use cgmath::Matrix4;
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use vkallocator::HostMemorySyncError;
 use vkinitialization::{
@@ -15,13 +12,13 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{LoadedModels, ShaderLoader, SpriteTextureData},
+  asset_loader::{texture_loader::TextureData, LoadedModels, ShaderLoader},
   last_frames_durations::FPSDurations,
   render::{
     command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
     pipelines::TextPipeline,
   },
-  scene::Scene,
+  scene::{DrawMatrices, Scene},
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -71,7 +68,7 @@ impl Renderer {
     pre_window: RenderInit,
     event_loop: &ActiveEventLoop,
     loaded_models: &LoadedModels,
-    sprite_data: &mut SpriteTextureData,
+    sprite_data: &mut TextureData,
   ) -> Result<Self, InitializationError> {
     // having an error during window creation triggers pre_window drop
     let window_attributes = Window::default_attributes()
@@ -183,7 +180,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&swapchains);
 
     let swapchain_format = swapchains.get_format();
@@ -207,7 +204,7 @@ impl Renderer {
       sprite_data,
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&gpu_data);
 
     // use same format for surface and the render target
@@ -223,7 +220,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })
+    .on_err(|_| destroy_objs(&destructor))
     .map_err(GPUDataAllocationError::from)?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
@@ -231,7 +228,7 @@ impl Renderer {
     log::info!("Creating pipeline cache");
     let (pipeline_cache, created_from_file) =
       pipelines::create_pipeline_cache(&device, &physical_device)
-        .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+        .on_err(|_| destroy_objs(&destructor))?;
     if created_from_file {
       log::info!("Cache successfully created from an existing cache file");
     } else {
@@ -240,7 +237,7 @@ impl Renderer {
     destructor.push(&pipeline_cache);
 
     let descriptor_pool =
-      DescriptorPool::new(&device, &gpu_data).on_err(|_| unsafe { destroy_objs(&destructor) })?;
+      DescriptorPool::new(&device, &gpu_data).on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&descriptor_pool);
 
     let mut shader_loader = ShaderLoader::new();
@@ -253,7 +250,7 @@ impl Renderer {
       render_format,
       RENDER_EXTENT,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&graphics_pipeline);
     log::debug!("Creating text pipeline");
     let text_pipeline = TextPipeline::new(
@@ -264,7 +261,7 @@ impl Renderer {
       render_format,
       RENDER_EXTENT,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&text_pipeline);
 
     log::debug!("Creating command pools");
@@ -278,7 +275,7 @@ impl Renderer {
       ),
       FRAMES_IN_FLIGHT
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     for pool in graphics_pools.iter() {
       destructor.push(pool);
     }
@@ -289,7 +286,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&screenshot_buffer);
 
     Ok(Self {
@@ -364,7 +361,7 @@ impl Renderer {
     &self,
     frame_i: usize,
     image_i: usize,
-    ferris_matrix: &Matrix4<f32>,
+    matrices: &DrawMatrices,
     save_to_screenshot_buffer: bool,
     update_text_ui: bool,
     draw_text: bool,
@@ -390,7 +387,7 @@ impl Renderer {
       &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
-      ferris_matrix,
+      matrices,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)
       } else {

@@ -25,6 +25,8 @@ use super::PipelineCreationError;
 #[repr(C)]
 pub struct GraphicsPushConstants {
   pub matrix: Matrix4<f32>,
+  pub tex_offset: [f32; 2],
+  pub tex_size: [f32; 2],
 }
 
 pub struct GraphicsPipeline {
@@ -275,8 +277,8 @@ const fn no_depth_rasterization_state<'a>() -> vk::PipelineRasterizationStateCre
     p_next: ptr::null(),
     flags: vk::PipelineRasterizationStateCreateFlags::empty(),
     depth_clamp_enable: vk::FALSE,
-    cull_mode: vk::CullModeFlags::FRONT,
-    front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+    cull_mode: vk::CullModeFlags::BACK,
+    front_face: vk::FrontFace::CLOCKWISE,
     line_width: 1.0,
     polygon_mode: vk::PolygonMode::FILL,
     rasterizer_discard_enable: vk::FALSE,

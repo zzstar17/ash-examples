@@ -44,7 +44,7 @@ impl ShaderLoader {
       self.shader_buffer.len(),
       shader_path
     );
-    if self.shader_buffer.len() % 4 != 0 || self.shader_buffer.is_empty() {
+    if !self.shader_buffer.len().is_multiple_of(4) || self.shader_buffer.is_empty() {
       return Err(ShaderLoadError::Invalid);
     }
 

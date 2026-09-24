@@ -6,7 +6,7 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::window::Window;
 
 use crate::{
-  asset_loader::{LoadedModels, SpriteTextureData},
+  asset_loader::{texture_loader::TextureData, LoadedModels},
   last_frames_durations::FPSDurations,
   render::create_objs::create_fence,
   scene::Scene,
@@ -38,7 +38,7 @@ impl SyncRenderer {
   pub fn new(
     renderer: Renderer,
     loaded_models: &LoadedModels,
-    sprite_texture_data: &SpriteTextureData,
+    sprite_texture_data: &TextureData,
   ) -> Result<Self, InitializationError> {
     let device = &renderer.device;
     let fence0 = create_fence(
@@ -93,9 +93,9 @@ impl SyncRenderer {
     renderer: &Renderer,
     fence: vk::Fence,
     loaded_models: &LoadedModels,
-    sprite_texture_data: &SpriteTextureData,
+    sprite_texture_data: &TextureData,
   ) -> Result<(), HostMemorySyncError> {
-    renderer.full_record_upload_initial_staging(0, &loaded_models, &sprite_texture_data.bytes)?;
+    renderer.full_record_upload_initial_staging(0, loaded_models, &sprite_texture_data.bytes)?;
 
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];
@@ -124,7 +124,7 @@ impl SyncRenderer {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
 
-    let matrix = scene.get_mvp_matrices();
+    let matrices = scene.get_mvp_matrices();
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     let gpu_bound = unsafe {
@@ -251,7 +251,7 @@ impl SyncRenderer {
       self.renderer.record_graphics(
         cur_frame_i,
         cur_image_i as usize,
-        &matrix,
+        &matrices,
         record_screenshot,
         cur_total_frame == 0,
         true,

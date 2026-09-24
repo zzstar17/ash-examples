@@ -76,7 +76,7 @@ impl RenderCamera {
     }
   }
 
-  pub fn speed_mut<'a>(&'a mut self) -> &'a mut f32 {
+  pub fn speed_mut(&mut self) -> &mut f32 {
     &mut self.camera.speed
   }
 

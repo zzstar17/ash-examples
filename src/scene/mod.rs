@@ -21,6 +21,14 @@ pub struct Scene {
   pub camera: RenderCamera,
 
   pub ferris_obj: Render3dObj,
+  pub niko_obj: Render3dObj,
+  pub kakyoin_obj: Render3dObj,
+}
+
+pub struct DrawMatrices {
+  pub ferris: Matrix4<f32>,
+  pub niko: Matrix4<f32>,
+  pub kakyoin: Matrix4<f32>,
 }
 
 impl Scene {
@@ -45,11 +53,23 @@ impl Scene {
       rotation,
       Vector3::new(Ferris::WIDTH, Ferris::HEIGHT, 1.0),
     );
+    let niko_obj = Render3dObj::from_full(
+      Point3::new(8.0, 0.0, -4.0),
+      rotation,
+      Vector3::new(1.0, 1.0, 1.0),
+    );
+    let kakyoin_obj = Render3dObj::from_full(
+      Point3::new(-8.0, 0.0, -4.0),
+      rotation,
+      Vector3::new(1.0, 1.0, 1.0),
+    );
 
     Self {
       ferris,
       camera,
       ferris_obj,
+      niko_obj,
+      kakyoin_obj,
     }
   }
 
@@ -63,8 +83,13 @@ impl Scene {
       .move_to(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
   }
 
-  pub fn get_mvp_matrices(&self) -> Matrix4<f32> {
-    self.camera.projection_view() * self.ferris_obj.model()
+  pub fn get_mvp_matrices(&self) -> DrawMatrices {
+    let projection_view = self.camera.projection_view();
+    DrawMatrices {
+      ferris: projection_view * self.ferris_obj.model(),
+      niko: projection_view * self.niko_obj.model(),
+      kakyoin: projection_view * self.kakyoin_obj.model(),
+    }
   }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {

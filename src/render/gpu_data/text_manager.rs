@@ -404,7 +404,7 @@ impl TextManager {
       camera_pos.x, camera_pos.y, camera_pos.z
     );
     self.slug.build_text(
-      &camera_pos_text,
+      camera_pos_text,
       Self::FONT_SIZE,
       self.camera_pos_offset,
       &mut self.host_vertices,
@@ -416,7 +416,7 @@ impl TextManager {
       camera_front.x, camera_front.y, camera_front.z
     );
     self.slug.build_text(
-      &camera_front_text,
+      camera_front_text,
       Self::FONT_SIZE,
       self.camera_front_offset,
       &mut self.host_vertices,

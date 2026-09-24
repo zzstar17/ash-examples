@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader};
 
-use crate::{render::TexturedVertex, NIKO_MODEL_PATH};
+use crate::{render::TexturedVertex, KAKYOIN_MODEL_PATH, NIKO_MODEL_PATH};
 
 pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   // top left
@@ -36,10 +36,8 @@ pub const QUAD_VERTICES: [TexturedVertex; 4] = [
     _padding1: 0.0,
   },
 ];
-pub const QUAD_VERTICES_SIZE: u64 = (size_of::<TexturedVertex>() * QUAD_VERTICES.len()) as u64;
 
 pub const QUAD_INDICES: [u32; 6] = [0, 1, 2, 3, 2, 1];
-pub const QUAD_INDICES_SIZE: u64 = (size_of::<u16>() * QUAD_INDICES.len()) as u64;
 
 pub struct LoadedModels {
   pub vertices: Vec<TexturedVertex>,
@@ -52,7 +50,7 @@ pub struct LoadedModels {
 pub struct Models {
   pub quad: ModelOffset,
   pub niko: ModelOffset,
-  pub total_index_count: u32,
+  pub kakyoin: ModelOffset,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -64,11 +62,20 @@ pub struct ModelOffset {
 }
 
 impl LoadedModels {
-  pub fn load() -> Result<Self, obj::ObjError> {
-    let niko_f = File::open(NIKO_MODEL_PATH)?;
-    let mut buff_reader = BufReader::new(niko_f);
+  pub fn load() -> Result<Self, (obj::ObjError, &'static str)> {
+    let niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
+      let niko_f =
+        File::open(NIKO_MODEL_PATH).map_err(|err| (obj::ObjError::from(err), NIKO_MODEL_PATH))?;
+      let mut buff_reader = BufReader::new(niko_f);
+      obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_MODEL_PATH))?
+    };
 
-    let obj: obj::Obj<obj::TexturedVertex, u32> = obj::load_obj(&mut buff_reader)?;
+    let kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {
+      let niko_f = File::open(KAKYOIN_MODEL_PATH)
+        .map_err(|err| (obj::ObjError::from(err), KAKYOIN_MODEL_PATH))?;
+      let mut buff_reader = BufReader::new(niko_f);
+      obj::load_obj(&mut buff_reader).map_err(|err| (err, KAKYOIN_MODEL_PATH))?
+    };
 
     let quad_model = ModelOffset {
       vertices_offset: 0,
@@ -80,32 +87,47 @@ impl LoadedModels {
     let niko_model = ModelOffset {
       vertices_offset: quad_model.vertices_len,
       indices_offset: quad_model.indices_len,
-      vertices_len: obj.vertices.len(),
-      indices_len: obj.indices.len(),
+      vertices_len: niko_obj.vertices.len(),
+      indices_len: niko_obj.indices.len(),
     };
 
-    let mut vertices = Vec::with_capacity(quad_model.vertices_len + niko_model.indices_len);
-    let mut indices = Vec::with_capacity(quad_model.indices_len + niko_model.indices_len);
+    let kakyoin_model = ModelOffset {
+      vertices_offset: niko_model.vertices_offset + niko_model.vertices_len,
+      indices_offset: niko_model.indices_offset + niko_model.indices_len,
+      vertices_len: kakyoin_obj.vertices.len(),
+      indices_len: kakyoin_obj.indices.len(),
+    };
+
+    let mut vertices = Vec::with_capacity(
+      quad_model.vertices_len + niko_model.vertices_len + kakyoin_model.vertices_len,
+    );
+    let mut indices = Vec::with_capacity(
+      quad_model.indices_len + niko_model.indices_len + kakyoin_model.indices_len,
+    );
 
     vertices.extend_from_slice(&QUAD_VERTICES);
     indices.extend_from_slice(&QUAD_INDICES);
 
-    for vertex in obj.vertices {
+    // flip y coordinates
+    for vertex in niko_obj.vertices.into_iter().chain(kakyoin_obj.vertices) {
       vertices.push(TexturedVertex {
-        pos: vertex.position,
-        normal: vertex.normal,
-        tex_coords: [vertex.texture[0], vertex.texture[1]],
+        pos: [
+          vertex.position[0],
+          1.0 - vertex.position[1],
+          vertex.position[2],
+        ],
+        normal: [vertex.normal[0], 1.0 - vertex.normal[1], vertex.normal[2]],
+        tex_coords: [vertex.texture[0], 1.0 - vertex.texture[1]],
         ..Default::default()
       });
     }
-    for index in obj.indices {
-      indices.push(index + QUAD_INDICES.len() as u32);
-    }
+    indices.extend_from_slice(&niko_obj.indices);
+    indices.extend_from_slice(&kakyoin_obj.indices);
 
     let models = Models {
       quad: quad_model,
       niko: niko_model,
-      total_index_count: indices.len() as u32,
+      kakyoin: kakyoin_model,
     };
 
     Ok(Self {

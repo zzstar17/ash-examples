@@ -1,5 +1,7 @@
 use std::time::Duration;
 
+use crate::FERRIS_TEXTURE_SIZE;
+
 pub struct Ferris {
   // 0 to 1
   pub pos: [f32; 2],
@@ -11,8 +13,7 @@ impl Ferris {
   // ferris bounces around a 1*1 unit square
   const SIZE: f32 = 0.1;
 
-  const TEXTURE_DIMENSIONS: [f32; 2] = [120.0, 80.0]; // saved texture dimensions
-  const RATIO: f32 = Self::TEXTURE_DIMENSIONS[0] / Self::TEXTURE_DIMENSIONS[1];
+  const RATIO: f32 = FERRIS_TEXTURE_SIZE[0] / FERRIS_TEXTURE_SIZE[1];
 
   pub const WIDTH: f32 = Self::SIZE;
   pub const HEIGHT: f32 = Self::SIZE / Self::RATIO;
