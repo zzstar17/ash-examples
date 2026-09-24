@@ -10,6 +10,7 @@ use ash::vk::{self, Handle};
 use ash_slug::{SlugPushConstants, SlugVertex};
 
 use crate::{
+  asset_loader::ShaderLoader,
   render::{
     descriptor_sets::DescriptorPool,
     shaders::{self, TextShader},
@@ -32,12 +33,14 @@ impl TextPipeline {
   pub fn new(
     device: &ash::Device,
     cache: vk::PipelineCache,
+    shader_loader: &mut ShaderLoader,
     descriptor_pool: &DescriptorPool,
     render_format: vk::Format,
     extent: vk::Extent2D,
   ) -> Result<Self, PipelineCreationError> {
     let layout = Self::create_layout(device, descriptor_pool)?;
-    let shader = shaders::TextShader::load(device).map_err(PipelineCreationError::ShaderFailed)?;
+    let shader = shaders::TextShader::load(device, shader_loader)
+      .map_err(PipelineCreationError::ShaderFailed)?;
 
     let initial = Self::create_with_base(
       device,

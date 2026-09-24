@@ -4,36 +4,7 @@ use std::{marker::PhantomData, pin::Pin, ptr};
 
 use ash::vk;
 
-pub use vertex::Vertex;
-
-use std::mem::size_of;
-
-pub static QUAD_VERTICES: [Vertex; 4] = [
-  // top left
-  Vertex {
-    pos: [-1.0, -1.0],
-    tex_coords: [0.0, 0.0],
-  },
-  // bottom left
-  Vertex {
-    pos: [1.0, -1.0],
-    tex_coords: [1.0, 0.0],
-  },
-  // top right
-  Vertex {
-    pos: [-1.0, 1.0],
-    tex_coords: [0.0, 1.0],
-  },
-  // bottom right
-  Vertex {
-    pos: [1.0, 1.0],
-    tex_coords: [1.0, 1.0],
-  },
-];
-pub static QUAD_VERTICES_SIZE: u64 = (size_of::<Vertex>() * QUAD_VERTICES.len()) as u64;
-
-pub static QUAD_INDICES: [u16; 6] = [0, 1, 2, 3, 2, 1];
-pub static QUAD_INDICES_SIZE: u64 = (size_of::<u16>() * QUAD_INDICES.len()) as u64;
+pub use vertex::TexturedVertex;
 
 pub struct PipelineVertexInputStateCreateInfo<'a> {
   _binding_descriptions: Pin<Box<[vk::VertexInputBindingDescription]>>,

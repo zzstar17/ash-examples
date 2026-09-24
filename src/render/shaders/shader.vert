@@ -5,13 +5,14 @@ layout(push_constant) uniform PushConstantData {
 } pc;
 
 // vertex
-layout(location = 0) in vec2 vertex_pos;
-layout(location = 1) in vec2 tex_coords;
+layout(location = 0) in vec3 vertex_pos;
+layout(location = 1) in vec3 vertex_normal;
+layout(location = 2) in vec2 tex_coords;
 
 layout(location = 0) out vec2 out_tex_coords;
 
 void main() {
-  gl_Position = pc.matrix * vec4(vertex_pos, 0.0, 1.0);
+  gl_Position = pc.matrix * vec4(vertex_pos, 1.0);
   
   out_tex_coords = tex_coords;
 }

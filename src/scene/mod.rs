@@ -1,6 +1,6 @@
 use std::{f32, time::Duration};
 
-use cgmath::{Euler, Matrix4, Point3, Rad};
+use cgmath::{Euler, Matrix4, Point3, Rad, Vector3};
 
 use crate::{
   keys::{KeyState::Pressed, Keys},
@@ -43,7 +43,7 @@ impl Scene {
     let ferris_obj = Render3dObj::from_full(
       Point3::new(ferris.pos[0], ferris.pos[1], -3.0),
       rotation,
-      Ferris::WIDTH,
+      Vector3::new(Ferris::WIDTH, Ferris::HEIGHT, 1.0),
     );
 
     Self {

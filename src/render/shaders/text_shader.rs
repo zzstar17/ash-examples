@@ -3,14 +3,15 @@ use std::{ffi::CStr, marker::PhantomData, path::Path, ptr};
 use ash::vk;
 use vkobjects::DeviceManuallyDestroyed;
 
-use crate::ENABLE_USE_DEBUG_SHADERS;
+use crate::{
+  asset_loader::{ShaderLoadError, ShaderLoader},
+  ENABLE_USE_DEBUG_SHADERS,
+};
 
-use super::{load_shader, ShaderError};
-
-const VERT_SHADER_PATH: &str = "./shaders/slug_vertex.spv";
-const VERT_DEBUG_SHADER_PATH: &str = "./shaders/slug_vertex_debug.spv";
-const FRAG_SHADER_PATH: &str = "./shaders/slug_pixel.spv";
-const FRAG_DEBUG_SHADER_PATH: &str = "./shaders/slug_pixel_debug.spv";
+const VERT_SHADER_PATH: &str = "./assets/shaders/slug_vertex.spv";
+const VERT_DEBUG_SHADER_PATH: &str = "./assets/shaders/slug_vertex_debug.spv";
+const FRAG_SHADER_PATH: &str = "./assets/shaders/slug_pixel.spv";
+const FRAG_DEBUG_SHADER_PATH: &str = "./assets/shaders/slug_pixel_debug.spv";
 
 static MAIN_FN_NAME: &CStr = c"main";
 
@@ -20,7 +21,10 @@ pub struct TextShader {
 }
 
 impl TextShader {
-  pub fn load(device: &ash::Device) -> Result<Self, ShaderError> {
+  pub fn load(
+    device: &ash::Device,
+    shader_loader: &mut ShaderLoader,
+  ) -> Result<Self, ShaderLoadError> {
     let vert_path = Path::new(if ENABLE_USE_DEBUG_SHADERS {
       VERT_DEBUG_SHADER_PATH
     } else {
@@ -32,8 +36,8 @@ impl TextShader {
       FRAG_SHADER_PATH
     });
     Ok(Self {
-      vert: load_shader(device, vert_path)?,
-      frag: load_shader(device, frag_path)?,
+      vert: shader_loader.load_shader(device, vert_path)?,
+      frag: shader_loader.load_shader(device, frag_path)?,
     })
   }
 }

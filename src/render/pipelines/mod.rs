@@ -7,14 +7,14 @@ pub use graphics::{GraphicsPipeline, GraphicsPushConstants};
 pub use text::TextPipeline;
 use vkobjects::errors::OutOfMemoryError;
 
-use crate::render::shaders::ShaderError;
+use crate::asset_loader::ShaderLoadError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineCreationError {
   #[error("Out of memory")]
   OutOfMemory(#[source] OutOfMemoryError),
-  #[error("Failed to load shader")]
-  ShaderFailed(#[source] ShaderError),
+  #[error("Failed to load shader\n{0}")]
+  ShaderFailed(#[from] ShaderLoadError),
   #[error("Failed to compile or link shaders")]
   CompilationFailed,
 }

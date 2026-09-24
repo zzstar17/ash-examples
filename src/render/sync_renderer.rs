@@ -6,8 +6,9 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::window::Window;
 
 use crate::{
+  asset_loader::{LoadedModels, SpriteTextureData},
   last_frames_durations::FPSDurations,
-  render::{create_objs::create_fence, gpu_data::sprite_buffers::SpriteTextureData},
+  render::create_objs::create_fence,
   scene::Scene,
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
@@ -36,6 +37,7 @@ pub struct SyncRenderer {
 impl SyncRenderer {
   pub fn new(
     renderer: Renderer,
+    loaded_models: &LoadedModels,
     sprite_texture_data: &SpriteTextureData,
   ) -> Result<Self, InitializationError> {
     let device = &renderer.device;
@@ -59,7 +61,7 @@ impl SyncRenderer {
     let frame_fences = [fence0, fence1];
 
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, sprite_texture_data)?;
+      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, sprite_texture_data)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -90,9 +92,10 @@ impl SyncRenderer {
   unsafe fn submit_initial_staging_copy(
     renderer: &Renderer,
     fence: vk::Fence,
+    loaded_models: &LoadedModels,
     sprite_texture_data: &SpriteTextureData,
   ) -> Result<(), HostMemorySyncError> {
-    renderer.full_record_upload_initial_staging(0, &sprite_texture_data.bytes)?;
+    renderer.full_record_upload_initial_staging(0, &loaded_models, &sprite_texture_data.bytes)?;
 
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];

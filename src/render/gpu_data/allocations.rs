@@ -62,8 +62,8 @@ pub fn allocate_device(
       vk::MemoryPropertyFlags::empty(),
     ],
     [
-      &sprite_buffers.quad_vertices,
-      &sprite_buffers.quad_indices,
+      &sprite_buffers.vertices,
+      &sprite_buffers.indices,
       &sprite_buffers.texture,
       &text_ui,
       &text_buffers.curve_texture,
@@ -75,8 +75,8 @@ pub fn allocate_device(
     false,
     #[cfg(feature = "log_alloc")]
     Some([
-      "Quad vertices",
-      "Quad indices",
+      "Vertices",
+      "Indices",
       "Sprite texture",
       "Text UI",
       "Text curve texture",

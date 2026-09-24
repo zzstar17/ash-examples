@@ -1,3 +1,4 @@
+mod asset_loader;
 mod font;
 mod keys;
 mod last_frames_durations;
@@ -33,6 +34,7 @@ const INITIAL_WINDOW_HEIGHT: u32 = 800;
 
 const RESOLUTION: [u32; 2] = [1920, 1080];
 
+const NIKO_MODEL_PATH: &str = "./assets/niko.obj";
 const TEXTURE_PATH: &str = "./ferris.png";
 
 // get first that exists

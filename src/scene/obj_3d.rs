@@ -8,7 +8,7 @@ pub struct Render3dObj {
   translation_matrix: Matrix4<f32>,
   rotation: Euler<Rad<f32>>,
   rotation_matrix: Matrix4<f32>,
-  scale: f32,
+  scale: Vector3<f32>,
   scale_matrix: Matrix4<f32>,
   model_matrix: Matrix4<f32>,
 }
@@ -31,16 +31,16 @@ impl Render3dObj {
       translation_matrix,
       rotation,
       rotation_matrix,
-      scale,
+      scale: Vector3::new(scale, scale, scale),
       scale_matrix,
       model_matrix: translation_matrix * rotation_matrix * scale_matrix,
     }
   }
 
-  pub fn from_full(position: Point3<f32>, rotation: Euler<Rad<f32>>, scale: f32) -> Self {
+  pub fn from_full(position: Point3<f32>, rotation: Euler<Rad<f32>>, scale: Vector3<f32>) -> Self {
     let translation_matrix = Matrix4::from_translation(position.to_vec());
     let rotation_matrix = Matrix4::from(rotation);
-    let scale_matrix = Matrix4::from_scale(scale);
+    let scale_matrix = Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z);
 
     Self {
       position,
@@ -65,11 +65,6 @@ impl Render3dObj {
   #[allow(dead_code)]
   pub fn rotation(&self) -> &Euler<Rad<f32>> {
     &self.rotation
-  }
-
-  #[allow(dead_code)]
-  pub fn scale(&self) -> f32 {
-    self.scale
   }
 
   #[allow(dead_code)]
@@ -114,7 +109,7 @@ impl Render3dObj {
     self.update_model_matrix();
   }
 
-  pub fn set_scale(&mut self, new_scale: f32) {
+  pub fn set_scale(&mut self, new_scale: Vector3<f32>) {
     self.scale = new_scale;
     self.update_scale_matrix();
     self.update_model_matrix();
@@ -134,7 +129,7 @@ impl Render3dObj {
     &mut self,
     new_position: Point3<f32>,
     new_rotation: Euler<Rad<f32>>,
-    new_scale: f32,
+    new_scale: Vector3<f32>,
   ) {
     self.position = new_position;
     self.rotation = new_rotation;
@@ -155,7 +150,7 @@ impl Render3dObj {
   }
 
   fn update_scale_matrix(&mut self) {
-    self.scale_matrix = Matrix4::from_scale(self.scale);
+    self.scale_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
   }
 
   fn update_model_matrix(&mut self) {

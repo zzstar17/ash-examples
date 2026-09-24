@@ -5,15 +5,15 @@ pub mod text_manager;
 
 use std::{ops::BitOr, ptr};
 
-use crate::render::{
-  command_pools::graphics::GraphicsCommandBufferPool,
-  create_objs::{create_image, create_image_view},
-  gpu_data::{
-    sprite_buffers::{SpriteBuffers, SpriteTextureData},
-    text_buffers::TextBuffers,
-    text_manager::TextManager,
+use crate::{
+  asset_loader::{LoadedModels, SpriteTextureData},
+  render::{
+    command_pools::graphics::GraphicsCommandBufferPool,
+    create_objs::{create_image, create_image_view},
+    gpu_data::{
+      sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, text_manager::TextManager,
+    },
   },
-  vertices::{QUAD_INDICES, QUAD_INDICES_SIZE, QUAD_VERTICES, QUAD_VERTICES_SIZE},
 };
 use ash::vk;
 use vkinitialization::device::{Device, PhysicalDevice};
@@ -116,11 +116,13 @@ impl GPUData {
     device: &Device,
     physical_device: &PhysicalDevice,
     render_format: vk::Format,
+    loaded_models: &LoadedModels,
     sprite_texture_data: &SpriteTextureData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let sprite_buffers = SpriteBuffers::new(
       device,
+      loaded_models,
       vk::Extent2D {
         width: sprite_texture_data.width,
         height: sprite_texture_data.height,
@@ -151,9 +153,10 @@ impl GPUData {
       c"Text UI",
     )?;
 
-    let staging_size =
-      (sprite_texture_data.bytes.len() as u64 + QUAD_VERTICES_SIZE + QUAD_INDICES_SIZE)
-        .max(staging_size_required);
+    let staging_size = (sprite_texture_data.bytes.len() as u64
+      + loaded_models.vertices_size()
+      + loaded_models.indices_size())
+    .max(staging_size_required);
 
     let staging_alloc =
       allocations::allocate_staging_memory(device, physical_device, staging_size, marker)?;
@@ -198,14 +201,18 @@ impl GPUData {
   pub fn write_and_record_initial_staging_data(
     &self,
     device: &Device,
+    loaded_models: &LoadedModels,
     sprite_texture_bytes: &[u8],
     pool: &GraphicsCommandBufferPool,
   ) -> Result<(), HostMemorySyncError> {
     let sprite_texture_data_size = sprite_texture_bytes.len() as u64;
 
+    let vertices_size = loaded_models.vertices_size();
+    let indices_size = loaded_models.indices_size();
+
     let vertices_offset = 0;
-    let indices_offset = QUAD_VERTICES_SIZE;
-    let sprite_texture_offset = QUAD_INDICES_SIZE + indices_offset;
+    let indices_offset = vertices_size;
+    let sprite_texture_offset = indices_size + indices_offset;
     let initial_copy_size = sprite_texture_offset + sprite_texture_data_size;
 
     assert!(initial_copy_size <= self.staging.buffer_size);
@@ -219,14 +226,14 @@ impl GPUData {
     };
     unsafe {
       ptr::copy_nonoverlapping(
-        QUAD_VERTICES.as_ptr() as *const u8,
+        loaded_models.vertices.as_ptr() as *const u8,
         staging_ptr.add(vertices_offset as usize).as_ptr(),
-        QUAD_VERTICES_SIZE as usize,
+        vertices_size as usize,
       );
       ptr::copy_nonoverlapping(
-        QUAD_INDICES.as_ptr() as *const u8,
+        loaded_models.indices.as_ptr() as *const u8,
         staging_ptr.add(indices_offset as usize).as_ptr(),
-        QUAD_INDICES_SIZE as usize,
+        indices_size as usize,
       );
       ptr::copy_nonoverlapping(
         sprite_texture_bytes.as_ptr(),
@@ -245,12 +252,12 @@ impl GPUData {
         let region = vk::BufferCopy {
           src_offset: vertices_offset,
           dst_offset: 0,
-          size: QUAD_VERTICES_SIZE,
+          size: vertices_size,
         };
         device.cmd_copy_buffer(
           cb,
           self.staging.buffer,
-          self.sprite_buffers.quad_vertices,
+          self.sprite_buffers.vertices,
           &[region],
         );
       }
@@ -258,12 +265,12 @@ impl GPUData {
         let region = vk::BufferCopy {
           src_offset: indices_offset,
           dst_offset: 0,
-          size: QUAD_INDICES_SIZE,
+          size: indices_size,
         };
         device.cmd_copy_buffer(
           cb,
           self.staging.buffer,
-          self.sprite_buffers.quad_indices,
+          self.sprite_buffers.indices,
           &[region],
         );
       }

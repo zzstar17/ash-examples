@@ -15,10 +15,10 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
+  asset_loader::{LoadedModels, ShaderLoader, SpriteTextureData},
   last_frames_durations::FPSDurations,
   render::{
-    command_pools::graphics::GraphicsCommandBufferPool,
-    gpu_data::{sprite_buffers::SpriteTextureData, GPUDataAllocationError},
+    command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
     pipelines::TextPipeline,
   },
   scene::Scene,
@@ -66,39 +66,11 @@ pub struct Renderer {
   screenshot_buffer: ScreenshotBuffer,
 }
 
-struct Destructor<const N: usize> {
-  objs: [MaybeUninit<*const dyn DeviceManuallyDestroyed>; N],
-  len: usize,
-}
-
-impl<const N: usize> Destructor<N> {
-  pub fn new() -> Self {
-    Self {
-      objs: unsafe { MaybeUninit::uninit().assume_init() },
-      len: 0,
-    }
-  }
-
-  pub fn push(&mut self, ptr: *const dyn DeviceManuallyDestroyed) {
-    self.len += 1;
-    self.objs[self.len] = MaybeUninit::new(ptr);
-  }
-
-  pub unsafe fn fire(&self, device: &ash::Device) {
-    for i in (0..self.len).rev() {
-      self.objs[i]
-        .assume_init()
-        .as_ref()
-        .unwrap()
-        .destroy_self(device);
-    }
-  }
-}
-
 impl Renderer {
   pub fn initialize(
     pre_window: RenderInit,
     event_loop: &ActiveEventLoop,
+    loaded_models: &LoadedModels,
     sprite_data: &mut SpriteTextureData,
   ) -> Result<Self, InitializationError> {
     // having an error during window creation triggers pre_window drop
@@ -115,8 +87,6 @@ impl Renderer {
     // .with_resizable(false)
     let window = event_loop.create_window(window_attributes)?;
 
-    let mut destructor: Destructor<17> = Destructor::new();
-
     #[cfg(feature = "vl")]
     let (entry, instance, debug_utils) = pre_window.deconstruct();
     #[cfg(not(feature = "vl"))]
@@ -127,9 +97,6 @@ impl Renderer {
       destroy!(&debug_utils);
       destroy!(&instance);
     };
-    destructor.push(&instance);
-    #[cfg(feature = "vl")]
-    destructor.push(&debug_utils);
 
     let surface = Surface::new(
       &entry,
@@ -138,19 +105,21 @@ impl Renderer {
       window.window_handle()?,
     )
     .on_err(|_| destroy_instance())?;
-    destructor.push(&surface);
 
     // can return an error and can also return no devices
     let physical_device_creation = match unsafe {
       PhysicalDevice::select(&instance, &surface, initialization::select_physical_device)
     }
-    .on_err(|_| destroy_instance())?
-    {
+    .on_err(|_| unsafe {
+      ManuallyDestroyed::destroy_self(&surface);
+      destroy_instance()
+    })? {
       Some(tu) => tu,
-      None => {
+      None => unsafe {
+        ManuallyDestroyed::destroy_self(&surface);
         destroy_instance();
         return Err(InitializationError::NoCompatibleDevices);
-      }
+      },
     };
 
     let (device, queues) = Device::create(
@@ -176,8 +145,10 @@ impl Renderer {
         ..Default::default()
       },
     )
-    .on_err(|_| destroy_instance())?;
-    destructor.push(&device);
+    .on_err(|_| unsafe {
+      ManuallyDestroyed::destroy_self(&surface);
+      destroy_instance();
+    })?;
 
     let physical_device = physical_device_creation.physical_device;
 
@@ -187,6 +158,19 @@ impl Renderer {
     unsafe {
       debug_utils_marker.set_queue_labels(queues);
     }
+
+    let mut destructor: Vec<&dyn DeviceManuallyDestroyed> = Vec::new();
+    let destroy_objs = |destructor: &[&dyn DeviceManuallyDestroyed]| unsafe {
+      for obj in destructor.iter().rev() {
+        obj.destroy_self(&device);
+      }
+
+      destroy!(&device, &surface);
+
+      #[cfg(feature = "vl")]
+      destroy!(&debug_utils);
+      destroy!(&instance);
+    };
 
     let swapchains = Swapchains::new(
       &instance,
@@ -199,7 +183,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&swapchains);
 
     let swapchain_format = swapchains.get_format();
@@ -219,10 +203,11 @@ impl Renderer {
       &device,
       &physical_device,
       texture_format,
+      loaded_models,
       sprite_data,
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&gpu_data);
 
     // use same format for surface and the render target
@@ -238,7 +223,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })
+    .on_err(|_| unsafe { destroy_objs(&destructor) })
     .map_err(GPUDataAllocationError::from)?;
     log::debug!("Created render targets:\n{:#?}", render_targets);
     destructor.push(&render_targets);
@@ -246,7 +231,7 @@ impl Renderer {
     log::info!("Creating pipeline cache");
     let (pipeline_cache, created_from_file) =
       pipelines::create_pipeline_cache(&device, &physical_device)
-        .on_err(|_| unsafe { destructor.fire(&device) })?;
+        .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     if created_from_file {
       log::info!("Cache successfully created from an existing cache file");
     } else {
@@ -255,30 +240,34 @@ impl Renderer {
     destructor.push(&pipeline_cache);
 
     let descriptor_pool =
-      DescriptorPool::new(&device, &gpu_data).on_err(|_| unsafe { destructor.fire(&device) })?;
+      DescriptorPool::new(&device, &gpu_data).on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&descriptor_pool);
 
-    log::debug!("Creating pipeline");
+    let mut shader_loader = ShaderLoader::new();
+    log::debug!("Creating graphics pipeline");
     let graphics_pipeline = GraphicsPipeline::new(
       &device,
       pipeline_cache,
+      &mut shader_loader,
       &descriptor_pool,
       render_format,
       RENDER_EXTENT,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&graphics_pipeline);
-
+    log::debug!("Creating text pipeline");
     let text_pipeline = TextPipeline::new(
       &device,
       pipeline_cache,
+      &mut shader_loader,
       &descriptor_pool,
       render_format,
       RENDER_EXTENT,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&text_pipeline);
 
+    log::debug!("Creating command pools");
     let graphics_pools = fill_destroyable_array_with_expression!(
       &device,
       GraphicsCommandBufferPool::create(
@@ -289,8 +278,10 @@ impl Renderer {
       ),
       FRAMES_IN_FLIGHT
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
-    destructor.push(graphics_pools.as_ptr());
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
+    for pool in graphics_pools.iter() {
+      destructor.push(pool);
+    }
 
     let screenshot_buffer = ScreenshotBuffer::new(
       &device,
@@ -298,7 +289,7 @@ impl Renderer {
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
-    .on_err(|_| unsafe { destructor.fire(&device) })?;
+    .on_err(|_| unsafe { destroy_objs(&destructor) })?;
     destructor.push(&screenshot_buffer);
 
     Ok(Self {
@@ -341,13 +332,17 @@ impl Renderer {
   pub unsafe fn full_record_upload_initial_staging(
     &self,
     frame_i: usize,
+    loaded_models: &LoadedModels,
     sprite_texture_bytes: &[u8],
   ) -> Result<(), HostMemorySyncError> {
     let pool = &self.graphics_pools[frame_i];
     pool.begin_recording(&self.device)?;
-    self
-      .data
-      .write_and_record_initial_staging_data(&self.device, sprite_texture_bytes, pool)?;
+    self.data.write_and_record_initial_staging_data(
+      &self.device,
+      loaded_models,
+      sprite_texture_bytes,
+      pool,
+    )?;
     pool.end_recording(&self.device)?;
     Ok(())
   }

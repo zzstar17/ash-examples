@@ -15,7 +15,6 @@ use crate::{
     gpu_data::GPUData,
     pipelines::{GraphicsPipeline, GraphicsPushConstants, TextPipeline},
     render_targets::RenderTargets,
-    vertices::QUAD_INDICES,
     RENDER_EXTENT, RENDER_SIZE,
   },
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
@@ -345,14 +344,16 @@ impl GraphicsCommandBufferPool {
         utility::any_as_u8_slice(&graphics_push_constants),
       );
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.quad_vertices], &[0]);
-      device.cmd_bind_index_buffer(
+      device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
+      device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
+      device.cmd_draw_indexed(
         cb,
-        data.sprite_buffers.quad_indices,
+        data.sprite_buffers.models.quad.indices_len as u32,
+        1,
         0,
-        vk::IndexType::UINT16,
+        0,
+        0,
       );
-      device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
 
       // draw text ui 2d sprite on screen
       if draw_text {
@@ -390,7 +391,14 @@ impl GraphicsCommandBufferPool {
             0,
             utility::any_as_u8_slice(&pc),
           );
-          device.cmd_draw_indexed(cb, QUAD_INDICES.len() as u32, 1, 0, 0, 0);
+          device.cmd_draw_indexed(
+            cb,
+            data.sprite_buffers.models.quad.indices_len as u32,
+            1,
+            0,
+            0,
+            0,
+          );
         }
 
         {

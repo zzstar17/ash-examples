@@ -10,17 +10,19 @@ use ash::vk::{self, Handle};
 use cgmath::Matrix4;
 
 use crate::{
+  asset_loader::ShaderLoader,
   render::{
     descriptor_sets::DescriptorPool,
     shaders::{self, Shader},
-    vertices::Vertex,
+    TexturedVertex,
   },
   vertex_input_state_create_info,
 };
-use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
+use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
 use super::PipelineCreationError;
 
+#[repr(C)]
 pub struct GraphicsPushConstants {
   pub matrix: Matrix4<f32>,
 }
@@ -37,12 +39,17 @@ impl GraphicsPipeline {
   pub fn new(
     device: &ash::Device,
     cache: vk::PipelineCache,
+    shader_loader: &mut ShaderLoader,
     descriptor_pool: &DescriptorPool,
     render_format: vk::Format,
     extent: vk::Extent2D,
   ) -> Result<Self, PipelineCreationError> {
     let layout = Self::create_layout(device, descriptor_pool)?;
-    let shader = shaders::Shader::load(device).map_err(PipelineCreationError::ShaderFailed)?;
+    let shader = shaders::Shader::load(device, shader_loader)
+      .map_err(PipelineCreationError::ShaderFailed)
+      .on_err(|_err| unsafe {
+        device.destroy_pipeline_layout(layout, None);
+      })?;
 
     let initial = Self::create_with_base(
       device,
@@ -144,7 +151,7 @@ impl GraphicsPipeline {
   ) -> Result<vk::Pipeline, PipelineCreationError> {
     let shader_stages = shader.get_pipeline_shader_creation_info();
 
-    let vertex_input_state = vertex_input_state_create_info!(Vertex);
+    let vertex_input_state = vertex_input_state_create_info!(TexturedVertex);
     let vertex_input_state = vertex_input_state.get();
 
     let input_assembly_state = triangle_input_assembly_state();

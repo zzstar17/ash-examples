@@ -81,6 +81,8 @@ pub enum InitializationError {
 
   #[error(transparent)]
   IOError(#[from] std::io::Error),
+  #[error("Failed to load models\n{0}")]
+  ModelLoadFailed(#[from] obj::ObjError),
 
   // undefined behavior / driver or application bug (see vl)
   #[error(transparent)]

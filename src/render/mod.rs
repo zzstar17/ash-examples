@@ -22,6 +22,7 @@ pub use errors::{FrameRenderError, InitializationError};
 pub use initialization::{RenderInit, RenderInitError};
 pub use swapchain::AcquireNextImageError;
 pub use sync_renderer::SyncRenderer;
+pub use vertices::TexturedVertex;
 
 use crate::RESOLUTION;
 
