@@ -2,13 +2,6 @@ use std::mem::{offset_of, size_of};
 
 use ash::vk;
 
-#[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
-pub struct Vertex {
-  pub pos: [f32; 2],
-  pub tex_coords: [f32; 2],
-}
-
 // std430 layout
 #[repr(C)]
 #[derive(Default, Copy, PartialEq, Clone, Debug)]

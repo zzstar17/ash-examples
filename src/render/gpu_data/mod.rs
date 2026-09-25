@@ -9,7 +9,7 @@ use crate::{
   asset_loader::{texture_loader::TextureData, LoadedModels},
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
-    create_objs::{create_image, create_image_view},
+    create_objs::{create_color_image_view, create_image},
     gpu_data::{
       sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, text_manager::TextManager,
     },
@@ -88,18 +88,19 @@ impl ImageViews {
     text_buffers: &TextBuffers,
     ui: vk::Image,
   ) -> Result<Self, OutOfMemoryError> {
-    let sprite = create_image_view(device, sprite_buffers.texture, render_format)?;
+    let sprite = create_color_image_view(device, sprite_buffers.texture, render_format)?;
 
-    let text_curve = create_image_view(
+    let text_curve = create_color_image_view(
       device,
       text_buffers.curve_texture,
       TextBuffers::CURVES_FORMAT,
     )
     .on_err(|_| unsafe { destroy!(device => &sprite) })?;
-    let text_band = create_image_view(device, text_buffers.band_texture, TextBuffers::BANDS_FORMAT)
-      .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
+    let text_band =
+      create_color_image_view(device, text_buffers.band_texture, TextBuffers::BANDS_FORMAT)
+        .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
 
-    let ui = create_image_view(device, ui, render_format)
+    let ui = create_color_image_view(device, ui, render_format)
       .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
 
     Ok(Self {

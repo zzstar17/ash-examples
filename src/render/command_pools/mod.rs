@@ -15,6 +15,15 @@ const ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange =
     layer_count: 1,
   };
 
+const ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange =
+  vk::ImageSubresourceRange {
+    aspect_mask: vk::ImageAspectFlags::DEPTH,
+    base_mip_level: 0,
+    level_count: 1,
+    base_array_layer: 0,
+    layer_count: 1,
+  };
+
 const ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS: vk::ImageSubresourceLayers =
   vk::ImageSubresourceLayers {
     aspect_mask: vk::ImageAspectFlags::COLOR,

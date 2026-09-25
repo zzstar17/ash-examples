@@ -13,6 +13,7 @@ use crate::{
   asset_loader::ShaderLoader,
   render::{
     descriptor_sets::DescriptorPool,
+    render_targets::DEPTH_FORMAT,
     shaders::{self, TextShader},
   },
   vertex_input_state_create_info,
@@ -166,6 +167,19 @@ impl TextPipeline {
     let rasterization_state_ci = no_depth_rasterization_state();
     let multisample_state_ci = no_multisample_state();
 
+    // no depth test
+    let depth_stencil_state_ci = vk::PipelineDepthStencilStateCreateInfo {
+      flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
+      depth_test_enable: vk::FALSE,
+      depth_write_enable: vk::TRUE,
+      depth_compare_op: vk::CompareOp::LESS,
+      depth_bounds_test_enable: vk::FALSE,
+      min_depth_bounds: 0.0,
+      max_depth_bounds: 1.0,
+      stencil_test_enable: vk::FALSE,
+      ..Default::default()
+    };
+
     let attachment_state = vk::PipelineColorBlendAttachmentState {
       // blend by opacity
       blend_enable: vk::TRUE,
@@ -197,7 +211,7 @@ impl TextPipeline {
     let rendering_create_info = vk::PipelineRenderingCreateInfo {
       color_attachment_count: render_formats.len() as u32,
       p_color_attachment_formats: render_formats.as_ptr(),
-      depth_attachment_format: vk::Format::UNDEFINED,
+      depth_attachment_format: DEPTH_FORMAT,
       stencil_attachment_format: vk::Format::UNDEFINED,
       ..Default::default()
     };
@@ -218,7 +232,7 @@ impl TextPipeline {
       p_viewport_state: &viewport_state,
       p_rasterization_state: &rasterization_state_ci,
       p_multisample_state: &multisample_state_ci,
-      p_depth_stencil_state: ptr::null(),
+      p_depth_stencil_state: &depth_stencil_state_ci,
       p_color_blend_state: &color_blend_state,
       p_dynamic_state: ptr::null(),
       layout,

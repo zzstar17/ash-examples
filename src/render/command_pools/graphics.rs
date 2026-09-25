@@ -1,6 +1,6 @@
 use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
-use ash::vk;
+use ash::vk::{self, ClearDepthStencilValue};
 use ash_slug::SlugPushConstants;
 use cgmath::{Matrix4, Vector4};
 use vkinitialization::device::QueueFamilies;
@@ -10,6 +10,7 @@ use crate::{
   render::{
     command_pools::{
       ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS, ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
     },
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
@@ -281,24 +282,51 @@ impl GraphicsCommandBufferPool {
 
     // wait previous copy on render target
     {
-      let wait_render_target = vk::ImageMemoryBarrier2 {
+      let wait_render_target_color = vk::ImageMemoryBarrier2 {
         src_access_mask: vk::AccessFlags2::NONE,
         dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
         src_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT), // previous copy operations
         dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
         new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        image: render_targets.images[frame_i],
+        image: render_targets.color_images[frame_i],
         subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
-      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_render_target]));
+      let wait_render_target_depth = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::NONE,
+        dst_access_mask: vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_WRITE
+          .bitor(vk::AccessFlags2::DEPTH_STENCIL_ATTACHMENT_READ),
+        src_stage_mask: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+          .bitor(vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS), // previous operations
+        dst_stage_mask: vk::PipelineStageFlags2::EARLY_FRAGMENT_TESTS
+          .bitor(vk::PipelineStageFlags2::LATE_FRAGMENT_TESTS),
+        old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+        new_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+        image: render_targets.depth_images[frame_i],
+        subresource_range: ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(
+        cb,
+        &dependency_info(
+          &[],
+          &[],
+          &[wait_render_target_color, wait_render_target_depth],
+        ),
+      );
 
       let clear_value = vk::ClearValue {
         color: BACKGROUND_COLOR,
       };
+      let depth_clear_value = vk::ClearValue {
+        depth_stencil: ClearDepthStencilValue {
+          depth: 1.0,
+          stencil: 0,
+        },
+      };
       let color_attachments = [vk::RenderingAttachmentInfo {
-        image_view: render_targets.image_views[frame_i],
+        image_view: render_targets.color_views[frame_i],
         image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         resolve_mode: vk::ResolveModeFlags::NONE,
         resolve_image_view: vk::ImageView::null(),
@@ -308,6 +336,17 @@ impl GraphicsCommandBufferPool {
         clear_value,
         ..Default::default()
       }];
+      let depth_attachment = vk::RenderingAttachmentInfo {
+        image_view: render_targets.depth_views[frame_i],
+        image_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
+        resolve_mode: vk::ResolveModeFlags::NONE,
+        resolve_image_view: vk::ImageView::null(),
+        resolve_image_layout: vk::ImageLayout::UNDEFINED,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        clear_value: depth_clear_value,
+        ..Default::default()
+      };
       let rendering_info = vk::RenderingInfo {
         flags: vk::RenderingFlags::empty(),
         render_area: vk::Rect2D {
@@ -318,7 +357,7 @@ impl GraphicsCommandBufferPool {
         view_mask: 0,
         color_attachment_count: color_attachments.len() as u32,
         p_color_attachments: color_attachments.as_ptr(),
-        p_depth_attachment: ptr::null(),
+        p_depth_attachment: &depth_attachment,
         p_stencil_attachment: ptr::null(),
         ..Default::default()
       };
@@ -506,7 +545,7 @@ impl GraphicsCommandBufferPool {
         dst_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT),
         old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         new_layout: vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
-        image: render_targets.images[frame_i],
+        image: render_targets.color_images[frame_i],
         subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
@@ -576,7 +615,7 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_copy_image_to_buffer(
         cb,
-        render_targets.images[frame_i],
+        render_targets.color_images[frame_i],
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         buffer,
         &[region],
@@ -637,7 +676,7 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_copy_image(
         cb,
-        render_targets.images[frame_i],
+        render_targets.color_images[frame_i],
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         swapchain_image,
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,
@@ -654,7 +693,7 @@ impl GraphicsCommandBufferPool {
       );
       device.cmd_blit_image(
         cb,
-        render_targets.images[frame_i],
+        render_targets.color_images[frame_i],
         vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
         swapchain_image,
         vk::ImageLayout::TRANSFER_DST_OPTIMAL,

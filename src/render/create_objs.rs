@@ -105,14 +105,12 @@ pub fn create_image(
   }
 }
 
-pub fn create_image_view(
+pub fn create_color_image_view(
   device: &ash::Device,
   image: vk::Image,
   format: vk::Format,
 ) -> Result<vk::ImageView, OutOfMemoryError> {
   let create_info = vk::ImageViewCreateInfo {
-    s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-    p_next: ptr::null(),
     flags: vk::ImageViewCreateFlags::empty(),
     image,
     view_type: vk::ImageViewType::TYPE_2D,
@@ -130,7 +128,40 @@ pub fn create_image_view(
       base_array_layer: 0,
       layer_count: 1,
     },
-    _marker: PhantomData,
+    ..Default::default()
+  };
+
+  unsafe {
+    device
+      .create_image_view(&create_info, None)
+      .map_err(|err| err.into())
+  }
+}
+
+pub fn create_depth_image_view(
+  device: &ash::Device,
+  image: vk::Image,
+  format: vk::Format,
+) -> Result<vk::ImageView, OutOfMemoryError> {
+  let create_info = vk::ImageViewCreateInfo {
+    flags: vk::ImageViewCreateFlags::empty(),
+    image,
+    view_type: vk::ImageViewType::TYPE_2D,
+    format,
+    components: vk::ComponentMapping {
+      r: vk::ComponentSwizzle::IDENTITY,
+      g: vk::ComponentSwizzle::IDENTITY,
+      b: vk::ComponentSwizzle::IDENTITY,
+      a: vk::ComponentSwizzle::IDENTITY,
+    },
+    subresource_range: vk::ImageSubresourceRange {
+      aspect_mask: vk::ImageAspectFlags::DEPTH,
+      base_mip_level: 0,
+      level_count: 1,
+      base_array_layer: 0,
+      layer_count: 1,
+    },
+    ..Default::default()
   };
 
   unsafe {

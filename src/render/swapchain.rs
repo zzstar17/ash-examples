@@ -22,7 +22,7 @@ use crate::{
   PREFERRED_PRESENTATION_METHOD,
 };
 
-use super::create_objs::create_image_view;
+use super::create_objs::create_color_image_view;
 
 // VK_ERROR_NATIVE_WINDOW_IN_USE_KHR shouldn't happen unless some other program somehow hijacks
 //    the created window other API
@@ -533,7 +533,7 @@ impl Swapchain {
       let mut image_views: Vec<vk::ImageView> = Vec::with_capacity(images.len());
       for &image in images.iter() {
         image_views.push(
-          match create_image_view(device, image, image_format.format) {
+          match create_color_image_view(device, image, image_format.format) {
             Ok(view) => view,
             Err(err) => unsafe {
               for view in image_views {

@@ -63,12 +63,21 @@ pub struct ModelOffset {
 
 impl LoadedModels {
   pub fn load() -> Result<Self, (obj::ObjError, &'static str)> {
-    let niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
+    let mut niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
       let niko_f =
         File::open(NIKO_MODEL_PATH).map_err(|err| (obj::ObjError::from(err), NIKO_MODEL_PATH))?;
       let mut buff_reader = BufReader::new(niko_f);
       obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_MODEL_PATH))?
     };
+
+    // todo: Fix niko model's vertices's face orientation
+    // temporary fix to flip triangles orientation counter-clockwise
+    assert!(niko_obj.indices.len().is_multiple_of(3));
+    for triangle in niko_obj.indices.chunks_exact_mut(3) {
+      let temp = triangle[0];
+      triangle[0] = triangle[2];
+      triangle[2] = temp;
+    }
 
     let kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {
       let niko_f = File::open(KAKYOIN_MODEL_PATH)
@@ -121,6 +130,7 @@ impl LoadedModels {
         ..Default::default()
       });
     }
+
     indices.extend_from_slice(&niko_obj.indices);
     indices.extend_from_slice(&kakyoin_obj.indices);
 
