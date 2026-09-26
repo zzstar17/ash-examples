@@ -1,4 +1,4 @@
-use cgmath::{EuclideanSpace, Euler, Matrix4, Point3, Rad, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, Quaternion, Vector3};
 
 /// Object information suitable for rendering in 3D. Caches certain matrices
 /// in order to perform less calculations while rendering.
@@ -6,7 +6,7 @@ use cgmath::{EuclideanSpace, Euler, Matrix4, Point3, Rad, Vector3};
 pub struct Render3dObj {
   position: Point3<f32>,
   translation_matrix: Matrix4<f32>,
-  rotation: Euler<Rad<f32>>,
+  rotation: Quaternion<f32>,
   rotation_matrix: Matrix4<f32>,
   scale: Vector3<f32>,
   scale_matrix: Matrix4<f32>,
@@ -16,12 +16,12 @@ pub struct Render3dObj {
 #[allow(dead_code)]
 impl Render3dObj {
   pub fn new(position: Point3<f32>) -> Self {
-    let rotation = Euler {
-      x: Rad(0.0),
-      y: Rad(0.0),
-      z: Rad(0.0),
+    let rotation = Quaternion {
+      v: Vector3::new(0.0, 0.0, 0.0),
+      s: 1.0,
     };
-    let scale = 0.5;
+
+    let scale = 1.0;
 
     let translation_matrix = Matrix4::from_translation(position.to_vec());
     let rotation_matrix = Matrix4::from(rotation);
@@ -38,7 +38,9 @@ impl Render3dObj {
     }
   }
 
-  pub fn from_full(position: Point3<f32>, rotation: Euler<Rad<f32>>, scale: Vector3<f32>) -> Self {
+  pub fn from_full(position: Point3<f32>, rotation: Quaternion<f32>, scale: Vector3<f32>) -> Self {
+    debug_assert!((rotation.magnitude2() - 1.0).abs() < 0.001);
+
     let translation_matrix = Matrix4::from_translation(position.to_vec());
     let rotation_matrix = Matrix4::from(rotation);
     let scale_matrix = Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z);
@@ -62,7 +64,7 @@ impl Render3dObj {
     &self.position
   }
 
-  pub fn rotation(&self) -> &Euler<Rad<f32>> {
+  pub fn rotation(&self) -> &Quaternion<f32> {
     &self.rotation
   }
 
@@ -96,8 +98,18 @@ impl Render3dObj {
     self.update_model_matrix();
   }
 
-  pub fn rotate(&mut self, new_rotation: Euler<Rad<f32>>) {
+  pub fn set_rotation(&mut self, new_rotation: Quaternion<f32>) {
     self.rotation = new_rotation;
+    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
+    self.update_rotation_matrix();
+    self.update_model_matrix();
+  }
+
+  pub fn rotate(&mut self, rotation: Quaternion<f32>) {
+    debug_assert!((rotation.magnitude2() - 1.0).abs() < 0.001);
+    self.rotation = rotation * self.rotation;
+    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
+
     self.update_rotation_matrix();
     self.update_model_matrix();
   }
@@ -108,9 +120,10 @@ impl Render3dObj {
     self.update_model_matrix();
   }
 
-  pub fn move_and_rotate(&mut self, new_position: Point3<f32>, new_rotation: Euler<Rad<f32>>) {
+  pub fn move_and_rotate(&mut self, new_position: Point3<f32>, new_rotation: Quaternion<f32>) {
     self.position = new_position;
     self.rotation = new_rotation;
+    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
     self.update_translation_matrix();
     self.update_rotation_matrix();
     self.update_model_matrix();
@@ -119,11 +132,12 @@ impl Render3dObj {
   pub fn update(
     &mut self,
     new_position: Point3<f32>,
-    new_rotation: Euler<Rad<f32>>,
+    new_rotation: Quaternion<f32>,
     new_scale: Vector3<f32>,
   ) {
     self.position = new_position;
     self.rotation = new_rotation;
+    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
     self.scale = new_scale;
     self.update_translation_matrix();
     self.update_rotation_matrix();
