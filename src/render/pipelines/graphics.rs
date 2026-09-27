@@ -24,10 +24,23 @@ use vkobjects::{errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroye
 use super::PipelineCreationError;
 
 #[repr(C)]
+#[derive(Debug, Clone, Copy)]
 pub struct GraphicsPushConstants {
   pub matrix: Matrix4<f32>,
   pub tex_offset: [f32; 2],
   pub tex_size: [f32; 2],
+}
+
+impl Default for GraphicsPushConstants {
+  fn default() -> Self {
+    Self {
+      matrix: Matrix4::new(
+        0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+      ),
+      tex_offset: [0.0, 0.0],
+      tex_size: [0.0, 0.0],
+    }
+  }
 }
 
 pub struct GraphicsPipeline {

@@ -5,10 +5,7 @@ use vkinitialization::device::Device;
 use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::{
-  asset_loader::{
-    texture_loader::{self, TextureOffsets},
-    LoadedModels, Models,
-  },
+  asset_loader::{LoadedModels, Models},
   render::{
     create_objs::{create_buffer, create_image},
     gpu_data::{GPUDataAllocationError, TEXTURE_USAGES},
@@ -19,7 +16,6 @@ use crate::{
 pub struct SpriteBuffers {
   pub texture: vk::Image,
   pub texture_extent: vk::Extent2D,
-  pub texture_offsets: TextureOffsets,
 
   pub vertices: vk::Buffer,
   pub indices: vk::Buffer,
@@ -73,7 +69,6 @@ impl SpriteBuffers {
       vertices,
       indices,
       models: loaded_models.models,
-      texture_offsets: texture_loader::get_texture_offsets(),
     })
   }
 }

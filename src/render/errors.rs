@@ -62,9 +62,6 @@ pub enum InitializationError {
   #[error(transparent)]
   WindowError(#[from] WindowError),
 
-  #[error("Image error: {0}")]
-  ImageError(#[from] image::ImageError),
-
   #[error("Failed to allocate device memory during initialization:\n    {0}")]
   AllocationError(#[from] GPUDataAllocationError),
 
@@ -78,11 +75,6 @@ pub enum InitializationError {
   PipelineCreationFailed(#[from] PipelineCreationError),
   #[error("An error occurred when creating or saving the pipeline cache: {0}")]
   PipelineCacheError(#[from] PipelineCacheError),
-
-  #[error(transparent)]
-  IOError(#[from] std::io::Error),
-  #[error("Failed to load models\n{0}\nPath: {1}")]
-  ModelLoadFailed(#[source] obj::ObjError, &'static str),
 
   // undefined behavior / driver or application bug (see vl)
   #[error(transparent)]

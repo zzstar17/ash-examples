@@ -18,7 +18,7 @@ use crate::{
     command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
     pipelines::TextPipeline,
   },
-  scene::{DrawMatrices, Scene},
+  scene::Scene,
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
 };
 
@@ -32,7 +32,7 @@ use super::{
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
-  RenderInit, FRAMES_IN_FLIGHT, RENDER_EXTENT, SWAPCHAIN_IMAGE_USAGES,
+  FRAMES_IN_FLIGHT, RENDER_EXTENT, SWAPCHAIN_IMAGE_USAGES,
 };
 
 pub struct Renderer {
@@ -65,10 +65,13 @@ pub struct Renderer {
 
 impl Renderer {
   pub fn initialize(
-    pre_window: RenderInit,
+    entry: ash::Entry,
+    instance: ash::Instance,
+    #[cfg(feature = "vl")] debug_utils: vkinitialization::DebugUtils,
+
     event_loop: &ActiveEventLoop,
     loaded_models: &LoadedModels,
-    sprite_data: &mut TextureData,
+    texture_data: &mut TextureData,
   ) -> Result<Self, InitializationError> {
     // having an error during window creation triggers pre_window drop
     let window_attributes = Window::default_attributes()
@@ -83,11 +86,6 @@ impl Renderer {
       });
     // .with_resizable(false)
     let window = event_loop.create_window(window_attributes)?;
-
-    #[cfg(feature = "vl")]
-    let (entry, instance, debug_utils) = pre_window.deconstruct();
-    #[cfg(not(feature = "vl"))]
-    let (entry, instance) = pre_window.deconstruct();
 
     let destroy_instance = || unsafe {
       #[cfg(feature = "vl")]
@@ -193,7 +191,7 @@ impl Renderer {
         .unwrap()
     };
 
-    format_conversions::convert_rgba_data_to_format(&mut sprite_data.bytes, texture_format);
+    format_conversions::convert_rgba_data_to_format(&mut texture_data.bytes, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
     let gpu_data = GPUData::new(
@@ -201,7 +199,8 @@ impl Renderer {
       &physical_device,
       texture_format,
       loaded_models,
-      sprite_data,
+      texture_data,
+      #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
     .on_err(|_| destroy_objs(&destructor))?;
@@ -361,7 +360,7 @@ impl Renderer {
     &self,
     frame_i: usize,
     image_i: usize,
-    matrices: &DrawMatrices,
+    scene: &Scene,
     save_to_screenshot_buffer: bool,
     update_text_ui: bool,
     draw_text: bool,
@@ -387,7 +386,7 @@ impl Renderer {
       &self.text_pipeline,
       &self.descriptor_pool,
       &self.data,
-      matrices,
+      scene,
       if save_to_screenshot_buffer {
         Some(*self.screenshot_buffer.buffer)
       } else {

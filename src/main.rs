@@ -24,7 +24,15 @@ use winit::{
   keyboard::{KeyCode, PhysicalKey},
 };
 
-use crate::{keys::Keys, last_frames_durations::LastFramesDurations, scene::Scene};
+use crate::{
+  asset_loader::{
+    texture_loader::{self, TextureData},
+    LoadedModels,
+  },
+  keys::Keys,
+  last_frames_durations::LastFramesDurations,
+  scene::Scene,
+};
 
 pub use asset_constants::*;
 
@@ -173,6 +181,7 @@ struct App {
   scene: Scene,
   ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
+  last_update_mouse_pos: PhysicalPosition<f64>,
   last_frames_durations: LastFramesDurations<60>,
   time_since_last_fps_print: Duration,
   frame_i: usize,
@@ -223,7 +232,11 @@ impl StartedStatus {
 
 impl RenderStatus {
   pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let render = RenderInit::new(event_loop)?;
+    let loaded_models =
+      LoadedModels::load().map_err(|(err, path)| RenderInitError::ModelLoadFailed(err, path))?;
+    let texture_data = TextureData::read_texture_bytes_as_rgba8()?;
+
+    let render = RenderInit::new(event_loop, loaded_models, texture_data)?;
     Ok(RenderStatus::Initialized(render))
   }
 
@@ -246,6 +259,14 @@ impl RenderStatus {
     }
   }
 
+  pub fn unwrap_initialized(&mut self) -> &mut RenderInit {
+    if let Self::Initialized(init) = self {
+      init
+    } else {
+      panic!()
+    }
+  }
+
   pub fn unwrap_started(&mut self) -> &mut StartedStatus {
     if let Self::Started(started) = self {
       started
@@ -260,7 +281,7 @@ impl RenderStatus {
 }
 
 impl App {
-  pub fn new(status: RenderStatus) -> Self {
+  pub fn new(mut status: RenderStatus) -> Self {
     let window_resize_handler = WindowResizeHandler {
       active: false,
       last_activation_instant: Instant::now(),
@@ -275,7 +296,11 @@ impl App {
 
     let frame_i: usize = 0;
 
-    let scene = Scene::new();
+    let render_init = status.unwrap_initialized();
+    let scene = Scene::new(
+      render_init.loaded_models.models,
+      texture_loader::get_texture_offsets(),
+    );
 
     Self {
       status,
@@ -289,6 +314,7 @@ impl App {
       mouse_in_window: true,
       last_frames_durations: LastFramesDurations::new(),
       keys: Keys::new(),
+      last_update_mouse_pos: PhysicalPosition { x: 0.0, y: 0.0 },
     }
   }
 }
@@ -374,7 +400,7 @@ impl ApplicationHandler for App {
 
           if let Err(err) = status.renderer.render_next_frame(
             self.frame_i,
-            &self.scene,
+            &mut self.scene,
             self.last_frames_durations.get_min_max_average_fps(),
           ) {
             match err {

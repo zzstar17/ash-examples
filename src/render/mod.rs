@@ -20,6 +20,7 @@ use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
 pub use initialization::{RenderInit, RenderInitError};
+pub use pipelines::GraphicsPushConstants;
 pub use swapchain::AcquireNextImageError;
 pub use sync_renderer::SyncRenderer;
 pub use vertices::TexturedVertex;

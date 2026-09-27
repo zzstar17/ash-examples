@@ -3,7 +3,7 @@ use std::{marker::PhantomData, ptr};
 use ash::vk;
 use vkallocator::HostMemorySyncError;
 use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceManuallyDestroyed};
-use winit::window::Window;
+use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
   asset_loader::{texture_loader::TextureData, LoadedModels},
@@ -36,10 +36,24 @@ pub struct SyncRenderer {
 
 impl SyncRenderer {
   pub fn new(
-    renderer: Renderer,
+    entry: ash::Entry,
+    instance: ash::Instance,
+    #[cfg(feature = "vl")] debug_utils: vkinitialization::DebugUtils,
+    event_loop: &ActiveEventLoop,
+
     loaded_models: &LoadedModels,
-    sprite_texture_data: &TextureData,
+    texture_data: &mut TextureData,
   ) -> Result<Self, InitializationError> {
+    let renderer = Renderer::initialize(
+      entry,
+      instance,
+      #[cfg(feature = "vl")]
+      debug_utils,
+      event_loop,
+      loaded_models,
+      texture_data,
+    )?;
+
     let device = &renderer.device;
     let fence0 = create_fence(
       device,
@@ -61,7 +75,7 @@ impl SyncRenderer {
     let frame_fences = [fence0, fence1];
 
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, sprite_texture_data)?;
+      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_data)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -118,13 +132,11 @@ impl SyncRenderer {
   pub fn render_next_frame(
     &mut self,
     cur_total_frame: usize,
-    scene: &Scene,
+    scene: &mut Scene,
     fps: FPSDurations,
   ) -> Result<(), FrameRenderError> {
     let cur_frame_i = (self.last_frame_i + 1) % FRAMES_IN_FLIGHT;
     self.last_frame_i = cur_frame_i;
-
-    let matrices = scene.get_mvp_matrices();
 
     // wait for frame of the same set (that holds current frame resources) to finish rendering
     let gpu_bound = unsafe {
@@ -251,7 +263,7 @@ impl SyncRenderer {
       self.renderer.record_graphics(
         cur_frame_i,
         cur_image_i as usize,
-        &matrices,
+        &scene,
         record_screenshot,
         cur_total_frame == 0,
         true,

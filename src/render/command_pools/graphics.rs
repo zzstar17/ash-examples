@@ -18,7 +18,7 @@ use crate::{
     render_targets::RenderTargets,
     RENDER_EXTENT, RENDER_SIZE,
   },
-  scene::DrawMatrices,
+  scene::Scene,
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
 };
 
@@ -257,7 +257,7 @@ impl GraphicsCommandBufferPool {
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
-    matrices: &DrawMatrices,
+    scene: &Scene,
 
     screenshot_buffer: Option<vk::Buffer>,
     draw_text: bool,
@@ -363,7 +363,6 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_begin_rendering(cb, &rendering_info);
 
-      // draw ferris
       device.cmd_bind_descriptor_sets(
         cb,
         vk::PipelineBindPoint::GRAPHICS,
@@ -373,74 +372,12 @@ impl GraphicsCommandBufferPool {
         &[],
       );
 
-      let graphics_push_constants = GraphicsPushConstants {
-        matrix: matrices.ferris,
-        tex_offset: data.sprite_buffers.texture_offsets.ferris.offset,
-        tex_size: data.sprite_buffers.texture_offsets.ferris.size,
-      };
-      device.cmd_push_constants(
-        cb,
-        pipeline.layout,
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        utility::any_as_u8_slice(&graphics_push_constants),
-      );
-
       device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
       device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
       device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
-      device.cmd_draw_indexed(
-        cb,
-        data.sprite_buffers.models.quad.indices_len as u32,
-        1,
-        0,
-        0,
-        0,
-      );
 
-      // niko
-      let graphics_push_constants = GraphicsPushConstants {
-        matrix: matrices.niko,
-        tex_offset: data.sprite_buffers.texture_offsets.niko.offset,
-        tex_size: data.sprite_buffers.texture_offsets.niko.size,
-      };
-      device.cmd_push_constants(
-        cb,
-        pipeline.layout,
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        utility::any_as_u8_slice(&graphics_push_constants),
-      );
-      device.cmd_draw_indexed(
-        cb,
-        data.sprite_buffers.models.niko.indices_len as u32,
-        1,
-        data.sprite_buffers.models.niko.indices_offset as u32,
-        data.sprite_buffers.models.niko.vertices_offset as i32,
-        0,
-      );
-
-      // kakyoin
-      let graphics_push_constants = GraphicsPushConstants {
-        matrix: matrices.kakyoin,
-        tex_offset: data.sprite_buffers.texture_offsets.kakyoin.offset,
-        tex_size: data.sprite_buffers.texture_offsets.kakyoin.size,
-      };
-      device.cmd_push_constants(
-        cb,
-        pipeline.layout,
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        utility::any_as_u8_slice(&graphics_push_constants),
-      );
-      device.cmd_draw_indexed(
-        cb,
-        data.sprite_buffers.models.kakyoin.indices_len as u32,
-        1,
-        data.sprite_buffers.models.kakyoin.indices_offset as u32,
-        data.sprite_buffers.models.kakyoin.vertices_offset as i32,
-        0,
-      );
+      // models draw calls
+      scene.record_draw_calls(device, cb, pipeline.layout);
 
       // draw text ui 2d sprite on screen
       if draw_text {

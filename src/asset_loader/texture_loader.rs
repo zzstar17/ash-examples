@@ -1,6 +1,7 @@
 use crate::{
-  FERRIS_TEXTURE_OFFSET, FERRIS_TEXTURE_SIZE, KAKYOIN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_SIZE,
-  NIKO_TEXTURE_OFFSET, NIKO_TEXTURE_SIZE, SPRITES_TOTAL_SIZE, TEXTURE_PATH,
+  BLACK_TEXTURE_OFFSET, BLACK_TEXTURE_SIZE, FERRIS_TEXTURE_OFFSET, FERRIS_TEXTURE_SIZE,
+  KAKYOIN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_SIZE, NIKO_TEXTURE_OFFSET, NIKO_TEXTURE_SIZE,
+  SPRITES_TOTAL_SIZE, TEXTURE_PATH,
 };
 
 pub struct TextureData {
@@ -14,6 +15,7 @@ pub struct TextureOffsets {
   pub ferris: TextureLoc,
   pub niko: TextureLoc,
   pub kakyoin: TextureLoc,
+  pub black: TextureLoc,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -36,6 +38,10 @@ pub const fn get_texture_offsets() -> TextureOffsets {
     kakyoin: TextureLoc {
       offset: KAKYOIN_TEXTURE_OFFSET,
       size: KAKYOIN_TEXTURE_SIZE,
+    },
+    black: TextureLoc {
+      offset: BLACK_TEXTURE_OFFSET,
+      size: BLACK_TEXTURE_SIZE,
     },
   }
 }

@@ -5,21 +5,23 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::{
   asset_loader::{texture_loader::TextureData, LoadedModels},
-  render::{errors::InitializationError, renderer::Renderer, SyncRenderer},
+  render::{errors::InitializationError, SyncRenderer},
 };
 use std::mem;
 
 use std::{
-  self,
-  mem::MaybeUninit,
-  ptr::{self, addr_of_mut},
+  mem::ManuallyDrop,
+  {self},
 };
 
 pub struct RenderInit {
-  pub entry: ash::Entry,
-  pub instance: ash::Instance,
+  pub entry: ManuallyDrop<ash::Entry>,
+  pub instance: ManuallyDrop<ash::Instance>,
   #[cfg(feature = "vl")]
-  pub debug_utils: vkinitialization::DebugUtils,
+  pub debug_utils: ManuallyDrop<vkinitialization::DebugUtils>,
+
+  pub loaded_models: ManuallyDrop<LoadedModels>,
+  pub texture_data: ManuallyDrop<TextureData>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -29,6 +31,14 @@ pub enum RenderInitError {
 
   #[error("Failed to get display handle")]
   DisplayHandle(#[source] HandleError),
+
+  #[error(transparent)]
+  IOError(#[from] std::io::Error),
+  #[error("Failed to load models\n{0}\nPath: {1}")]
+  ModelLoadFailed(#[source] obj::ObjError, &'static str),
+
+  #[error("Image error: {0}")]
+  ImageError(#[from] image::ImageError),
 }
 
 impl From<InstanceCreationError> for RenderInitError {
@@ -38,7 +48,11 @@ impl From<InstanceCreationError> for RenderInitError {
 }
 
 impl RenderInit {
-  pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
+  pub fn new(
+    event_loop: &EventLoop<()>,
+    models: LoadedModels,
+    texture_data: TextureData,
+  ) -> Result<Self, RenderInitError> {
     let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
     let display_handle = event_loop
@@ -58,54 +72,39 @@ impl RenderInit {
       vkinitialization::create_instance(&entry, app_info, optional_extensions, display_handle)?;
 
     Ok(Self {
+      entry: ManuallyDrop::new(entry),
+      instance: ManuallyDrop::new(instance),
+      #[cfg(feature = "vl")]
+      debug_utils: ManuallyDrop::new(debug_utils),
+
+      loaded_models: ManuallyDrop::new(models),
+      texture_data: ManuallyDrop::new(texture_data),
+    })
+  }
+
+  pub fn start(
+    mut self,
+    event_loop: &ActiveEventLoop,
+  ) -> Result<SyncRenderer, InitializationError> {
+    let entry = unsafe { ManuallyDrop::take(&mut self.entry) };
+    let instance = unsafe { ManuallyDrop::take(&mut self.instance) };
+    #[cfg(feature = "vl")]
+    let debug_utils = unsafe { ManuallyDrop::take(&mut self.debug_utils) };
+    let models = unsafe { ManuallyDrop::take(&mut self.loaded_models) };
+    let mut texture_data = unsafe { ManuallyDrop::take(&mut self.texture_data) };
+    mem::forget(self);
+
+    let renderer = SyncRenderer::new(
       entry,
       instance,
       #[cfg(feature = "vl")]
       debug_utils,
-    })
-  }
+      event_loop,
+      &models,
+      &mut texture_data,
+    );
 
-  pub fn start(self, event_loop: &ActiveEventLoop) -> Result<SyncRenderer, InitializationError> {
-    let mut sprite_data = TextureData::read_texture_bytes_as_rgba8()?;
-    let loaded_models = LoadedModels::load()
-      .map_err(|(err, path)| InitializationError::ModelLoadFailed(err, path))?;
-
-    let renderer = Renderer::initialize(self, event_loop, &loaded_models, &mut sprite_data)?;
-    SyncRenderer::new(renderer, &loaded_models, &sprite_data)
-  }
-
-  // take values out without calling drop
-  #[cfg(feature = "vl")]
-  pub fn deconstruct(mut self) -> (ash::Entry, ash::Instance, vkinitialization::DebugUtils) {
-    unsafe {
-      // could't find a less stupid way of doing this
-      let mut entry: MaybeUninit<ash::Entry> = MaybeUninit::uninit();
-      ptr::copy_nonoverlapping(addr_of_mut!(self.entry), entry.as_mut_ptr(), 1);
-      let mut instance = MaybeUninit::uninit();
-      ptr::copy_nonoverlapping(addr_of_mut!(self.instance), instance.as_mut_ptr(), 1);
-      let mut debug_utils = MaybeUninit::uninit();
-      ptr::copy_nonoverlapping(addr_of_mut!(self.debug_utils), debug_utils.as_mut_ptr(), 1);
-
-      mem::forget(self);
-      (
-        entry.assume_init(),
-        instance.assume_init(),
-        debug_utils.assume_init(),
-      )
-    }
-  }
-
-  #[cfg(not(feature = "vl"))]
-  pub fn deconstruct(mut self) -> (ash::Entry, ash::Instance) {
-    unsafe {
-      let mut entry: MaybeUninit<ash::Entry> = MaybeUninit::uninit();
-      ptr::copy_nonoverlapping(addr_of_mut!(self.entry), entry.as_mut_ptr(), 1);
-      let mut instance = MaybeUninit::uninit();
-      ptr::copy_nonoverlapping(addr_of_mut!(self.instance), instance.as_mut_ptr(), 1);
-
-      mem::forget(self);
-      (entry.assume_init(), instance.assume_init())
-    }
+    renderer
   }
 }
 
@@ -115,6 +114,13 @@ impl Drop for RenderInit {
       #[cfg(feature = "vl")]
       self.debug_utils.destroy_self();
       self.instance.destroy_self();
+
+      ManuallyDrop::drop(&mut self.entry);
+      ManuallyDrop::drop(&mut self.instance);
+      #[cfg(feature = "vl")]
+      ManuallyDrop::drop(&mut self.debug_utils);
+      ManuallyDrop::drop(&mut self.loaded_models);
+      ManuallyDrop::drop(&mut self.texture_data);
     }
   }
 }

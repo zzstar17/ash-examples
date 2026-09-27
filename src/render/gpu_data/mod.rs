@@ -159,8 +159,13 @@ impl GPUData {
       + loaded_models.indices_size())
     .max(staging_size_required);
 
-    let staging_alloc =
-      allocations::allocate_staging_memory(device, physical_device, staging_size, marker)?;
+    let staging_alloc = allocations::allocate_staging_memory(
+      device,
+      physical_device,
+      staging_size,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
     let device_alloc = allocations::allocate_device(
       device,
       physical_device,
