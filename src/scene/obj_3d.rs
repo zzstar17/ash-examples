@@ -1,16 +1,56 @@
-use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, Quaternion, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector3, Vector4};
 
 /// Object information suitable for rendering in 3D. Caches certain matrices
 /// in order to perform less calculations while rendering.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Render3dObj {
+  pub rotation: Quaternion<f32>,
+  pub scale: Vector3<f32>,
+  pub model_matrix: Matrix4<f32>,
+}
+
+fn compose_model_matrix(
   position: Point3<f32>,
-  translation_matrix: Matrix4<f32>,
   rotation: Quaternion<f32>,
-  rotation_matrix: Matrix4<f32>,
   scale: Vector3<f32>,
-  scale_matrix: Matrix4<f32>,
-  model_matrix: Matrix4<f32>,
+) -> Matrix4<f32> {
+  let x2 = rotation.v.x + rotation.v.x;
+  let y2 = rotation.v.y + rotation.v.y;
+  let z2 = rotation.v.z + rotation.v.z;
+
+  let xx2 = x2 * rotation.v.x;
+  let xy2 = x2 * rotation.v.y;
+  let xz2 = x2 * rotation.v.z;
+
+  let yy2 = y2 * rotation.v.y;
+  let yz2 = y2 * rotation.v.z;
+  let zz2 = z2 * rotation.v.z;
+
+  let sy2 = y2 * rotation.s;
+  let sz2 = z2 * rotation.s;
+  let sx2 = x2 * rotation.s;
+
+  Matrix4::from_cols(
+    Vector4::new(
+      (1.0 - yy2 - zz2) * scale.x,
+      (xy2 + sz2) * scale.x,
+      (xz2 - sy2) * scale.x,
+      0.0,
+    ),
+    Vector4::new(
+      (xy2 - sz2) * scale.y,
+      (1.0 - xx2 - zz2) * scale.y,
+      (yz2 + sx2) * scale.y,
+      0.0,
+    ),
+    Vector4::new(
+      (xz2 + sy2) * scale.z,
+      (yz2 - sx2) * scale.z,
+      (1.0 - xx2 - yy2) * scale.z,
+      0.0,
+    ),
+    Vector4::new(position.x, position.y, position.z, 1.0),
+  )
 }
 
 #[allow(dead_code)]
@@ -22,87 +62,52 @@ impl Render3dObj {
     };
 
     let scale = 1.0;
-
-    let translation_matrix = Matrix4::from_translation(position.to_vec());
-    let rotation_matrix = Matrix4::from(rotation);
-    let scale_matrix = Matrix4::from_scale(scale);
+    let scale = Vector3::new(scale, scale, scale);
 
     Self {
-      position,
-      translation_matrix,
       rotation,
-      rotation_matrix,
-      scale: Vector3::new(scale, scale, scale),
-      scale_matrix,
-      model_matrix: translation_matrix * rotation_matrix * scale_matrix,
+      scale: scale,
+      model_matrix: compose_model_matrix(position, rotation, scale),
     }
   }
 
   pub fn from_full(position: Point3<f32>, rotation: Quaternion<f32>, scale: Vector3<f32>) -> Self {
     debug_assert!((rotation.magnitude2() - 1.0).abs() < 0.001);
 
-    let translation_matrix = Matrix4::from_translation(position.to_vec());
-    let rotation_matrix = Matrix4::from(rotation);
-    let scale_matrix = Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z);
-
     Self {
-      position,
-      translation_matrix,
       rotation,
-      rotation_matrix,
       scale,
-      scale_matrix,
-      model_matrix: translation_matrix * rotation_matrix * scale_matrix,
+      model_matrix: compose_model_matrix(position, rotation, scale),
     }
   }
 
-  pub fn model(&self) -> &Matrix4<f32> {
-    &self.model_matrix
+  pub fn model(&self) -> Matrix4<f32> {
+    self.model_matrix
   }
 
-  pub fn position(&self) -> &Point3<f32> {
-    &self.position
+  pub fn position(&self) -> Point3<f32> {
+    Point3 {
+      x: self.model_matrix.w.x,
+      y: self.model_matrix.w.y,
+      z: self.model_matrix.w.z,
+    }
   }
 
-  pub fn rotation(&self) -> &Quaternion<f32> {
-    &self.rotation
+  pub fn move_y(&mut self, relative: f32) {
+    self.model_matrix.w.y += relative;
   }
 
-  pub fn move_relative(&mut self, rel: Vector3<f32>) {
-    self.position += rel;
-    self.update_translation_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn move_relative_x(&mut self, relative_x: f32) {
-    self.position.x += relative_x;
-    self.update_translation_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn move_relative_y(&mut self, relative_y: f32) {
-    self.position.y += relative_y;
-    self.update_translation_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn move_relative_z(&mut self, relative_z: f32) {
-    self.position.z += relative_z;
-    self.update_translation_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn move_to(&mut self, new_position: Point3<f32>) {
-    self.position = new_position;
-    self.update_translation_matrix();
-    self.update_model_matrix();
+  pub fn set_position(&mut self, new_position: Point3<f32>) {
+    self.model_matrix.w.x = new_position.x;
+    self.model_matrix.w.y = new_position.y;
+    self.model_matrix.w.z = new_position.z;
   }
 
   pub fn set_rotation(&mut self, new_rotation: Quaternion<f32>) {
     self.rotation = new_rotation;
     debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
-    self.update_rotation_matrix();
-    self.update_model_matrix();
+
+    self.update_model_matrix_full();
   }
 
   pub fn rotate(&mut self, rotation: Quaternion<f32>) {
@@ -110,54 +115,10 @@ impl Render3dObj {
     self.rotation = rotation * self.rotation;
     debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
 
-    self.update_rotation_matrix();
-    self.update_model_matrix();
+    self.update_model_matrix_full();
   }
 
-  pub fn set_scale(&mut self, new_scale: Vector3<f32>) {
-    self.scale = new_scale;
-    self.update_scale_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn move_and_rotate(&mut self, new_position: Point3<f32>, new_rotation: Quaternion<f32>) {
-    self.position = new_position;
-    self.rotation = new_rotation;
-    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
-    self.update_translation_matrix();
-    self.update_rotation_matrix();
-    self.update_model_matrix();
-  }
-
-  pub fn update(
-    &mut self,
-    new_position: Point3<f32>,
-    new_rotation: Quaternion<f32>,
-    new_scale: Vector3<f32>,
-  ) {
-    self.position = new_position;
-    self.rotation = new_rotation;
-    debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
-    self.scale = new_scale;
-    self.update_translation_matrix();
-    self.update_rotation_matrix();
-    self.update_scale_matrix();
-    self.update_model_matrix();
-  }
-
-  fn update_translation_matrix(&mut self) {
-    self.translation_matrix = Matrix4::from_translation(self.position.to_vec());
-  }
-
-  fn update_rotation_matrix(&mut self) {
-    self.rotation_matrix = Matrix4::from(self.rotation);
-  }
-
-  fn update_scale_matrix(&mut self) {
-    self.scale_matrix = Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
-  }
-
-  fn update_model_matrix(&mut self) {
-    self.model_matrix = self.translation_matrix * self.rotation_matrix * self.scale_matrix;
+  fn update_model_matrix_full(&mut self) {
+    self.model_matrix = compose_model_matrix(self.position(), self.rotation, self.scale);
   }
 }

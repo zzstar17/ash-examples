@@ -2,7 +2,7 @@ use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk::{self, ClearDepthStencilValue};
 use ash_slug::SlugPushConstants;
-use cgmath::{Matrix4, Vector4};
+use cgmath::{Matrix, Matrix4, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
@@ -225,7 +225,14 @@ impl GraphicsCommandBufferPool {
       0,
       vk::IndexType::UINT32,
     );
-    device.cmd_draw_indexed(cb, data.text.device_index_count, 1, 0, 0, 0);
+    device.cmd_draw_indexed(
+      cb,
+      data.text.device_2d_offsets.indices_len,
+      1,
+      data.text.device_2d_offsets.indices_offset,
+      data.text.device_2d_offsets.vertices_offset as i32,
+      0,
+    );
 
     device.cmd_end_rendering(cb);
 
@@ -433,22 +440,35 @@ impl GraphicsCommandBufferPool {
           );
         }
 
+        // switch to text pipeline
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+        device.cmd_bind_descriptor_sets(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          text_pipeline.layout,
+          0,
+          &[descriptor_pool.text_set],
+          &[],
+        );
+
+        // draw text on top of models
+        // todo: make this be calculated in scene
+        let projection_view = scene.camera.projection_view();
         {
-          let text_pc = SlugPushConstants::new_2d(
-            RENDER_SIZE.x,
-            RENDER_SIZE.y,
-            [10.0, data.text_ui_line_size + 10.0],
+          device.cmd_bind_vertex_buffers(cb, 0, &[data.text.buffers.device.vertices], &[0]);
+          device.cmd_bind_index_buffer(
+            cb,
+            data.text.buffers.device.indices,
+            data.text.device_2d_offsets.indices_len as u64 * size_of::<f32>() as u64,
+            vk::IndexType::UINT32,
           );
 
-          device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
-          device.cmd_bind_descriptor_sets(
-            cb,
-            vk::PipelineBindPoint::GRAPHICS,
-            text_pipeline.layout,
-            0,
-            &[descriptor_pool.text_set],
-            &[],
-          );
+          let matrix = (projection_view * scene.niko_text.model()).transpose();
+          let arrays = std::mem::transmute(matrix);
+          let text_pc = SlugPushConstants {
+            mvp_matrix: arrays,
+            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y, 0.0, 0.0],
+          };
           device.cmd_push_constants(
             cb,
             text_pipeline.layout,
@@ -456,6 +476,33 @@ impl GraphicsCommandBufferPool {
             0,
             utility::any_as_u8_slice(&text_pc),
           );
+          device.cmd_draw_indexed(cb, data.text.niko_offsets.indices_len, 1, 0, 0, 0);
+
+          let matrix = (projection_view * scene.kakyoin_text.model()).transpose();
+          let arrays = std::mem::transmute(matrix);
+          let text_pc = SlugPushConstants {
+            mvp_matrix: arrays,
+            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y, 0.0, 0.0],
+          };
+          device.cmd_push_constants(
+            cb,
+            text_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&text_pc),
+          );
+          device.cmd_draw_indexed(
+            cb,
+            data.text.kakyoin_offsets.indices_len,
+            1,
+            data.text.kakyoin_offsets.indices_offset,
+            0,
+            0,
+          );
+        }
+
+        // draw fast changing ui text
+        {
           // this should be synchronized with host because of host write ordering guarantees
           // https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-submission-host-writes
           device.cmd_bind_vertex_buffers(cb, 0, &[*data.text.buffers.host[frame_i].vertices], &[0]);
@@ -464,6 +511,19 @@ impl GraphicsCommandBufferPool {
             *data.text.buffers.host[frame_i].indices,
             0,
             vk::IndexType::UINT32,
+          );
+
+          let text_pc = SlugPushConstants::new_2d(
+            RENDER_SIZE.x,
+            RENDER_SIZE.y,
+            [10.0, data.text_ui_line_size + 10.0],
+          );
+          device.cmd_push_constants(
+            cb,
+            text_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&text_pc),
           );
           device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
         }

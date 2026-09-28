@@ -24,7 +24,6 @@ mod ferris;
 mod obj_3d;
 
 pub struct Scene {
-  pub drawing_data: Vec<GraphicsPushConstants>,
   pub models: Models,
   pub textures: TextureOffsets,
 
@@ -35,6 +34,9 @@ pub struct Scene {
   pub niko_obj: Render3dObj,
   pub kakyoin_obj: Render3dObj,
   pub ferris_borders: [Render3dObj; 4],
+
+  pub niko_text: Render3dObj,
+  pub kakyoin_text: Render3dObj,
 }
 
 // axis should be normalized
@@ -57,7 +59,7 @@ impl Scene {
       0.0003,
     );
 
-    let angle: f32 = f32::consts::PI / 2.0;
+    let angle: f32 = 0.0;
 
     let ferris_obj = Render3dObj::from_full(
       Point3::new(ferris.pos[0], ferris.pos[1], -3.0),
@@ -97,10 +99,12 @@ impl Scene {
       Vector3::new(1.0, 1.0, 1.0),
     );
 
-    let drawing_data = vec![GraphicsPushConstants::default(); 7];
+    let mut niko_text = niko_obj.clone();
+    niko_text.move_y(-3.5);
+    let mut kakyoin_text = kakyoin_obj.clone();
+    kakyoin_text.move_y(-1.5);
 
     Self {
-      drawing_data,
       models,
       textures,
       ferris,
@@ -109,6 +113,9 @@ impl Scene {
       ferris_borders,
       niko_obj,
       kakyoin_obj,
+
+      niko_text,
+      kakyoin_text,
     }
   }
 
@@ -126,7 +133,7 @@ impl Scene {
 
     self
       .ferris_obj
-      .move_to(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
+      .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
   }
 
   fn get_ferris_data(&self, projection_view: Matrix4<f32>) -> (GraphicsPushConstants, ModelOffset) {

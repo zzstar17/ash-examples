@@ -21,6 +21,14 @@ use crate::{
   scene::Scene,
 };
 
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TextOffsets {
+  pub vertices_offset: u32,
+  pub indices_offset: u32,
+  pub vertices_len: u32,
+  pub indices_len: u32,
+}
+
 pub struct TextManager {
   pub slug: SlugRendering<'static>,
   pub buffers: TextBuffers,
@@ -30,7 +38,11 @@ pub struct TextManager {
   pub host_vertices: Vec<SlugVertex>,
   pub host_indices: Vec<u32>,
 
-  pub device_index_count: u32,
+  pub device_initialized: bool,
+  pub device_2d_offsets: TextOffsets,
+  pub niko_offsets: TextOffsets,
+  pub kakyoin_offsets: TextOffsets,
+
   pub host_index_count: u32,
 
   fps_offset: vk::Offset2D,
@@ -57,6 +69,8 @@ impl TextManager {
 
     let mut device_vertices = Vec::new();
     let mut device_indices = Vec::new();
+
+    // build ui text
     let line_dist = slug.get_line_dist(1.5);
     let TextBuildResult {
       rect: rect_fps,
@@ -129,6 +143,46 @@ impl TextManager {
     full_size.max[0] += 10.0;
     full_size.max[1] += 15.0;
 
+    let device_2d_offsets = TextOffsets {
+      vertices_offset: 0,
+      indices_offset: 0,
+      vertices_len: device_vertices.len() as u32,
+      indices_len: device_indices.len() as u32,
+    };
+
+    // build 3d text
+    // todo: hot mess rn, need to improve library
+    slug.build_text(
+      "niko",
+      1,
+      vk::Offset2D { x: 0, y: 0 },
+      &mut device_vertices,
+      &mut device_indices,
+    );
+    let niko_offsets = TextOffsets {
+      vertices_offset: 0,
+      indices_offset: 0,
+      vertices_len: device_vertices.len() as u32 - device_2d_offsets.vertices_len,
+      indices_len: device_indices.len() as u32 - device_2d_offsets.indices_len,
+    };
+    slug.build_text(
+      "kakyoin",
+      1,
+      vk::Offset2D { x: 0, y: 0 },
+      &mut device_vertices,
+      &mut device_indices,
+    );
+    let kakyoin_offsets = TextOffsets {
+      vertices_offset: niko_offsets.vertices_len,
+      indices_offset: niko_offsets.indices_len,
+      vertices_len: device_vertices.len() as u32
+        - device_2d_offsets.vertices_len
+        - niko_offsets.vertices_len,
+      indices_len: device_indices.len() as u32
+        - device_2d_offsets.indices_len
+        - niko_offsets.indices_len,
+    };
+
     let textures = slug.get_texture_data();
 
     let text_vertices_size = (device_vertices.len() * size_of::<SlugVertex>()) as u64;
@@ -144,6 +198,7 @@ impl TextManager {
         * ash_slug::INDICES_PER_GLYPH
         * size_of::<u32>()) as u64,
     };
+    log::debug!("Text buffer dimensions: {:?}", dimensions);
 
     let buffers = TextBuffers::new(
       device,
@@ -169,7 +224,11 @@ impl TextManager {
         device_indices,
         host_vertices: Vec::new(),
         host_indices: Vec::new(),
-        device_index_count: 0,
+
+        device_initialized: false,
+        device_2d_offsets,
+        niko_offsets,
+        kakyoin_offsets,
         host_index_count: 0,
 
         fps_offset,
@@ -365,7 +424,7 @@ impl TextManager {
       );
     }
 
-    self.device_index_count = self.device_indices.len() as u32;
+    self.device_initialized = true;
 
     Ok(())
   }

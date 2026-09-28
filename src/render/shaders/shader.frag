@@ -6,5 +6,10 @@ layout(location = 0) out vec4 out_color;
 layout(binding = 0) uniform sampler2D tex_sampler;
 
 void main() {
-  out_color = textureLod(tex_sampler, tex_coords, 0);
+  vec4 color = textureLod(tex_sampler, tex_coords, 0);
+  if (color.a < 0.1) {
+    discard;
+  }
+
+  out_color = color;
 }
