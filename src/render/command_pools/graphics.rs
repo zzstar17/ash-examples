@@ -1,7 +1,7 @@
 use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk::{self, ClearDepthStencilValue};
-use ash_slug::SlugPushConstants;
+use ash_slug::{SlugPushConstants, SlugVertex};
 use cgmath::{Matrix, Matrix4, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
@@ -199,8 +199,10 @@ impl GraphicsCommandBufferPool {
     };
     device.cmd_begin_rendering(cb, &rendering_info);
 
-    let text_pc =
-      SlugPushConstants::new_2d(RENDER_SIZE.x, RENDER_SIZE.y, [0.0, data.text_ui_line_size]);
+    let text_pc = SlugPushConstants::new_2d(
+      [RENDER_SIZE.x, RENDER_SIZE.y],
+      [0.0, data.text_ui_line_size],
+    );
 
     device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
     device.cmd_bind_descriptor_sets(
@@ -455,7 +457,12 @@ impl GraphicsCommandBufferPool {
         // todo: make this be calculated in scene
         let projection_view = scene.camera.projection_view();
         {
-          device.cmd_bind_vertex_buffers(cb, 0, &[data.text.buffers.device.vertices], &[0]);
+          device.cmd_bind_vertex_buffers(
+            cb,
+            0,
+            &[data.text.buffers.device.vertices],
+            &[data.text.device_2d_offsets.vertices_len as u64 * size_of::<SlugVertex>() as u64],
+          );
           device.cmd_bind_index_buffer(
             cb,
             data.text.buffers.device.indices,
@@ -467,7 +474,7 @@ impl GraphicsCommandBufferPool {
           let arrays = std::mem::transmute(matrix);
           let text_pc = SlugPushConstants {
             mvp_matrix: arrays,
-            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y, 0.0, 0.0],
+            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
           };
           device.cmd_push_constants(
             cb,
@@ -476,13 +483,20 @@ impl GraphicsCommandBufferPool {
             0,
             utility::any_as_u8_slice(&text_pc),
           );
-          device.cmd_draw_indexed(cb, data.text.niko_offsets.indices_len, 1, 0, 0, 0);
+          device.cmd_draw_indexed(
+            cb,
+            data.text.niko_offsets.indices_len,
+            1,
+            data.text.niko_offsets.indices_offset,
+            0,
+            0,
+          );
 
           let matrix = (projection_view * scene.kakyoin_text.model()).transpose();
           let arrays = std::mem::transmute(matrix);
           let text_pc = SlugPushConstants {
             mvp_matrix: arrays,
-            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y, 0.0, 0.0],
+            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
           };
           device.cmd_push_constants(
             cb,
@@ -496,7 +510,7 @@ impl GraphicsCommandBufferPool {
             data.text.kakyoin_offsets.indices_len,
             1,
             data.text.kakyoin_offsets.indices_offset,
-            0,
+            data.text.kakyoin_offsets.vertices_offset as i32,
             0,
           );
         }
@@ -514,8 +528,7 @@ impl GraphicsCommandBufferPool {
           );
 
           let text_pc = SlugPushConstants::new_2d(
-            RENDER_SIZE.x,
-            RENDER_SIZE.y,
+            [RENDER_SIZE.x, RENDER_SIZE.y],
             [10.0, data.text_ui_line_size + 10.0],
           );
           device.cmd_push_constants(

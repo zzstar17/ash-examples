@@ -2,7 +2,7 @@ use std::ptr;
 
 use ash::vk;
 use ash_slug::{
-  slug_rendering::{SlugRendering, TextBuildResult},
+  slug_rendering::{SimulateTextBuildResult, SlugRendering, TextBuildResult},
   PointRect, SlugVertex,
 };
 use vkallocator::{HostMemorySyncError, MappedHostBuffer};
@@ -65,7 +65,7 @@ impl TextManager {
     let shaper = font::SHAPER_DATA.shaper(&font::FONT_REF).build();
     let mut slug = SlugRendering::new(&font::FONT_FACE, shaper);
 
-    slug.add_glyphs_in_str(" 0123456789,.;yesno");
+    slug.add_glyphs_in_str(" 0123456789-+=,.:;yesno");
 
     let mut device_vertices = Vec::new();
     let mut device_indices = Vec::new();
@@ -80,6 +80,7 @@ impl TextManager {
       "fps: ",
       Self::FONT_SIZE,
       vk::Offset2D { x: 0, y: 0 },
+      false,
       &mut device_vertices,
       &mut device_indices,
     );
@@ -94,6 +95,7 @@ impl TextManager {
         x: 0,
         y: -line_dist,
       },
+      false,
       &mut device_vertices,
       &mut device_indices,
     );
@@ -108,6 +110,7 @@ impl TextManager {
         x: 0,
         y: -line_dist * 2,
       },
+      false,
       &mut device_vertices,
       &mut device_indices,
     );
@@ -122,16 +125,18 @@ impl TextManager {
         x: 0,
         y: -line_dist * 3,
       },
+      false,
       &mut device_vertices,
       &mut device_indices,
     );
     // simulate longest line
-    let TextBuildResult {
+    let SimulateTextBuildResult {
       rect: rect_longest, ..
     } = slug.simulate_build_text(
       "-1000.0, -1000.0, -1000.0",
       Self::FONT_SIZE,
       camera_front_offset,
+      false,
     );
     let mut full_size = rect_fps
       .or(rect_gpu_idle)
@@ -151,36 +156,48 @@ impl TextManager {
     };
 
     // build 3d text
-    // todo: hot mess rn, need to improve library
-    slug.build_text(
-      "niko",
+    let TextBuildResult {
+      new_vertex_offset,
+      new_index_offset,
+      new_vertex_count,
+      new_index_count,
+      ..
+    } = slug.build_text_with_offset(
+      "Niko",
       1,
       vk::Offset2D { x: 0, y: 0 },
+      true,
+      0,
       &mut device_vertices,
       &mut device_indices,
     );
     let niko_offsets = TextOffsets {
-      vertices_offset: 0,
-      indices_offset: 0,
-      vertices_len: device_vertices.len() as u32 - device_2d_offsets.vertices_len,
-      indices_len: device_indices.len() as u32 - device_2d_offsets.indices_len,
+      vertices_offset: new_vertex_offset - device_2d_offsets.vertices_len,
+      indices_offset: new_index_offset - device_2d_offsets.indices_len,
+      vertices_len: new_vertex_count,
+      indices_len: new_index_count,
     };
-    slug.build_text(
-      "kakyoin",
+
+    let TextBuildResult {
+      new_vertex_offset,
+      new_index_offset,
+      new_vertex_count,
+      new_index_count,
+      ..
+    } = slug.build_text_with_offset(
+      "Kakyoin",
       1,
       vk::Offset2D { x: 0, y: 0 },
+      true,
+      0,
       &mut device_vertices,
       &mut device_indices,
     );
     let kakyoin_offsets = TextOffsets {
-      vertices_offset: niko_offsets.vertices_len,
-      indices_offset: niko_offsets.indices_len,
-      vertices_len: device_vertices.len() as u32
-        - device_2d_offsets.vertices_len
-        - niko_offsets.vertices_len,
-      indices_len: device_indices.len() as u32
-        - device_2d_offsets.indices_len
-        - niko_offsets.indices_len,
+      vertices_offset: new_vertex_offset - device_2d_offsets.vertices_len,
+      indices_offset: new_index_offset - device_2d_offsets.indices_len,
+      vertices_len: new_vertex_count,
+      indices_len: new_index_count,
     };
 
     let textures = slug.get_texture_data();
@@ -447,6 +464,7 @@ impl TextManager {
       &fps_text,
       Self::FONT_SIZE,
       self.fps_offset,
+      false,
       &mut self.host_vertices,
       &mut self.host_indices,
     );
@@ -454,6 +472,7 @@ impl TextManager {
       if gpu_bound { "yes" } else { "no" },
       Self::FONT_SIZE,
       self.gpu_idle_offset,
+      false,
       &mut self.host_vertices,
       &mut self.host_indices,
     );
@@ -466,6 +485,7 @@ impl TextManager {
       camera_pos_text,
       Self::FONT_SIZE,
       self.camera_pos_offset,
+      false,
       &mut self.host_vertices,
       &mut self.host_indices,
     );
@@ -478,6 +498,7 @@ impl TextManager {
       camera_front_text,
       Self::FONT_SIZE,
       self.camera_front_offset,
+      false,
       &mut self.host_vertices,
       &mut self.host_indices,
     );

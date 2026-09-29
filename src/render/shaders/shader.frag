@@ -7,9 +7,9 @@ layout(binding = 0) uniform sampler2D tex_sampler;
 
 void main() {
   vec4 color = textureLod(tex_sampler, tex_coords, 0);
-  if (color.a < 0.1) {
-    discard;
-  }
+  // if (color.a < 0.1) {
+  //   discard;
+  // }
 
   out_color = color;
 }

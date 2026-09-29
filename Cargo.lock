@@ -234,9 +234,9 @@ dependencies = [
 
 [[package]]
 name = "ash-slug"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed7d2984e53da27f9aaf9ae3291e6c5f7cfe67537ef022c11b256449d47984e1"
+checksum = "0ddddd1a97e1428301093f39e9f8accf9b904754e1ac4c3c3e786b4ad5c8d05c"
 dependencies = [
  "ash",
  "harfrust",

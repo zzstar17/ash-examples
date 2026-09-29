@@ -2,6 +2,8 @@ use std::f32::consts::PI;
 
 use cgmath::{InnerSpace, Matrix4, PerspectiveFov, Point3, Rad, Vector3};
 
+use super::UP;
+
 const HALF_PI: f32 = PI / 2.0;
 
 pub struct Camera {
@@ -41,17 +43,11 @@ impl Camera {
   }
 }
 
-// normalized vector pointing up
-const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
-
 /// Camera with dynamic up / down directions.
 pub struct RenderCamera {
   camera: Camera,
   /// normalized front vector
   front: Vector3<f32>,
-  // used in rotate
-  // name doesn't make sense if camera is not controlled by mouse
-  sensitivity: f32,
   fov: f32,
   aspect_ratio: f32,
   /// cached because it's not frequently updated
@@ -69,7 +65,6 @@ impl RenderCamera {
     Self {
       camera,
       front,
-      sensitivity,
       fov,
       aspect_ratio,
       projection_matrix: calc_projection_matrix(fov, aspect_ratio),
@@ -115,19 +110,27 @@ impl RenderCamera {
   }
 
   pub fn rotate(&mut self, delta_x: f32, delta_y: f32) {
-    self.camera.yaw_relative(delta_x * self.sensitivity);
-    self.camera.pitch_relative(delta_y * self.sensitivity);
+    self.camera.yaw_relative(delta_x);
+    self.camera.pitch_relative(delta_y);
     self.front = self.camera.get_front();
   }
 
   pub fn move_forward(&mut self, duration: &std::time::Duration) {
     let distance = self.camera.speed * duration.as_secs_f32();
-    self.camera.position += self.front * distance;
+
+    let front_small = Vector3::new(self.front.x, 0.0, self.front.z);
+    if front_small.magnitude2() > 0.001 {
+      self.camera.position += front_small.normalize() * distance;
+    }
   }
 
   pub fn move_backwards(&mut self, duration: &std::time::Duration) {
     let distance = self.camera.speed * duration.as_secs_f32();
-    self.camera.position -= self.front * distance;
+
+    let front_small = Vector3::new(self.front.x, 0.0, self.front.z);
+    if front_small.magnitude2() > 0.001 {
+      self.camera.position -= front_small.normalize() * distance;
+    }
   }
 
   pub fn move_left(&mut self, duration: &std::time::Duration) {

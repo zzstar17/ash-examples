@@ -26,7 +26,7 @@ vkinitialization = { version = "0.1.11", git = "https://github.com/zzstar17/vkin
     "surface"
 ] }
 vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocator", default-features = false}
-ash-slug= "0.1.4"
+ash-slug= "0.1.5"
 
 harfrust = "0.13.0"
 ttf-parser = "0.25.1"

@@ -177,11 +177,11 @@ struct App {
   window_resize_handler: WindowResizeHandler,
   mouse_position: PhysicalPosition<f64>,
   mouse_in_window: bool,
+  mouse_grab: bool,
+  mouse_delta: [f64; 2],
   keys: Keys,
   scene: Scene,
-  ferris_drag_mouse_pos: Option<[f64; 2]>,
   last_update: Instant,
-  last_update_mouse_pos: PhysicalPosition<f64>,
   last_frames_durations: LastFramesDurations<60>,
   time_since_last_fps_print: Duration,
   frame_i: usize,
@@ -310,11 +310,11 @@ impl App {
       time_since_last_fps_print,
       frame_i,
       mouse_position: PhysicalPosition { x: 0.0, y: 0.0 },
-      ferris_drag_mouse_pos: None,
       mouse_in_window: true,
+      mouse_grab: false,
       last_frames_durations: LastFramesDurations::new(),
       keys: Keys::new(),
-      last_update_mouse_pos: PhysicalPosition { x: 0.0, y: 0.0 },
+      mouse_delta: [0.0, 0.0],
     }
   }
 }
@@ -345,12 +345,9 @@ impl ApplicationHandler for App {
   ) {
     #[allow(clippy::single_match)]
     match event {
-      DeviceEvent::MouseMotion { delta } if !self.mouse_in_window => {
-        // try to keep track of the mouse outside the window
-        if let Some(pos) = self.ferris_drag_mouse_pos.as_mut() {
-          pos[0] += delta.0;
-          pos[1] += delta.1;
-        }
+      DeviceEvent::MouseMotion { delta } => {
+        self.mouse_delta[0] += delta.0;
+        self.mouse_delta[1] += delta.1;
       }
 
       _ => {}
@@ -383,6 +380,13 @@ impl ApplicationHandler for App {
         let time_passed = now - self.last_update;
         self.last_update = now;
 
+        let delta_mouse = if self.mouse_grab {
+          Some(self.mouse_delta)
+        } else {
+          None
+        };
+        self.mouse_delta = [0.0; 2];
+
         self.last_frames_durations.update_new(time_passed);
 
         self.time_since_last_fps_print += time_passed;
@@ -396,7 +400,7 @@ impl ApplicationHandler for App {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
           }
-          self.scene.update(time_passed, &self.keys);
+          self.scene.update(time_passed, &self.keys, delta_mouse);
 
           if let Err(err) = status.renderer.render_next_frame(
             self.frame_i,
@@ -465,9 +469,6 @@ impl ApplicationHandler for App {
       }
       WindowEvent::CursorMoved { position, .. } => {
         self.mouse_position = position;
-        if let Some(drag) = self.ferris_drag_mouse_pos.as_mut() {
-          *drag = [position.x, position.y];
-        }
       }
       WindowEvent::CursorEntered { .. } => {
         self.mouse_in_window = true;
@@ -500,6 +501,29 @@ impl ApplicationHandler for App {
             KeyCode::F2 | KeyCode::F12 => {
               if pressed && !repeating {
                 status.renderer.screenshot();
+              }
+            }
+            KeyCode::KeyC if pressed && !repeating => {
+              self.mouse_grab = !self.mouse_grab;
+              log::debug!("Mouse grab: {}", self.mouse_grab);
+              if self.mouse_grab {
+                let result = status
+                  .renderer
+                  .window()
+                  .set_cursor_grab(winit::window::CursorGrabMode::Locked);
+                if let Err(err) = result {
+                  log::error!("Failed to lock cursor: {}", err);
+                  self.mouse_grab = false;
+                }
+              } else {
+                let result = status
+                  .renderer
+                  .window()
+                  .set_cursor_grab(winit::window::CursorGrabMode::None);
+                if let Err(err) = result {
+                  log::error!("Failed to unlock cursor: {}", err);
+                  self.mouse_grab = true;
+                }
               }
             }
             KeyCode::F3 | KeyCode::F10 if pressed && !repeating => {

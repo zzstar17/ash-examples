@@ -1,7 +1,7 @@
 use std::{f32, time::Duration};
 
 use ash::vk;
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Rotation, Vector2, Vector3};
 use vkobjects::utility;
 
 use crate::{
@@ -23,6 +23,11 @@ mod camera;
 mod ferris;
 mod obj_3d;
 
+const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
+
+const CAMERA_MOUSE_SENSITIVITY: f64 = 1.5;
+const CAMERA_KEYBOARD_SENSITIVITY: f32 = 2.0;
+
 pub struct Scene {
   pub models: Models,
   pub textures: TextureOffsets,
@@ -34,6 +39,7 @@ pub struct Scene {
   pub niko_obj: Render3dObj,
   pub kakyoin_obj: Render3dObj,
   pub ferris_borders: [Render3dObj; 4],
+  pub axis: [Render3dObj; 3],
 
   pub niko_text: Render3dObj,
   pub kakyoin_text: Render3dObj,
@@ -56,7 +62,7 @@ impl Scene {
       Camera::new(1.0, f32::consts::PI / -2.0, 0.0),
       0.8,
       aspect_ratio,
-      0.0003,
+      3.0,
     );
 
     let angle: f32 = 0.0;
@@ -88,6 +94,23 @@ impl Scene {
         Vector3::new(0.03, 0.59, 1.0),
       ),
     ];
+    let axis = [
+      Render3dObj::from_full(
+        Point3::new(0.5, 0.0, 0.0),
+        Quaternion::new(1.0, 0.0, 0.0, 0.0),
+        Vector3::new(0.5, 0.05, 0.05),
+      ),
+      Render3dObj::from_full(
+        Point3::new(0.0, 0.5, 0.0),
+        Quaternion::new(1.0, 0.0, 0.0, 0.0),
+        Vector3::new(0.05, 0.5, 0.05),
+      ),
+      Render3dObj::from_full(
+        Point3::new(0.0, 0.0, 0.5),
+        Quaternion::new(1.0, 0.0, 0.0, 0.0),
+        Vector3::new(0.05, 0.05, 0.5),
+      ),
+    ];
     let niko_obj = Render3dObj::from_full(
       Point3::new(16.0, 0.0, -4.0),
       quaternion_from_angle(angle, Vector3::new(0.2, 1.0, 0.0).normalize()),
@@ -113,23 +136,44 @@ impl Scene {
       ferris_borders,
       niko_obj,
       kakyoin_obj,
+      axis,
 
       niko_text,
       kakyoin_text,
     }
   }
 
-  pub fn update(&mut self, time_since_last_update: Duration, keys: &Keys) {
+  pub fn update(
+    &mut self,
+    time_since_last_update: Duration,
+    keys: &Keys,
+    camera_mov: Option<[f64; 2]>,
+  ) {
+    if let Some(mov) = camera_mov {
+      let delta_x = mov[0] * time_since_last_update.as_secs_f64() * CAMERA_MOUSE_SENSITIVITY;
+      let delta_y = mov[1] * time_since_last_update.as_secs_f64() * CAMERA_MOUSE_SENSITIVITY;
+      self.camera.rotate(delta_x as f32, delta_y as f32);
+    }
+
     self.update_from_keys(keys, time_since_last_update);
 
     self.ferris.update(time_since_last_update);
 
-    let angle = 0.02 * time_since_last_update.as_secs_f32();
+    let angle = 0.04 * time_since_last_update.as_secs_f32();
     // rotate around y axis
     let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
 
     self.kakyoin_obj.rotate(rotation);
     self.niko_obj.rotate(rotation);
+
+    // make text gradually rotate towards the camera
+    let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
+    self
+      .niko_text
+      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
+    self
+      .kakyoin_text
+      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
 
     self
       .ferris_obj
@@ -166,6 +210,23 @@ impl Scene {
       fun(&self.ferris_borders[2]),
       fun(&self.ferris_borders[3]),
     ]
+  }
+
+  fn get_axis_data(
+    &self,
+    projection_view: Matrix4<f32>,
+  ) -> [(GraphicsPushConstants, ModelOffset); 3] {
+    let fun = |obj: &Render3dObj| {
+      let push_constants = GraphicsPushConstants {
+        matrix: projection_view * obj.model(),
+        tex_offset: self.textures.black.offset,
+        tex_size: self.textures.black.size,
+      };
+
+      (push_constants, self.models.cube)
+    };
+
+    [fun(&self.axis[0]), fun(&self.axis[1]), fun(&self.axis[2])]
   }
 
   fn get_niko_data(&self, projection_view: Matrix4<f32>) -> (GraphicsPushConstants, ModelOffset) {
@@ -220,6 +281,9 @@ impl Scene {
     }
     record_cmds(self.get_niko_data(projection_view));
     record_cmds(self.get_kakyoin(projection_view));
+    for data in self.get_axis_data(projection_view) {
+      record_cmds(data);
+    }
   }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {
@@ -254,13 +318,15 @@ impl Scene {
     }
     if keys.q ^ keys.e {
       if keys.q == Pressed {
-        self
-          .camera
-          .rotate(-5000.0 * time_since_last_update.as_secs_f32(), 0.0);
+        self.camera.rotate(
+          -CAMERA_KEYBOARD_SENSITIVITY * time_since_last_update.as_secs_f32(),
+          0.0,
+        );
       } else {
-        self
-          .camera
-          .rotate(5000.0 * time_since_last_update.as_secs_f32(), 0.0)
+        self.camera.rotate(
+          CAMERA_KEYBOARD_SENSITIVITY * time_since_last_update.as_secs_f32(),
+          0.0,
+        )
       }
     }
   }
