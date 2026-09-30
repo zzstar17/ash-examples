@@ -2,7 +2,7 @@ use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk::{self, ClearDepthStencilValue};
 use ash_slug::{SlugPushConstants, SlugVertex};
-use cgmath::{Matrix, Matrix4, Vector4};
+use cgmath::{Matrix, Matrix4, MetricSpace, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
@@ -97,9 +97,71 @@ impl GraphicsCommandBufferPool {
     pipeline: &GraphicsPipeline,
     scene: &Scene,
   ) {
-    for data in scene.get_crosshair_data() {
-      self.record_draw_indexed(device, pipeline.layout, data);
+    let cam = scene.camera.position();
+    let pos_x = cam.distance2(scene.crosshair[0].position());
+    let pos_y = cam.distance2(scene.crosshair[1].position());
+    let pos_z = cam.distance2(scene.crosshair[2].position());
+
+    // draw first ones farther away
+    let mut positions = [(pos_x, 0), (pos_y, 1), (pos_z, 2)];
+    positions.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    let data = scene.get_crosshair_data();
+    for (_, i) in positions {
+      self.record_draw_indexed(device, pipeline.layout, data[i]);
     }
+  }
+
+  pub unsafe fn record_draw_world_text(
+    &self,
+    device: &ash::Device,
+    pipeline: &TextPipeline,
+    scene: &Scene,
+    data: &GPUData,
+  ) {
+    let matrix = (scene.last_update_projection_view * scene.niko_text.model()).transpose();
+    let arrays = std::mem::transmute(matrix);
+    let text_pc = SlugPushConstants {
+      mvp_matrix: arrays,
+      viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
+    };
+    device.cmd_push_constants(
+      self.main,
+      pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&text_pc),
+    );
+    device.cmd_draw_indexed(
+      self.main,
+      data.text.niko_offsets.indices_len,
+      1,
+      data.text.niko_offsets.indices_offset,
+      0,
+      0,
+    );
+
+    let matrix = (scene.last_update_projection_view * scene.kakyoin_text.model()).transpose();
+    let arrays = std::mem::transmute(matrix);
+    let text_pc = SlugPushConstants {
+      mvp_matrix: arrays,
+      viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
+    };
+    device.cmd_push_constants(
+      self.main,
+      pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&text_pc),
+    );
+    device.cmd_draw_indexed(
+      self.main,
+      data.text.kakyoin_offsets.indices_len,
+      1,
+      data.text.kakyoin_offsets.indices_offset,
+      data.text.kakyoin_offsets.vertices_offset as i32,
+      0,
+    );
   }
 
   pub unsafe fn record_copy_staging_buffer_to_image(
@@ -341,8 +403,20 @@ impl GraphicsCommandBufferPool {
       layer_count: 1,
     };
 
-    // wait previous copy on render target
+    let color_clear_value = vk::ClearValue {
+      color: BACKGROUND_COLOR,
+    };
+    let depth_clear_value = vk::ClearValue {
+      depth_stencil: ClearDepthStencilValue {
+        depth: 1.0,
+        stencil: 0,
+      },
+    };
+
+    // todo: it may be worth to create separate pipelines for UI and world drawing
+    // it would at least technically mean I'm not binding the same pipelines twice
     {
+      // wait previous copy on render target
       let wait_render_target_color = vk::ImageMemoryBarrier2 {
         src_access_mask: vk::AccessFlags2::NONE,
         dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -377,15 +451,6 @@ impl GraphicsCommandBufferPool {
         ),
       );
 
-      let clear_value = vk::ClearValue {
-        color: BACKGROUND_COLOR,
-      };
-      let depth_clear_value = vk::ClearValue {
-        depth_stencil: ClearDepthStencilValue {
-          depth: 1.0,
-          stencil: 0,
-        },
-      };
       let color_attachments = [vk::RenderingAttachmentInfo {
         image_view: render_targets.color_views[frame_i],
         image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -394,7 +459,7 @@ impl GraphicsCommandBufferPool {
         resolve_image_layout: vk::ImageLayout::UNDEFINED,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::STORE,
-        clear_value,
+        clear_value: color_clear_value,
         ..Default::default()
       }];
       let depth_attachment = vk::RenderingAttachmentInfo {
@@ -424,80 +489,30 @@ impl GraphicsCommandBufferPool {
       };
       device.cmd_begin_rendering(cb, &rendering_info);
 
-      device.cmd_bind_descriptor_sets(
-        cb,
-        vk::PipelineBindPoint::GRAPHICS,
-        pipeline.layout,
-        0,
-        &[descriptor_pool.sprites_set],
-        &[],
-      );
+      // switch to graphics and record world objects (with depth buffer)
+      {
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
+        device.cmd_set_depth_test_enable(cb, true);
 
-      device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-      device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
-      device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
+        device.cmd_bind_descriptor_sets(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          pipeline.layout,
+          0,
+          &[descriptor_pool.sprites_set],
+          &[],
+        );
+        device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
+        device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
 
-      device.cmd_set_depth_test_enable(cb, true);
-      self.record_draw_scene_world_objects(device, pipeline, scene);
+        self.record_draw_scene_world_objects(device, pipeline, scene);
+      }
 
-      self.record_draw_crosshair(device, pipeline, scene);
-
-      // draw text ui 2d sprite on screen
-      if draw_text {
-        {
-          let ratio_x = data.text_ui_size.width as f32 / RENDER_SIZE.x;
-          let ratio_y = data.text_ui_size.height as f32 / RENDER_SIZE.y;
-          let offset_pixels_x = 10.0;
-          let offset_pixels_y = 10.0;
-          // top left + pixels
-          let offset_x = -1.0 + ratio_x + (offset_pixels_x * 2.0 / RENDER_SIZE.x);
-          let offset_y = -1.0 + ratio_y + (offset_pixels_y * 2.0 / RENDER_SIZE.y);
-
-          // column major orthogonal projection with translation
-          // (image on screen)
-          let matrix = Matrix4 {
-            x: Vector4::new(ratio_x, 0.0, 0.0, 0.0),
-            y: Vector4::new(0.0, ratio_y, 0.0, 0.0),
-            z: Vector4::new(0.0, 0.0, 0.0, 0.0),
-            w: Vector4::new(offset_x, offset_y, 0.0, 1.0),
-          };
-
-          let pc = GraphicsPushConstants {
-            matrix,
-            tex_offset: [0.0, 0.0],
-            tex_size: [
-              data.text_ui_size.width as f32,
-              data.text_ui_size.height as f32,
-            ],
-          };
-
-          device.cmd_bind_descriptor_sets(
-            cb,
-            vk::PipelineBindPoint::GRAPHICS,
-            pipeline.layout,
-            0,
-            &[descriptor_pool.text_ui_set],
-            &[],
-          );
-          device.cmd_push_constants(
-            cb,
-            pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&pc),
-          );
-          device.cmd_draw_indexed(
-            cb,
-            data.sprite_buffers.models.quad.indices_len as u32,
-            1,
-            0,
-            0,
-            0,
-          );
-        }
-
-        // switch to text pipeline
+      // switch to text pipeline and draw 3d world text
+      {
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+        device.cmd_set_depth_test_enable(cb, true);
+
         device.cmd_bind_descriptor_sets(
           cb,
           vk::PipelineBindPoint::GRAPHICS,
@@ -506,94 +521,137 @@ impl GraphicsCommandBufferPool {
           &[descriptor_pool.text_set],
           &[],
         );
+        device.cmd_bind_vertex_buffers(
+          cb,
+          0,
+          &[data.text.buffers.device.vertices],
+          &[data.text.device_2d_offsets.vertices_len as u64 * size_of::<SlugVertex>() as u64],
+        );
+        device.cmd_bind_index_buffer(
+          cb,
+          data.text.buffers.device.indices,
+          data.text.device_2d_offsets.indices_len as u64 * size_of::<f32>() as u64,
+          vk::IndexType::UINT32,
+        );
 
-        // draw text on top of models
-        // todo: make this be calculated in scene
-        let projection_view = scene.camera.projection_view();
-        {
-          device.cmd_bind_vertex_buffers(
-            cb,
-            0,
-            &[data.text.buffers.device.vertices],
-            &[data.text.device_2d_offsets.vertices_len as u64 * size_of::<SlugVertex>() as u64],
-          );
-          device.cmd_bind_index_buffer(
-            cb,
-            data.text.buffers.device.indices,
-            data.text.device_2d_offsets.indices_len as u64 * size_of::<f32>() as u64,
-            vk::IndexType::UINT32,
-          );
+        self.record_draw_world_text(device, text_pipeline, scene, data);
+      }
 
-          let matrix = (projection_view * scene.niko_text.model()).transpose();
-          let arrays = std::mem::transmute(matrix);
-          let text_pc = SlugPushConstants {
-            mvp_matrix: arrays,
-            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
-          };
-          device.cmd_push_constants(
-            cb,
-            text_pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&text_pc),
-          );
-          device.cmd_draw_indexed(
-            cb,
-            data.text.niko_offsets.indices_len,
-            1,
-            data.text.niko_offsets.indices_offset,
-            0,
-            0,
-          );
-
-          let matrix = (projection_view * scene.kakyoin_text.model()).transpose();
-          let arrays = std::mem::transmute(matrix);
-          let text_pc = SlugPushConstants {
-            mvp_matrix: arrays,
-            viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
-          };
-          device.cmd_push_constants(
-            cb,
-            text_pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&text_pc),
-          );
-          device.cmd_draw_indexed(
-            cb,
-            data.text.kakyoin_offsets.indices_len,
-            1,
-            data.text.kakyoin_offsets.indices_offset,
-            data.text.kakyoin_offsets.vertices_offset as i32,
-            0,
-          );
-        }
-
+      // switch back to graphics and draw ui
+      {
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
         device.cmd_set_depth_test_enable(cb, false);
-        // draw fast changing ui text
-        {
-          // this should be synchronized with host because of host write ordering guarantees
-          // https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-submission-host-writes
-          device.cmd_bind_vertex_buffers(cb, 0, &[*data.text.buffers.host[frame_i].vertices], &[0]);
-          device.cmd_bind_index_buffer(
-            cb,
-            *data.text.buffers.host[frame_i].indices,
-            0,
-            vk::IndexType::UINT32,
-          );
 
-          let text_pc = SlugPushConstants::new_2d(
-            [RENDER_SIZE.x, RENDER_SIZE.y],
-            [10.0, data.text_ui_line_size + 10.0],
-          );
-          device.cmd_push_constants(
-            cb,
-            text_pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&text_pc),
-          );
-          device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
+        device.cmd_bind_descriptor_sets(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          pipeline.layout,
+          0,
+          &[descriptor_pool.sprites_set],
+          &[],
+        );
+        device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
+        device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
+        self.record_draw_crosshair(device, pipeline, scene);
+
+        // text ui (prerendered sprite image, still uses graphics)
+        if draw_text {
+          {
+            // pipeline is still graphics
+
+            let ratio_x = data.text_ui_size.width as f32 / RENDER_SIZE.x;
+            let ratio_y = data.text_ui_size.height as f32 / RENDER_SIZE.y;
+            let offset_pixels_x = 10.0;
+            let offset_pixels_y = 10.0;
+            // top left + pixels
+            let offset_x = -1.0 + ratio_x + (offset_pixels_x * 2.0 / RENDER_SIZE.x);
+            let offset_y = -1.0 + ratio_y + (offset_pixels_y * 2.0 / RENDER_SIZE.y);
+
+            // column major orthogonal projection with translation
+            // (image on screen)
+            let matrix = Matrix4 {
+              x: Vector4::new(ratio_x, 0.0, 0.0, 0.0),
+              y: Vector4::new(0.0, ratio_y, 0.0, 0.0),
+              z: Vector4::new(0.0, 0.0, 0.0, 0.0),
+              w: Vector4::new(offset_x, offset_y, 0.0, 1.0),
+            };
+
+            let pc = GraphicsPushConstants {
+              matrix,
+              tex_offset: [0.0, 0.0],
+              tex_size: [
+                data.text_ui_size.width as f32,
+                data.text_ui_size.height as f32,
+              ],
+            };
+
+            device.cmd_bind_descriptor_sets(
+              cb,
+              vk::PipelineBindPoint::GRAPHICS,
+              pipeline.layout,
+              0,
+              &[descriptor_pool.text_ui_set],
+              &[],
+            );
+            device.cmd_push_constants(
+              cb,
+              pipeline.layout,
+              vk::ShaderStageFlags::VERTEX,
+              0,
+              utility::any_as_u8_slice(&pc),
+            );
+            device.cmd_draw_indexed(
+              cb,
+              data.sprite_buffers.models.quad.indices_len as u32,
+              1,
+              0,
+              0,
+              0,
+            );
+          }
+
+          // draw fast changing ui text
+          {
+            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+            device.cmd_set_depth_test_enable(cb, false);
+
+            device.cmd_bind_descriptor_sets(
+              cb,
+              vk::PipelineBindPoint::GRAPHICS,
+              text_pipeline.layout,
+              0,
+              &[descriptor_pool.text_set],
+              &[],
+            );
+
+            // this should be synchronized with host because of host write ordering guarantees
+            // https://docs.vulkan.org/spec/latest/chapters/synchronization.html#synchronization-submission-host-writes
+            device.cmd_bind_vertex_buffers(
+              cb,
+              0,
+              &[*data.text.buffers.host[frame_i].vertices],
+              &[0],
+            );
+            device.cmd_bind_index_buffer(
+              cb,
+              *data.text.buffers.host[frame_i].indices,
+              0,
+              vk::IndexType::UINT32,
+            );
+
+            let text_pc = SlugPushConstants::new_2d(
+              [RENDER_SIZE.x, RENDER_SIZE.y],
+              [10.0, data.text_ui_line_size + 10.0],
+            );
+            device.cmd_push_constants(
+              cb,
+              text_pipeline.layout,
+              vk::ShaderStageFlags::VERTEX,
+              0,
+              utility::any_as_u8_slice(&text_pc),
+            );
+            device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
+          }
         }
       }
 

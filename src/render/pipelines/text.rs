@@ -285,8 +285,8 @@ const fn no_depth_rasterization_state<'a>() -> vk::PipelineRasterizationStateCre
     p_next: ptr::null(),
     flags: vk::PipelineRasterizationStateCreateFlags::empty(),
     depth_clamp_enable: vk::FALSE,
-    cull_mode: vk::CullModeFlags::NONE,
-    front_face: vk::FrontFace::CLOCKWISE, // doesn't matter if cull_mode is none
+    cull_mode: vk::CullModeFlags::BACK,
+    front_face: vk::FrontFace::COUNTER_CLOCKWISE,
     line_width: 1.0,
     polygon_mode: vk::PolygonMode::FILL,
     rasterizer_discard_enable: vk::FALSE,

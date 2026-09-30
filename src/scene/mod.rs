@@ -23,7 +23,7 @@ mod obj_3d;
 
 const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
 
-const CAMERA_MOUSE_SENSITIVITY: f64 = 1.5;
+const CAMERA_MOUSE_SENSITIVITY: f64 = 0.006;
 const CAMERA_KEYBOARD_SENSITIVITY: f32 = 2.0;
 
 pub struct Scene {
@@ -152,14 +152,21 @@ impl Scene {
     camera_mov: Option<[f64; 2]>,
   ) {
     if let Some(mov) = camera_mov {
-      let delta_x = mov[0] * time_since_last_update.as_secs_f64() * CAMERA_MOUSE_SENSITIVITY;
-      let delta_y = mov[1] * time_since_last_update.as_secs_f64() * CAMERA_MOUSE_SENSITIVITY;
+      // todo: winit seems to be worse at keeping track of physical device mouse movements the higher the framerate
+      // (at least on wayland)
+      // jank solution
+      let delta_x = mov[0]
+        * (time_since_last_update.as_nanos() as f64 / 1000000000.0).powf(0.1)
+        * CAMERA_MOUSE_SENSITIVITY;
+      let delta_y = mov[1]
+        * (time_since_last_update.as_nanos() as f64 / 1000000000.0).powf(0.1)
+        * CAMERA_MOUSE_SENSITIVITY;
       self.camera.rotate(delta_x as f32, delta_y as f32);
     }
     self.update_from_keys(keys, time_since_last_update);
     self.last_update_projection_view = self.camera.projection_view();
 
-    let crosshair_position = self.camera.position() + self.camera.front() * 30.0;
+    let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
     self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
     self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
     self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));

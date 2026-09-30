@@ -67,7 +67,7 @@ const BACKGROUND_COLOR: vk::ClearColorValue = vk::ClearColorValue {
 // color exterior the game area
 // (that appears if window is resized to a size with ratio different that in RESOLUTION)
 const OUT_OF_BOUNDS_AREA_COLOR: vk::ClearColorValue = vk::ClearColorValue {
-  float32: [1.0, 0.0, 0.0, 1.0],
+  float32: [0.0, 0.0, 0.0, 1.0],
 };
 
 // see https://registry.khronos.org/vulkan/specs/1.3-extensions/man/html/VkPresentModeKHR.html
