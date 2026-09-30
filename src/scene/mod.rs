@@ -1,8 +1,6 @@
 use std::{f32, time::Duration};
 
-use ash::vk;
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Rotation, Vector2, Vector3};
-use vkobjects::utility;
+use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector3};
 
 use crate::{
   asset_loader::{model_loader::ModelOffset, texture_loader::TextureOffsets, Models},
@@ -32,6 +30,8 @@ pub struct Scene {
   pub models: Models,
   pub textures: TextureOffsets,
 
+  pub last_update_projection_view: Matrix4<f32>,
+
   pub ferris: Ferris,
   pub camera: RenderCamera,
 
@@ -39,7 +39,7 @@ pub struct Scene {
   pub niko_obj: Render3dObj,
   pub kakyoin_obj: Render3dObj,
   pub ferris_borders: [Render3dObj; 4],
-  pub axis: [Render3dObj; 3],
+  pub crosshair: [Render3dObj; 3],
 
   pub niko_text: Render3dObj,
   pub kakyoin_text: Render3dObj,
@@ -94,7 +94,7 @@ impl Scene {
         Vector3::new(0.03, 0.59, 1.0),
       ),
     ];
-    let axis = [
+    let crosshair = [
       Render3dObj::from_full(
         Point3::new(0.5, 0.0, 0.0),
         Quaternion::new(1.0, 0.0, 0.0, 0.0),
@@ -130,13 +130,15 @@ impl Scene {
     Self {
       models,
       textures,
+      last_update_projection_view: Matrix4::from_scale(1.0),
+
       ferris,
       camera,
       ferris_obj,
       ferris_borders,
       niko_obj,
       kakyoin_obj,
-      axis,
+      crosshair,
 
       niko_text,
       kakyoin_text,
@@ -154,8 +156,13 @@ impl Scene {
       let delta_y = mov[1] * time_since_last_update.as_secs_f64() * CAMERA_MOUSE_SENSITIVITY;
       self.camera.rotate(delta_x as f32, delta_y as f32);
     }
-
     self.update_from_keys(keys, time_since_last_update);
+    self.last_update_projection_view = self.camera.projection_view();
+
+    let crosshair_position = self.camera.position() + self.camera.front() * 30.0;
+    self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
+    self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
+    self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
 
     self.ferris.update(time_since_last_update);
 
@@ -180,9 +187,9 @@ impl Scene {
       .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
   }
 
-  fn get_ferris_data(&self, projection_view: Matrix4<f32>) -> (GraphicsPushConstants, ModelOffset) {
+  pub fn get_ferris_data(&self) -> (GraphicsPushConstants, ModelOffset) {
     let push_constants = GraphicsPushConstants {
-      matrix: projection_view * self.ferris_obj.model(),
+      matrix: self.last_update_projection_view * self.ferris_obj.model(),
       tex_offset: self.textures.ferris.offset,
       tex_size: self.textures.ferris.size,
     };
@@ -190,13 +197,10 @@ impl Scene {
     (push_constants, self.models.quad)
   }
 
-  fn get_ferris_borders_data(
-    &self,
-    projection_view: Matrix4<f32>,
-  ) -> [(GraphicsPushConstants, ModelOffset); 4] {
+  pub fn get_ferris_borders_data(&self) -> [(GraphicsPushConstants, ModelOffset); 4] {
     let fun = |obj: &Render3dObj| {
       let push_constants = GraphicsPushConstants {
-        matrix: projection_view * obj.model(),
+        matrix: self.last_update_projection_view * obj.model(),
         tex_offset: self.textures.black.offset,
         tex_size: self.textures.black.size,
       };
@@ -212,26 +216,33 @@ impl Scene {
     ]
   }
 
-  fn get_axis_data(
-    &self,
-    projection_view: Matrix4<f32>,
-  ) -> [(GraphicsPushConstants, ModelOffset); 3] {
-    let fun = |obj: &Render3dObj| {
-      let push_constants = GraphicsPushConstants {
-        matrix: projection_view * obj.model(),
-        tex_offset: self.textures.black.offset,
-        tex_size: self.textures.black.size,
-      };
-
-      (push_constants, self.models.cube)
+  pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, ModelOffset); 3] {
+    let pc_x = GraphicsPushConstants {
+      matrix: self.last_update_projection_view * self.crosshair[0].model(),
+      tex_offset: self.textures.red.offset,
+      tex_size: self.textures.red.size,
+    };
+    let pc_y = GraphicsPushConstants {
+      matrix: self.last_update_projection_view * self.crosshair[1].model(),
+      tex_offset: self.textures.green.offset,
+      tex_size: self.textures.green.size,
+    };
+    let pc_z = GraphicsPushConstants {
+      matrix: self.last_update_projection_view * self.crosshair[2].model(),
+      tex_offset: self.textures.blue.offset,
+      tex_size: self.textures.blue.size,
     };
 
-    [fun(&self.axis[0]), fun(&self.axis[1]), fun(&self.axis[2])]
+    [
+      (pc_x, self.models.cube),
+      (pc_y, self.models.cube),
+      (pc_z, self.models.cube),
+    ]
   }
 
-  fn get_niko_data(&self, projection_view: Matrix4<f32>) -> (GraphicsPushConstants, ModelOffset) {
+  pub fn get_niko_data(&self) -> (GraphicsPushConstants, ModelOffset) {
     let push_constants = GraphicsPushConstants {
-      matrix: projection_view * self.niko_obj.model(),
+      matrix: self.last_update_projection_view * self.niko_obj.model(),
       tex_offset: self.textures.niko.offset,
       tex_size: self.textures.niko.size,
     };
@@ -239,51 +250,14 @@ impl Scene {
     (push_constants, self.models.niko)
   }
 
-  fn get_kakyoin(&self, projection_view: Matrix4<f32>) -> (GraphicsPushConstants, ModelOffset) {
+  pub fn get_kakyoin(&self) -> (GraphicsPushConstants, ModelOffset) {
     let push_constants = GraphicsPushConstants {
-      matrix: projection_view * self.kakyoin_obj.model(),
+      matrix: self.last_update_projection_view * self.kakyoin_obj.model(),
       tex_offset: self.textures.kakyoin.offset,
       tex_size: self.textures.kakyoin.size,
     };
 
     (push_constants, self.models.kakyoin)
-  }
-
-  pub unsafe fn record_draw_calls(
-    &self,
-    device: &ash::Device,
-    cb: vk::CommandBuffer,
-    pipeline_layout: vk::PipelineLayout,
-  ) {
-    let record_cmds = |(push_constants, model_offsets): (GraphicsPushConstants, ModelOffset)| {
-      device.cmd_push_constants(
-        cb,
-        pipeline_layout,
-        vk::ShaderStageFlags::VERTEX,
-        0,
-        utility::any_as_u8_slice(&push_constants),
-      );
-      device.cmd_draw_indexed(
-        cb,
-        model_offsets.indices_len as u32,
-        1,
-        model_offsets.indices_offset as u32,
-        model_offsets.vertices_offset as i32,
-        0,
-      );
-    };
-
-    let projection_view = self.camera.projection_view();
-
-    record_cmds(self.get_ferris_data(projection_view));
-    for data in self.get_ferris_borders_data(projection_view) {
-      record_cmds(data);
-    }
-    record_cmds(self.get_niko_data(projection_view));
-    record_cmds(self.get_kakyoin(projection_view));
-    for data in self.get_axis_data(projection_view) {
-      record_cmds(data);
-    }
   }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {

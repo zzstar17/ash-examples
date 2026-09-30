@@ -1,6 +1,6 @@
 use std::f32::consts::PI;
 
-use cgmath::{InnerSpace, Matrix4, PerspectiveFov, Point3, Rad, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, Vector3, Vector4};
 
 use super::UP;
 
@@ -155,11 +155,21 @@ impl RenderCamera {
 }
 
 fn calc_projection_matrix(fov: f32, aspect_ratio: f32) -> Matrix4<f32> {
-  PerspectiveFov {
-    fovy: Rad(fov),
-    aspect: aspect_ratio,
-    far: 1000.0,
-    near: 0.1,
-  }
-  .into()
+  let far = 1000.0;
+  let near = 0.05;
+
+  let y_scale = 1.0 / f32::tan(fov * 0.5);
+  let x_scale = y_scale / aspect_ratio;
+
+  // right handed projection perspective fov matrix that keeps the deep range in [0, 1]
+  // yoinked from https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dxmatrixperspectivefovrh
+  // see https://github.com/rustgd/cgmath/issues/449
+  let m = Matrix4 {
+    x: Vector4::new(x_scale, 0.0, 0.0, 0.0),
+    y: Vector4::new(0.0, y_scale, 0.0, 0.0),
+    z: Vector4::new(0.0, 0.0, far / (near - far), -1.0),
+    w: Vector4::new(0.0, 0.0, near * far / (near - far), 0.0),
+  };
+
+  m
 }

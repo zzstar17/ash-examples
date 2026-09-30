@@ -170,7 +170,7 @@ impl TextPipeline {
     // no depth test
     let depth_stencil_state_ci = vk::PipelineDepthStencilStateCreateInfo {
       flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
-      depth_test_enable: vk::FALSE,
+      depth_test_enable: vk::TRUE,
       depth_write_enable: vk::TRUE,
       depth_compare_op: vk::CompareOp::LESS,
       depth_bounds_test_enable: vk::FALSE,
@@ -216,6 +216,15 @@ impl TextPipeline {
       ..Default::default()
     };
 
+    let dynamic = [vk::DynamicState::DEPTH_TEST_ENABLE];
+    // let dynamic = [];
+    let dynamic_state_ci = vk::PipelineDynamicStateCreateInfo {
+      flags: vk::PipelineDynamicStateCreateFlags::empty(),
+      dynamic_state_count: dynamic.len() as u32,
+      p_dynamic_states: dynamic.as_ptr(),
+      ..Default::default()
+    };
+
     let mut flags = vk::PipelineCreateFlags::ALLOW_DERIVATIVES;
     if !base.is_null() {
       flags = flags.bitor(vk::PipelineCreateFlags::DERIVATIVE)
@@ -234,7 +243,7 @@ impl TextPipeline {
       p_multisample_state: &multisample_state_ci,
       p_depth_stencil_state: &depth_stencil_state_ci,
       p_color_blend_state: &color_blend_state,
-      p_dynamic_state: ptr::null(),
+      p_dynamic_state: &dynamic_state_ci,
       layout,
       render_pass: vk::RenderPass::null(),
       subpass: 0,

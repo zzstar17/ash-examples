@@ -7,6 +7,7 @@ use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
+  asset_loader::model_loader::ModelOffset,
   render::{
     command_pools::{
       ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS, ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
@@ -73,6 +74,32 @@ impl GraphicsCommandBufferPool {
       vk::CommandBufferBeginInfo::default().flags(vk::CommandBufferUsageFlags::ONE_TIME_SUBMIT);
     device.begin_command_buffer(self.main, &begin_info)?;
     Ok(())
+  }
+
+  unsafe fn record_draw_scene_world_objects(
+    &self,
+    device: &ash::Device,
+    pipeline: &GraphicsPipeline,
+    scene: &Scene,
+  ) {
+    // device.cmd_set_depth_test_enable(cb, true);
+    self.record_draw_indexed(device, pipeline.layout, scene.get_ferris_data());
+    for data in scene.get_ferris_borders_data() {
+      self.record_draw_indexed(device, pipeline.layout, data);
+    }
+    self.record_draw_indexed(device, pipeline.layout, scene.get_niko_data());
+    self.record_draw_indexed(device, pipeline.layout, scene.get_kakyoin());
+  }
+
+  unsafe fn record_draw_crosshair(
+    &self,
+    device: &ash::Device,
+    pipeline: &GraphicsPipeline,
+    scene: &Scene,
+  ) {
+    for data in scene.get_crosshair_data() {
+      self.record_draw_indexed(device, pipeline.layout, data);
+    }
   }
 
   pub unsafe fn record_copy_staging_buffer_to_image(
@@ -198,6 +225,7 @@ impl GraphicsCommandBufferPool {
       ..Default::default()
     };
     device.cmd_begin_rendering(cb, &rendering_info);
+    device.cmd_set_depth_test_enable(cb, false);
 
     let text_pc = SlugPushConstants::new_2d(
       [RENDER_SIZE.x, RENDER_SIZE.y],
@@ -250,6 +278,30 @@ impl GraphicsCommandBufferPool {
       ..Default::default()
     };
     device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+  }
+
+  unsafe fn record_draw_indexed(
+    &self,
+    device: &ash::Device,
+    pipeline_layout: vk::PipelineLayout,
+    (push_constants, model_offsets): (GraphicsPushConstants, ModelOffset),
+  ) {
+    let cb = self.main;
+    device.cmd_push_constants(
+      cb,
+      pipeline_layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&push_constants),
+    );
+    device.cmd_draw_indexed(
+      cb,
+      model_offsets.indices_len as u32,
+      1,
+      model_offsets.indices_offset as u32,
+      model_offsets.vertices_offset as i32,
+      0,
+    );
   }
 
   pub unsafe fn record_main(
@@ -385,8 +437,10 @@ impl GraphicsCommandBufferPool {
       device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
       device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
 
-      // models draw calls
-      scene.record_draw_calls(device, cb, pipeline.layout);
+      device.cmd_set_depth_test_enable(cb, true);
+      self.record_draw_scene_world_objects(device, pipeline, scene);
+
+      self.record_draw_crosshair(device, pipeline, scene);
 
       // draw text ui 2d sprite on screen
       if draw_text {
@@ -515,6 +569,7 @@ impl GraphicsCommandBufferPool {
           );
         }
 
+        device.cmd_set_depth_test_enable(cb, false);
         // draw fast changing ui text
         {
           // this should be synchronized with host because of host write ordering guarantees
