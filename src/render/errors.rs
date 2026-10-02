@@ -182,7 +182,7 @@ pub enum ImageError {
   #[error("Failed to sync screenshot buffer: {0}")]
   HostMemorySyncError(#[from] HostMemorySyncError),
 
-  #[error("Image Error")]
+  #[error("Image Error: {0}")]
   ImageError(#[from] image::ImageError),
 }
 impl std::fmt::Debug for ImageError {

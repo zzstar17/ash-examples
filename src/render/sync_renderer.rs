@@ -6,9 +6,12 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{texture_loader::TextureData, LoadedModels},
+  asset_loader::{
+    texture_loader::{TextureData, TEXTURE_FORMAT},
+    LoadedModels,
+  },
   last_frames_durations::FPSDurations,
-  render::create_objs::create_fence,
+  render::{create_objs::create_fence, format_conversions},
   scene::Scene,
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
@@ -44,7 +47,7 @@ impl SyncRenderer {
     loaded_models: &LoadedModels,
     texture_data: &mut TextureData,
   ) -> Result<Self, InitializationError> {
-    let renderer = Renderer::initialize(
+    let (renderer, texture_format) = Renderer::initialize(
       entry,
       instance,
       #[cfg(feature = "vl")]
@@ -74,8 +77,18 @@ impl SyncRenderer {
     .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
     let frame_fences = [fence0, fence1];
 
+    let bytes = texture_data.bytes();
+    let mut bytes_clone = Vec::new();
+    let texture_bytes_ref = if texture_format != TEXTURE_FORMAT {
+      bytes_clone.extend_from_slice(bytes);
+      format_conversions::convert_rgba_data_to_format(&mut bytes_clone, texture_format);
+      &bytes_clone
+    } else {
+      bytes
+    };
+
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_data)?;
+      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_bytes_ref)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -107,9 +120,9 @@ impl SyncRenderer {
     renderer: &Renderer,
     fence: vk::Fence,
     loaded_models: &LoadedModels,
-    sprite_texture_data: &TextureData,
+    texture_bytes: &[u8],
   ) -> Result<(), HostMemorySyncError> {
-    renderer.full_record_upload_initial_staging(0, loaded_models, &sprite_texture_data.bytes)?;
+    renderer.full_record_upload_initial_staging(0, loaded_models, texture_bytes)?;
 
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];

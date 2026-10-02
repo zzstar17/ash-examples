@@ -4,7 +4,10 @@ use vkobjects::ManuallyDestroyed;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::{
-  asset_loader::{texture_loader::TextureData, LoadedModels},
+  asset_loader::{
+    texture_loader::{TextureData, TextureLoadError},
+    LoadedModels,
+  },
   render::{errors::InitializationError, SyncRenderer},
 };
 use std::mem;
@@ -37,8 +40,8 @@ pub enum RenderInitError {
   #[error("Failed to load models\n{0}\nPath: {1}")]
   ModelLoadFailed(#[source] obj::ObjError, &'static str),
 
-  #[error("Image error: {0}")]
-  ImageError(#[from] image::ImageError),
+  #[error("Failed to load textures\n{0}")]
+  TextureLoadFailed(#[from] TextureLoadError),
 }
 
 impl From<InstanceCreationError> for RenderInitError {

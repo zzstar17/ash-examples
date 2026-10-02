@@ -25,7 +25,7 @@ use crate::{
 use super::{
   descriptor_sets::DescriptorPool,
   errors::{ImageError, InitializationError, SwapchainRecreationError},
-  format_conversions::{self, KNOWN_FORMATS},
+  format_conversions::KNOWN_FORMATS,
   gpu_data::GPUData,
   initialization::{self},
   pipelines::{self, GraphicsPipeline},
@@ -64,6 +64,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
+  // returns texture format
   pub fn initialize(
     entry: ash::Entry,
     instance: ash::Instance,
@@ -72,7 +73,7 @@ impl Renderer {
     event_loop: &ActiveEventLoop,
     loaded_models: &LoadedModels,
     texture_data: &mut TextureData,
-  ) -> Result<Self, InitializationError> {
+  ) -> Result<(Self, vk::Format), InitializationError> {
     // having an error during window creation triggers pre_window drop
     let window_attributes = Window::default_attributes()
       .with_title(WINDOW_TITLE)
@@ -190,8 +191,6 @@ impl Renderer {
         .find(|&f| initialization::format_is_supported(&instance, *physical_device, f))
         .unwrap()
     };
-
-    format_conversions::convert_rgba_data_to_format(&mut texture_data.bytes, texture_format);
     log::info!("Creating texture with the format {:?}", texture_format);
 
     let gpu_data = GPUData::new(
@@ -288,28 +287,31 @@ impl Renderer {
     .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&screenshot_buffer);
 
-    Ok(Self {
-      window,
-      surface,
-      _entry: entry,
-      instance,
-      #[cfg(feature = "vl")]
-      debug_utils,
-      #[cfg(feature = "vl")]
-      debug_utils_marker,
-      physical_device,
-      device,
-      queues,
-      graphics_pools,
-      data: gpu_data,
-      pipeline: graphics_pipeline,
-      pipeline_cache,
-      swapchains,
-      descriptor_pool,
-      render_targets,
-      screenshot_buffer,
-      text_pipeline,
-    })
+    Ok((
+      Self {
+        window,
+        surface,
+        _entry: entry,
+        instance,
+        #[cfg(feature = "vl")]
+        debug_utils,
+        #[cfg(feature = "vl")]
+        debug_utils_marker,
+        physical_device,
+        device,
+        queues,
+        graphics_pools,
+        data: gpu_data,
+        pipeline: graphics_pipeline,
+        pipeline_cache,
+        swapchains,
+        descriptor_pool,
+        render_targets,
+        screenshot_buffer,
+        text_pipeline,
+      },
+      texture_format,
+    ))
   }
 
   pub fn write_host_device_text_data(

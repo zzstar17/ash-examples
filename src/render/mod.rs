@@ -49,4 +49,4 @@ const IMAGE_WITH_RESOLUTION_MINIMAL_SIZE: u64 =
 // https://stackoverflow.com/questions/75094730/why-prefer-non-srgb-format-for-vulkan-swapchain
 // we're using the same format for the render target and the swapchain, so there is no
 // difference in color for Ferris, only for the background color (as the color gets interpreted differently)
-const SWAPCHAIN_PREFERRED_IMAGE_FORMAT: vk::Format = vk::Format::B8G8R8A8_UNORM;
+const SWAPCHAIN_PREFERRED_IMAGE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;

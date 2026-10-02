@@ -1,7 +1,7 @@
 pub const NIKO_MODEL_PATH: &str = "./assets/niko.obj";
 pub const KAKYOIN_MODEL_PATH: &str = "./assets/Kakyoin.obj";
 
-pub const TEXTURE_PATH: &str = "./sprites.png";
+pub const TEXTURE_PATH: &str = "./assets/textures.ktx";
 
 pub const SPRITES_TOTAL_SIZE: [u32; 2] = [1452, 2048];
 

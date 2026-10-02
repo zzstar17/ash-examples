@@ -154,7 +154,7 @@ impl GPUData {
       c"Text UI",
     )?;
 
-    let staging_size = (sprite_texture_data.bytes.len() as u64
+    let staging_size = (sprite_texture_data.bytes().len() as u64
       + loaded_models.vertices_size()
       + loaded_models.indices_size())
     .max(staging_size_required);
