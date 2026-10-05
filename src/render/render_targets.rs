@@ -45,6 +45,7 @@ impl RenderTargets {
         render_format,
         RENDER_EXTENT.width,
         RENDER_EXTENT.height,
+        1,
         vk::ImageUsageFlags::COLOR_ATTACHMENT
           .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
           .bitor(vk::ImageUsageFlags::TRANSFER_DST),
@@ -62,6 +63,7 @@ impl RenderTargets {
         DEPTH_FORMAT,
         RENDER_EXTENT.width,
         RENDER_EXTENT.height,
+        1,
         vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
           .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
           .bitor(vk::ImageUsageFlags::TRANSFER_DST),
@@ -103,7 +105,7 @@ impl RenderTargets {
       device,
       color_images
         .iter()
-        .map(|image| create_color_image_view(device, *image, render_format)),
+        .map(|image| create_color_image_view(device, *image, render_format, 1)),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe {

@@ -70,6 +70,7 @@ pub fn create_image(
   format: vk::Format,
   width: u32,
   height: u32,
+  mip_levels: u32,
   usage: vk::ImageUsageFlags,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   #[cfg(feature = "vl")] name: &CStr,
@@ -86,7 +87,7 @@ pub fn create_image(
       height,
       depth: 1,
     },
-    mip_levels: 1,
+    mip_levels,
     array_layers: 1,
     samples: vk::SampleCountFlags::TYPE_1,
     tiling: vk::ImageTiling::OPTIMAL,
@@ -109,6 +110,7 @@ pub fn create_color_image_view(
   device: &ash::Device,
   image: vk::Image,
   format: vk::Format,
+  mip_levels: u32,
 ) -> Result<vk::ImageView, OutOfMemoryError> {
   let create_info = vk::ImageViewCreateInfo {
     flags: vk::ImageViewCreateFlags::empty(),
@@ -124,7 +126,7 @@ pub fn create_color_image_view(
     subresource_range: vk::ImageSubresourceRange {
       aspect_mask: vk::ImageAspectFlags::COLOR,
       base_mip_level: 0,
-      level_count: 1,
+      level_count: mip_levels,
       base_array_layer: 0,
       layer_count: 1,
     },

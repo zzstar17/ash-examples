@@ -11,7 +11,7 @@ use crate::{
     LoadedModels,
   },
   last_frames_durations::FPSDurations,
-  render::{create_objs::create_fence, format_conversions},
+  render::create_objs::create_fence,
   scene::Scene,
   DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
@@ -77,18 +77,19 @@ impl SyncRenderer {
     .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
     let frame_fences = [fence0, fence1];
 
-    let bytes = texture_data.bytes();
-    let mut bytes_clone = Vec::new();
-    let texture_bytes_ref = if texture_format != TEXTURE_FORMAT {
-      bytes_clone.extend_from_slice(bytes);
-      format_conversions::convert_rgba_data_to_format(&mut bytes_clone, texture_format);
-      &bytes_clone
-    } else {
-      bytes
-    };
+    // let bytes = texture_data.bytes();
+    // let mut bytes_clone = Vec::new();
+    // let texture_bytes_ref = if texture_format != TEXTURE_FORMAT {
+    //   bytes_clone.extend_from_slice(bytes);
+    //   format_conversions::convert_rgba_data_to_format(&mut bytes_clone, texture_format);
+    //   &bytes_clone
+    // } else {
+    //   bytes
+    // };
+    assert_eq!(texture_format, TEXTURE_FORMAT);
 
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_bytes_ref)?;
+      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_data)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -120,9 +121,9 @@ impl SyncRenderer {
     renderer: &Renderer,
     fence: vk::Fence,
     loaded_models: &LoadedModels,
-    texture_bytes: &[u8],
+    texture_data: &TextureData,
   ) -> Result<(), HostMemorySyncError> {
-    renderer.full_record_upload_initial_staging(0, loaded_models, texture_bytes)?;
+    renderer.full_record_upload_initial_staging(0, loaded_models, texture_data)?;
 
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];

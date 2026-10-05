@@ -67,6 +67,7 @@ impl TextBuffers {
       Self::CURVES_FORMAT,
       curve_texture_extent.width,
       curve_texture_extent.height,
+      1,
       TEXTURE_USAGES,
       #[cfg(feature = "vl")]
       marker,
@@ -78,6 +79,7 @@ impl TextBuffers {
       Self::BANDS_FORMAT,
       band_texture_extent.width,
       band_texture_extent.height,
+      1,
       TEXTURE_USAGES,
       #[cfg(feature = "vl")]
       marker,

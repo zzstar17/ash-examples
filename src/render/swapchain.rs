@@ -533,7 +533,7 @@ impl Swapchain {
       let mut image_views: Vec<vk::ImageView> = Vec::with_capacity(images.len());
       for &image in images.iter() {
         image_views.push(
-          match create_color_image_view(device, image, image_format.format) {
+          match create_color_image_view(device, image, image_format.format, 1) {
             Ok(view) => view,
             Err(err) => unsafe {
               for view in image_views {

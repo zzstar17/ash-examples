@@ -15,6 +15,7 @@ use crate::{
 #[derive(Debug, Clone, Copy)]
 pub struct SpriteBuffers {
   pub texture: vk::Image,
+  pub texture_mip_levels: u32,
   pub texture_extent: vk::Extent2D,
 
   pub vertices: vk::Buffer,
@@ -28,6 +29,7 @@ impl SpriteBuffers {
     loaded_models: &LoadedModels,
     texture_extent: vk::Extent2D,
     render_format: vk::Format,
+    texture_mip_levels: u32,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let texture = create_image(
@@ -35,6 +37,7 @@ impl SpriteBuffers {
       render_format,
       texture_extent.width,
       texture_extent.height,
+      texture_mip_levels,
       TEXTURE_USAGES,
       #[cfg(feature = "vl")]
       marker,
@@ -65,6 +68,7 @@ impl SpriteBuffers {
 
     Ok(Self {
       texture,
+      texture_mip_levels,
       texture_extent,
       vertices,
       indices,

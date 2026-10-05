@@ -88,19 +88,29 @@ impl ImageViews {
     text_buffers: &TextBuffers,
     ui: vk::Image,
   ) -> Result<Self, OutOfMemoryError> {
-    let sprite = create_color_image_view(device, sprite_buffers.texture, render_format)?;
+    let sprite = create_color_image_view(
+      device,
+      sprite_buffers.texture,
+      render_format,
+      sprite_buffers.texture_mip_levels,
+    )?;
 
     let text_curve = create_color_image_view(
       device,
       text_buffers.curve_texture,
       TextBuffers::CURVES_FORMAT,
+      1,
     )
     .on_err(|_| unsafe { destroy!(device => &sprite) })?;
-    let text_band =
-      create_color_image_view(device, text_buffers.band_texture, TextBuffers::BANDS_FORMAT)
-        .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
+    let text_band = create_color_image_view(
+      device,
+      text_buffers.band_texture,
+      TextBuffers::BANDS_FORMAT,
+      1,
+    )
+    .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
 
-    let ui = create_color_image_view(device, ui, render_format)
+    let ui = create_color_image_view(device, ui, render_format, 1)
       .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
 
     Ok(Self {
@@ -118,17 +128,18 @@ impl GPUData {
     physical_device: &PhysicalDevice,
     render_format: vk::Format,
     loaded_models: &LoadedModels,
-    sprite_texture_data: &TextureData,
+    texture_data: &TextureData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
     let sprite_buffers = SpriteBuffers::new(
       device,
       loaded_models,
       vk::Extent2D {
-        width: sprite_texture_data.width,
-        height: sprite_texture_data.height,
+        width: texture_data.width,
+        height: texture_data.height,
       },
       render_format,
+      texture_data.reader.header().level_count.max(1),
       #[cfg(feature = "vl")]
       marker,
     )?;
@@ -147,6 +158,7 @@ impl GPUData {
       render_format,
       text_extent.width,
       text_extent.height,
+      1,
       vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::SAMPLED),
       #[cfg(feature = "vl")]
       marker,
@@ -154,7 +166,7 @@ impl GPUData {
       c"Text UI",
     )?;
 
-    let staging_size = (sprite_texture_data.bytes().len() as u64
+    let staging_size = (texture_data.total_mip_levels_size
       + loaded_models.vertices_size()
       + loaded_models.indices_size())
     .max(staging_size_required);
@@ -208,18 +220,16 @@ impl GPUData {
     &self,
     device: &Device,
     loaded_models: &LoadedModels,
-    sprite_texture_bytes: &[u8],
+    texture_data: &TextureData,
     pool: &GraphicsCommandBufferPool,
   ) -> Result<(), HostMemorySyncError> {
-    let sprite_texture_data_size = sprite_texture_bytes.len() as u64;
-
     let vertices_size = loaded_models.vertices_size();
     let indices_size = loaded_models.indices_size();
 
     let vertices_offset = 0;
     let indices_offset = vertices_size;
-    let sprite_texture_offset = indices_size + indices_offset;
-    let initial_copy_size = sprite_texture_offset + sprite_texture_data_size;
+    let texture_offset = indices_size + indices_offset;
+    let initial_copy_size = texture_offset + texture_data.total_mip_levels_size;
 
     assert!(initial_copy_size <= self.staging.buffer_size);
 
@@ -241,11 +251,19 @@ impl GPUData {
         staging_ptr.add(indices_offset as usize).as_ptr(),
         indices_size as usize,
       );
-      ptr::copy_nonoverlapping(
-        sprite_texture_bytes.as_ptr(),
-        staging_ptr.add(sprite_texture_offset as usize).as_ptr(),
-        sprite_texture_data_size as usize,
-      );
+
+      let mut local_level_offset = 0;
+      let staging_texture_offset = staging_ptr.add(texture_offset as usize);
+      for level in texture_data.reader.levels() {
+        assert_eq!(level.data.len(), level.uncompressed_byte_length as usize);
+        ptr::copy_nonoverlapping(
+          level.data.as_ptr(),
+          staging_texture_offset.add(local_level_offset).as_ptr(),
+          level.uncompressed_byte_length as usize,
+        );
+        local_level_offset += level.uncompressed_byte_length as usize;
+      }
+
       if !self.staging.mem_host_coherent {
         let ranges = [memory_range];
         device.flush_mapped_memory_ranges(&ranges)?;
@@ -280,10 +298,10 @@ impl GPUData {
           &[region],
         );
       }
-      pool.record_copy_staging_buffer_to_image(
+      pool.record_copy_staging_buffer_to_image_multisample(
         device,
         self.staging.buffer,
-        sprite_texture_offset,
+        texture_offset,
         self.sprite_buffers.texture,
         self.sprite_buffers.texture_extent,
         vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
@@ -292,6 +310,7 @@ impl GPUData {
         vk::AccessFlags2::NONE,
         vk::PipelineStageFlags2::NONE,
         vk::AccessFlags2::NONE,
+        &mut texture_data.reader.levels(),
       );
     }
 

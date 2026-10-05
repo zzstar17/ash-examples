@@ -6,7 +6,7 @@ use crate::{
   BLACK_TEXTURE_OFFSET, BLUE_TEXTURE_OFFSET, FERRIS_TEXTURE_OFFSET, FERRIS_TEXTURE_SIZE,
   GREEN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_SIZE, NIKO_TEXTURE_OFFSET,
   NIKO_TEXTURE_SIZE, RED_TEXTURE_OFFSET, SOLID_COLOR_TEXTURE_SIZE, SPRITES_TOTAL_SIZE,
-  TEXTURE_PATH,
+  SPRITES_TOTAL_SIZE_F32, TEXTURE_PATH,
 };
 
 pub const TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
@@ -16,6 +16,7 @@ pub struct TextureData {
   pub reader: ktx2::Reader<Vec<u8>>,
   pub width: u32,
   pub height: u32,
+  pub total_mip_levels_size: u64,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -40,41 +41,34 @@ pub struct TextureOffsets {
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextureLoc {
-  // in pixels
+  // normalized
   pub offset: [f32; 2],
   pub size: [f32; 2],
 }
 
+impl TextureLoc {
+  pub const fn from_render_extent(texture_size: [f32; 2], texture_offset: [f32; 2]) -> Self {
+    let size = [
+      texture_size[0] / SPRITES_TOTAL_SIZE_F32[0],
+      texture_size[1] / SPRITES_TOTAL_SIZE_F32[1],
+    ];
+    let offset = [
+      texture_offset[0] / SPRITES_TOTAL_SIZE_F32[0],
+      texture_offset[1] / SPRITES_TOTAL_SIZE_F32[1],
+    ];
+    Self { offset, size }
+  }
+}
+
 pub const fn get_texture_offsets() -> TextureOffsets {
   TextureOffsets {
-    ferris: TextureLoc {
-      offset: FERRIS_TEXTURE_OFFSET,
-      size: FERRIS_TEXTURE_SIZE,
-    },
-    niko: TextureLoc {
-      offset: NIKO_TEXTURE_OFFSET,
-      size: NIKO_TEXTURE_SIZE,
-    },
-    kakyoin: TextureLoc {
-      offset: KAKYOIN_TEXTURE_OFFSET,
-      size: KAKYOIN_TEXTURE_SIZE,
-    },
-    black: TextureLoc {
-      offset: BLACK_TEXTURE_OFFSET,
-      size: SOLID_COLOR_TEXTURE_SIZE,
-    },
-    red: TextureLoc {
-      offset: RED_TEXTURE_OFFSET,
-      size: SOLID_COLOR_TEXTURE_SIZE,
-    },
-    green: TextureLoc {
-      offset: GREEN_TEXTURE_OFFSET,
-      size: SOLID_COLOR_TEXTURE_SIZE,
-    },
-    blue: TextureLoc {
-      offset: BLUE_TEXTURE_OFFSET,
-      size: SOLID_COLOR_TEXTURE_SIZE,
-    },
+    ferris: TextureLoc::from_render_extent(FERRIS_TEXTURE_SIZE, FERRIS_TEXTURE_OFFSET),
+    niko: TextureLoc::from_render_extent(NIKO_TEXTURE_SIZE, NIKO_TEXTURE_OFFSET),
+    kakyoin: TextureLoc::from_render_extent(KAKYOIN_TEXTURE_SIZE, KAKYOIN_TEXTURE_OFFSET),
+    black: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, BLACK_TEXTURE_OFFSET),
+    red: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, RED_TEXTURE_OFFSET),
+    green: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, GREEN_TEXTURE_OFFSET),
+    blue: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, BLUE_TEXTURE_OFFSET),
   }
 }
 
@@ -98,20 +92,20 @@ impl TextureData {
     );
 
     // assert ucompressed
-    for level in reader.levels() {
-      assert_eq!(level.data.len() as u64, level.uncompressed_byte_length);
-      assert!(level.data.len() == width as usize * height as usize * 4);
-    }
+    let first_level = reader.levels().next().unwrap();
+    assert_eq!(
+      first_level.data.len() as u64,
+      first_level.uncompressed_byte_length
+    );
+    assert!(first_level.data.len() == width as usize * height as usize * 4);
+
+    let total_mip_levels_size = reader.levels().map(|l| l.uncompressed_byte_length).sum();
 
     Ok(Self {
       reader,
       width,
       height,
+      total_mip_levels_size,
     })
-  }
-
-  pub fn bytes(&self) -> &[u8] {
-    let level = self.reader.levels().next().unwrap();
-    level.data
   }
 }

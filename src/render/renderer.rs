@@ -331,14 +331,14 @@ impl Renderer {
     &self,
     frame_i: usize,
     loaded_models: &LoadedModels,
-    sprite_texture_bytes: &[u8],
+    texture_data: &TextureData,
   ) -> Result<(), HostMemorySyncError> {
     let pool = &self.graphics_pools[frame_i];
     pool.begin_recording(&self.device)?;
     self.data.write_and_record_initial_staging_data(
       &self.device,
       loaded_models,
-      sprite_texture_bytes,
+      texture_data,
       pool,
     )?;
     pool.end_recording(&self.device)?;

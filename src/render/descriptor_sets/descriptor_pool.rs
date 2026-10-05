@@ -20,13 +20,13 @@ fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemo
     anisotropy_enable: vk::FALSE,
     max_anisotropy: 0.0,
     border_color: vk::BorderColor::INT_TRANSPARENT_BLACK,
-    unnormalized_coordinates: vk::TRUE,
+    unnormalized_coordinates: vk::FALSE,
     compare_enable: vk::FALSE,
     compare_op: vk::CompareOp::NEVER,
     mipmap_mode: vk::SamplerMipmapMode::NEAREST,
     mip_lod_bias: 0.0,
-    max_lod: 0.0,
     min_lod: 0.0,
+    max_lod: vk::LOD_CLAMP_NONE,
     _marker: PhantomData,
   };
   unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())

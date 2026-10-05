@@ -234,6 +234,103 @@ impl GraphicsCommandBufferPool {
     );
   }
 
+  pub unsafe fn record_copy_staging_buffer_to_image_multisample(
+    &self,
+    device: &ash::Device,
+    staging: vk::Buffer,
+    staging_offset: u64,
+    dst: vk::Image,
+    image_extent: vk::Extent2D,
+    final_layout: vk::ImageLayout,
+    img_src_stage_mask: vk::PipelineStageFlags2,
+    img_src_access_mask: vk::AccessFlags2,
+    img_dst_stage_mask: vk::PipelineStageFlags2,
+    img_dst_access_mask: vk::AccessFlags2,
+    mip_level_iter: &mut dyn ExactSizeIterator<Item = ktx2::Level<'_>>,
+  ) {
+    let mip_levels = mip_level_iter.len() as u32;
+    let all_mip_levels_range = vk::ImageSubresourceRange {
+      aspect_mask: vk::ImageAspectFlags::COLOR,
+      base_mip_level: 0,
+      level_count: mip_levels,
+      base_array_layer: 0,
+      layer_count: 1,
+    };
+
+    let transfer_dst_layout = vk::ImageMemoryBarrier2 {
+      src_stage_mask: img_src_stage_mask,
+      dst_stage_mask: vk::PipelineStageFlags2::COPY,
+      src_access_mask: img_src_access_mask,
+      dst_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+      old_layout: vk::ImageLayout::UNDEFINED,
+      new_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      image: dst,
+      subresource_range: all_mip_levels_range,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(
+      self.main,
+      &dependency_info(&[], &[], &[transfer_dst_layout]),
+    );
+
+    let mut offset = 0;
+    let mut cur_mip_width = image_extent.width;
+    let mut cur_mip_height = image_extent.height;
+    let mut copy_regions = Vec::with_capacity(mip_levels as usize);
+    for (mip_i, level) in mip_level_iter.enumerate() {
+      assert!(level.uncompressed_byte_length == cur_mip_width as u64 * cur_mip_height as u64 * 4);
+      let copy_region = vk::BufferImageCopy {
+        buffer_offset: staging_offset + offset,
+        buffer_row_length: 0,   // 0 because buffer is tightly packed
+        buffer_image_height: 0, // 0 because buffer is tightly packed
+        image_subresource: vk::ImageSubresourceLayers {
+          aspect_mask: vk::ImageAspectFlags::COLOR,
+          mip_level: mip_i as u32,
+          base_array_layer: 0,
+          layer_count: 1,
+        },
+        image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
+        image_extent: vk::Extent3D {
+          width: cur_mip_width,
+          height: cur_mip_height,
+          depth: 1,
+        },
+      };
+      if 1 < cur_mip_width {
+        cur_mip_width /= 2;
+      }
+      if 1 < cur_mip_height {
+        cur_mip_height /= 2;
+      }
+      offset += level.uncompressed_byte_length;
+
+      copy_regions.push(copy_region);
+    }
+    device.cmd_copy_buffer_to_image(
+      self.main,
+      staging,
+      dst,
+      vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      &copy_regions,
+    );
+
+    let change_to_final_layout = vk::ImageMemoryBarrier2 {
+      src_stage_mask: vk::PipelineStageFlags2::COPY,
+      dst_stage_mask: img_dst_stage_mask,
+      src_access_mask: vk::AccessFlags2::TRANSFER_WRITE,
+      dst_access_mask: img_dst_access_mask,
+      old_layout: vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+      new_layout: final_layout,
+      image: dst,
+      subresource_range: all_mip_levels_range,
+      ..Default::default()
+    };
+    device.cmd_pipeline_barrier2(
+      self.main,
+      &dependency_info(&[], &[], &[change_to_final_layout]),
+    );
+  }
+
   pub unsafe fn record_update_text_ui(
     &self,
     device: &ash::Device,
@@ -579,10 +676,7 @@ impl GraphicsCommandBufferPool {
             let pc = GraphicsPushConstants {
               matrix,
               tex_offset: [0.0, 0.0],
-              tex_size: [
-                data.text_ui_size.width as f32,
-                data.text_ui_size.height as f32,
-              ],
+              tex_size: [1.0, 1.0],
             };
 
             device.cmd_bind_descriptor_sets(
