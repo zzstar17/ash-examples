@@ -10,6 +10,8 @@ use ash::vk::Handle;
 use ash::vk::{self};
 use vkobjects::errors::OutOfMemoryError;
 
+use crate::render::sample_count_to_flags;
+
 pub fn create_semaphore(
   device: &ash::Device,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
@@ -90,6 +92,47 @@ pub fn create_image(
     mip_levels,
     array_layers: 1,
     samples: vk::SampleCountFlags::TYPE_1,
+    tiling: vk::ImageTiling::OPTIMAL,
+    usage,
+    sharing_mode: vk::SharingMode::EXCLUSIVE,
+    queue_family_index_count: 0,
+    p_queue_family_indices: ptr::null(), // ignored if sharing mode is exclusive
+    initial_layout: vk::ImageLayout::UNDEFINED,
+    _marker: PhantomData,
+  };
+  unsafe {
+    let image = device.create_image(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE, image.as_raw(), name)?;
+    Ok(image)
+  }
+}
+
+pub fn create_image_sampled(
+  device: &ash::Device,
+  format: vk::Format,
+  width: u32,
+  height: u32,
+  samples: usize,
+  usage: vk::ImageUsageFlags,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
+) -> Result<vk::Image, OutOfMemoryError> {
+  // 1 color layer 2d image
+  let create_info = vk::ImageCreateInfo {
+    s_type: vk::StructureType::IMAGE_CREATE_INFO,
+    p_next: ptr::null(),
+    flags: vk::ImageCreateFlags::empty(),
+    image_type: vk::ImageType::TYPE_2D,
+    format,
+    extent: vk::Extent3D {
+      width,
+      height,
+      depth: 1,
+    },
+    mip_levels: 1,
+    array_layers: 1,
+    samples: sample_count_to_flags(samples),
     tiling: vk::ImageTiling::OPTIMAL,
     usage,
     sharing_mode: vk::SharingMode::EXCLUSIVE,

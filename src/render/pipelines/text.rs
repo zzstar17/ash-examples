@@ -14,6 +14,7 @@ use crate::{
   render::{
     descriptor_sets::DescriptorPool,
     render_targets::DEPTH_FORMAT,
+    sample_count_to_flags,
     shaders::{self, TextShader},
   },
   vertex_input_state_create_info,
@@ -38,6 +39,7 @@ impl TextPipeline {
     descriptor_pool: &DescriptorPool,
     render_format: vk::Format,
     extent: vk::Extent2D,
+    sample_count: usize,
   ) -> Result<Self, PipelineCreationError> {
     let layout = Self::create_layout(device, descriptor_pool)?;
     let shader = shaders::TextShader::load(device, shader_loader)
@@ -51,6 +53,7 @@ impl TextPipeline {
       vk::Pipeline::null(),
       render_format,
       extent,
+      sample_count,
     )?;
 
     Ok(Self {
@@ -68,6 +71,7 @@ impl TextPipeline {
     cache: vk::PipelineCache,
     render_format: vk::Format,
     extent: vk::Extent2D,
+    sample_count: usize,
   ) -> Result<(), PipelineCreationError> {
     assert!(self.old.is_none());
 
@@ -79,6 +83,7 @@ impl TextPipeline {
       self.current,
       render_format,
       extent,
+      sample_count,
     )?;
 
     let old = {
@@ -136,6 +141,7 @@ impl TextPipeline {
     base: vk::Pipeline,
     render_format: vk::Format,
     extent: vk::Extent2D,
+    sample_count: usize,
   ) -> Result<vk::Pipeline, PipelineCreationError> {
     let shader_stages = shader.get_pipeline_shader_creation_info();
 
@@ -165,7 +171,16 @@ impl TextPipeline {
       .viewports(&viewport);
 
     let rasterization_state_ci = no_depth_rasterization_state();
-    let multisample_state_ci = no_multisample_state();
+
+    let multisample_state_ci = vk::PipelineMultisampleStateCreateInfo {
+      rasterization_samples: sample_count_to_flags(sample_count),
+      sample_shading_enable: vk::FALSE,
+      min_sample_shading: 0.0,
+      p_sample_mask: ptr::null(),
+      alpha_to_one_enable: vk::FALSE,
+      alpha_to_coverage_enable: vk::FALSE,
+      ..Default::default()
+    };
 
     // no depth test
     let depth_stencil_state_ci = vk::PipelineDepthStencilStateCreateInfo {
@@ -294,22 +309,6 @@ const fn no_depth_rasterization_state<'a>() -> vk::PipelineRasterizationStateCre
     depth_bias_constant_factor: 0.0,
     depth_bias_enable: vk::FALSE,
     depth_bias_slope_factor: 0.0,
-    _marker: PhantomData,
-  }
-}
-
-const fn no_multisample_state<'a>() -> vk::PipelineMultisampleStateCreateInfo<'a> {
-  // everything off
-  vk::PipelineMultisampleStateCreateInfo {
-    s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-    flags: vk::PipelineMultisampleStateCreateFlags::empty(),
-    p_next: ptr::null(),
-    rasterization_samples: vk::SampleCountFlags::TYPE_1,
-    sample_shading_enable: vk::FALSE,
-    min_sample_shading: 0.0,
-    p_sample_mask: ptr::null(),
-    alpha_to_one_enable: vk::FALSE,
-    alpha_to_coverage_enable: vk::FALSE,
     _marker: PhantomData,
   }
 }

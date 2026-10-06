@@ -8,8 +8,10 @@ use vkobjects::{
   utility::OnErr, DeviceManuallyDestroyed,
 };
 
+use crate::render::create_objs::{create_image, create_image_sampled};
+
 use super::{
-  create_objs::{create_color_image_view, create_depth_image_view, create_image},
+  create_objs::{create_color_image_view, create_depth_image_view},
   FRAMES_IN_FLIGHT, RENDER_EXTENT,
 };
 
@@ -19,9 +21,11 @@ use super::{
 pub struct RenderTargets {
   pub color_images: [vk::Image; FRAMES_IN_FLIGHT],
   pub depth_images: [vk::Image; FRAMES_IN_FLIGHT],
+  pub resolve_images: [vk::Image; FRAMES_IN_FLIGHT],
 
   pub color_views: [vk::ImageView; FRAMES_IN_FLIGHT],
   pub depth_views: [vk::ImageView; FRAMES_IN_FLIGHT],
+  pub resolve_views: [vk::ImageView; FRAMES_IN_FLIGHT],
 
   pub memories: Box<[DetailedMemory]>,
 }
@@ -36,9 +40,48 @@ impl RenderTargets {
     device: &Device,
     physical_device: &PhysicalDevice,
     render_format: vk::Format,
+    sample_count: usize,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, AllocationError> {
     let color_images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
+      device,
+      create_image_sampled(
+        device,
+        render_format,
+        RENDER_EXTENT.width,
+        RENDER_EXTENT.height,
+        sample_count,
+        vk::ImageUsageFlags::COLOR_ATTACHMENT
+          .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
+          .bitor(vk::ImageUsageFlags::TRANSFER_DST),
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Color render target"
+      ),
+      FRAMES_IN_FLIGHT
+    )?;
+    let depth_images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
+      device,
+      create_image_sampled(
+        device,
+        DEPTH_FORMAT,
+        RENDER_EXTENT.width,
+        RENDER_EXTENT.height,
+        sample_count,
+        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+          .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
+          .bitor(vk::ImageUsageFlags::TRANSFER_DST),
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Depth render target"
+      ),
+      FRAMES_IN_FLIGHT
+    )
+    .on_err(|_| unsafe { destroy!(device => color_images.as_ref()) })?;
+
+    let resolve_images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
       device,
       create_image(
         device,
@@ -52,33 +95,20 @@ impl RenderTargets {
         #[cfg(feature = "vl")]
         marker,
         #[cfg(feature = "vl")]
-        c"Color render target"
-      ),
-      FRAMES_IN_FLIGHT
-    )?;
-    let depth_images: [vk::Image; FRAMES_IN_FLIGHT] = fill_destroyable_array_with_expression!(
-      device,
-      create_image(
-        device,
-        DEPTH_FORMAT,
-        RENDER_EXTENT.width,
-        RENDER_EXTENT.height,
-        1,
-        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
-          .bitor(vk::ImageUsageFlags::TRANSFER_SRC)
-          .bitor(vk::ImageUsageFlags::TRANSFER_DST),
-        #[cfg(feature = "vl")]
-        marker,
-        #[cfg(feature = "vl")]
-        c"Depth render target"
+        c"Resolve render target"
       ),
       FRAMES_IN_FLIGHT
     )
-    .on_err(|_| unsafe { destroy!(device => color_images.as_ref()) })?;
+    .on_err(|_| unsafe { destroy!(device => depth_images.as_ref(), color_images.as_ref()) })?;
 
     let images_trait = {
-      let mut temp = [&color_images[0] as &dyn MemoryBound; FRAMES_IN_FLIGHT * 2];
-      for (i, image) in color_images.iter().chain(depth_images.iter()).enumerate() {
+      let mut temp = [&color_images[0] as &dyn MemoryBound; FRAMES_IN_FLIGHT * 3];
+      for (i, image) in color_images
+        .iter()
+        .chain(depth_images.iter())
+        .chain(resolve_images.iter())
+        .enumerate()
+      {
         temp[i] = image as &dyn MemoryBound;
       }
       temp
@@ -99,7 +129,9 @@ impl RenderTargets {
       #[cfg(feature = "log_alloc")]
       "MAIN RENDER TARGETS",
     )
-    .on_err(|_| unsafe { destroy!(device => color_images.as_ref(), depth_images.as_ref()) })?;
+    .on_err(|_| unsafe {
+      destroy!(device => color_images.as_ref(), depth_images.as_ref(), resolve_images.as_ref())
+    })?;
 
     let color_views = fill_destroyable_array_from_iter!(
       device,
@@ -109,7 +141,7 @@ impl RenderTargets {
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe {
-      destroy!(device => color_images.as_ref(), depth_images.as_ref(), &alloc)
+      destroy!(device => color_images.as_ref(), depth_images.as_ref(), resolve_images.as_ref(), &alloc)
     })?;
     let depth_views = fill_destroyable_array_from_iter!(
       device,
@@ -119,7 +151,17 @@ impl RenderTargets {
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe {
-      destroy!(device =>color_views.as_ref(), color_images.as_ref(), depth_images.as_ref(), &alloc)
+      destroy!(device => color_views.as_ref(), color_images.as_ref(), depth_images.as_ref(), resolve_images.as_ref(), &alloc)
+    })?;
+    let resolve_views = fill_destroyable_array_from_iter!(
+      device,
+      resolve_images
+        .iter()
+        .map(|image| create_color_image_view(device, *image, render_format, 1)),
+      FRAMES_IN_FLIGHT
+    )
+    .on_err(|_| unsafe {
+      destroy!(device => depth_views.as_ref(), color_views.as_ref(), color_images.as_ref(), depth_images.as_ref(), resolve_images.as_ref(), &alloc)
     })?;
 
     Ok(Self {
@@ -127,6 +169,8 @@ impl RenderTargets {
       color_views,
       depth_images,
       depth_views,
+      resolve_images,
+      resolve_views,
       memories: Box::from(alloc.get_memories()),
     })
   }
@@ -136,9 +180,11 @@ impl DeviceManuallyDestroyed for RenderTargets {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.color_views.destroy_self(device);
     self.depth_views.destroy_self(device);
+    self.resolve_views.destroy_self(device);
 
     self.color_images.destroy_self(device);
     self.depth_images.destroy_self(device);
+    self.resolve_images.destroy_self(device);
 
     self.memories.destroy_self(device);
   }

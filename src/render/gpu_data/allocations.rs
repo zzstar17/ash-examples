@@ -52,6 +52,7 @@ pub fn allocate_device(
   physical_device: &PhysicalDevice,
   sprite_buffers: &SpriteBuffers,
   text_buffers: &TextBuffers,
+  text_ui_miltisampled: vk::Image,
   text_ui: vk::Image,
 ) -> Result<Vec<DetailedMemory>, GPUDataAllocationError> {
   let device_alloc = vkallocator::allocate_and_bind_memory(
@@ -65,6 +66,7 @@ pub fn allocate_device(
       &sprite_buffers.vertices,
       &sprite_buffers.indices,
       &sprite_buffers.texture,
+      &text_ui_miltisampled,
       &text_ui,
       &text_buffers.curve_texture,
       &text_buffers.band_texture,
@@ -78,7 +80,8 @@ pub fn allocate_device(
       "Vertices",
       "Indices",
       "Sprite texture",
-      "Text UI",
+      "Text UI (multisample)",
+      "Text UI (resolve)",
       "Text curve texture",
       "Text band texture",
       "Text device vertices",

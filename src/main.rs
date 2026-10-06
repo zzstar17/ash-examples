@@ -76,6 +76,10 @@ const OUT_OF_BOUNDS_AREA_COLOR: vk::ClearColorValue = vk::ClearColorValue {
 // otherwise, presentation mode will fallback to FIFO_KHR
 const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::IMMEDIATE;
 
+// todo: bypass multisampling if sample count is set to TYPE_1
+// Max amount of samples used in Multisample antialiasing (MSAA)
+const MAX_MULTISAMPLE_COUNT: vk::SampleCountFlags = vk::SampleCountFlags::TYPE_2;
+
 // prints current frame 1 / <time since last frame> every x time
 const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);
 

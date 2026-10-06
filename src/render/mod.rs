@@ -16,6 +16,7 @@ mod vertices;
 
 use ash::vk;
 use cgmath::Vector2;
+use vkinitialization::device::PhysicalDevice;
 use vkobjects::const_flag_bitor;
 
 pub use errors::{FrameRenderError, InitializationError};
@@ -25,7 +26,7 @@ pub use swapchain::AcquireNextImageError;
 pub use sync_renderer::SyncRenderer;
 pub use vertices::TexturedVertex;
 
-use crate::RESOLUTION;
+use crate::{MAX_MULTISAMPLE_COUNT, RESOLUTION};
 
 const FRAMES_IN_FLIGHT: usize = 2;
 
@@ -50,3 +51,57 @@ const IMAGE_WITH_RESOLUTION_MINIMAL_SIZE: u64 =
 // we're using the same format for the render target and the swapchain, so there is no
 // difference in color for Ferris, only for the background color (as the color gets interpreted differently)
 const SWAPCHAIN_PREFERRED_IMAGE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
+
+fn get_multisample_count(physical_device: &PhysicalDevice) -> usize {
+  let limit = physical_device
+    .properties
+    .p10
+    .limits
+    .framebuffer_color_sample_counts
+    & physical_device
+      .properties
+      .p10
+      .limits
+      .framebuffer_depth_sample_counts;
+  let limit = sample_flags_to_count(limit);
+
+  let user_set = sample_flags_to_count(MAX_MULTISAMPLE_COUNT);
+
+  limit.min(user_set)
+}
+
+fn sample_count_to_flags(count: usize) -> vk::SampleCountFlags {
+  match count {
+    64 => vk::SampleCountFlags::TYPE_64,
+    32 => vk::SampleCountFlags::TYPE_32,
+    16 => vk::SampleCountFlags::TYPE_16,
+    8 => vk::SampleCountFlags::TYPE_8,
+    4 => vk::SampleCountFlags::TYPE_4,
+    2 => vk::SampleCountFlags::TYPE_2,
+    1 => vk::SampleCountFlags::TYPE_1,
+    _ => panic!("Invalid sample count ({})", count),
+  }
+}
+
+fn sample_flags_to_count(flags: vk::SampleCountFlags) -> usize {
+  if flags.contains(vk::SampleCountFlags::TYPE_64) {
+    return 64;
+  }
+  if flags.contains(vk::SampleCountFlags::TYPE_32) {
+    return 32;
+  }
+  if flags.contains(vk::SampleCountFlags::TYPE_16) {
+    return 16;
+  }
+  if flags.contains(vk::SampleCountFlags::TYPE_8) {
+    return 8;
+  }
+  if flags.contains(vk::SampleCountFlags::TYPE_4) {
+    return 4;
+  }
+  if flags.contains(vk::SampleCountFlags::TYPE_2) {
+    return 2;
+  }
+
+  1
+}

@@ -193,12 +193,19 @@ impl Renderer {
     };
     log::info!("Creating texture with the format {:?}", texture_format);
 
+    let sample_count = super::get_multisample_count(&physical_device);
+    log::info!(
+      "Using {} sample count in multisampling antialiasing",
+      sample_count
+    );
+
     let gpu_data = GPUData::new(
       &device,
       &physical_device,
       texture_format,
       loaded_models,
       texture_data,
+      sample_count,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
@@ -215,12 +222,17 @@ impl Renderer {
       &device,
       &physical_device,
       render_format,
+      sample_count,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
     )
     .on_err(|_| destroy_objs(&destructor))
     .map_err(GPUDataAllocationError::from)?;
-    log::debug!("Created render targets:\n{:#?}", render_targets);
+    log::debug!(
+      "Created render targets with {} samples:\n{:#?}",
+      sample_count,
+      render_targets
+    );
     destructor.push(&render_targets);
 
     log::info!("Creating pipeline cache");
@@ -247,6 +259,7 @@ impl Renderer {
       &descriptor_pool,
       render_format,
       RENDER_EXTENT,
+      sample_count,
     )
     .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&graphics_pipeline);
@@ -258,6 +271,7 @@ impl Renderer {
       &descriptor_pool,
       render_format,
       RENDER_EXTENT,
+      sample_count,
     )
     .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&text_pipeline);
@@ -443,12 +457,15 @@ impl Renderer {
           _ => panic!(),
         })?;
 
+      let sample_count = super::get_multisample_count(&self.physical_device);
+
       // recreate all objects that depend on image format (but not on extent)
       let new_format = self.swapchains.get_format();
       let new_render_targets = RenderTargets::new(
         &self.device,
         &self.physical_device,
         new_format,
+        sample_count,
         #[cfg(feature = "vl")]
         &self.debug_utils_marker,
       )
@@ -460,6 +477,7 @@ impl Renderer {
         self.pipeline_cache,
         self.swapchains.get_format(),
         RENDER_EXTENT,
+        sample_count,
       ) {
         Ok(v) => v,
         Err(err) => unsafe {
