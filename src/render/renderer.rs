@@ -16,7 +16,7 @@ use crate::{
   last_frames_durations::FPSDurations,
   render::{
     command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
-    pipelines::TextPipeline,
+    pipelines::RenderPipelines,
   },
   scene::Scene,
   INITIAL_WINDOW_HEIGHT, INITIAL_WINDOW_WIDTH, RESOLUTION, SCREENSHOT_SAVE_FILE, WINDOW_TITLE,
@@ -28,7 +28,7 @@ use super::{
   format_conversions::KNOWN_FORMATS,
   gpu_data::GPUData,
   initialization::{self},
-  pipelines::{self, GraphicsPipeline},
+  pipelines::{self},
   render_targets::RenderTargets,
   screenshot_buffer::ScreenshotBuffer,
   swapchain::{SwapchainCreationError, Swapchains},
@@ -53,8 +53,7 @@ pub struct Renderer {
   render_targets: RenderTargets,
 
   pipeline_cache: vk::PipelineCache,
-  pipeline: GraphicsPipeline,
-  text_pipeline: TextPipeline,
+  render_pipelines: RenderPipelines,
   pub graphics_pools: [GraphicsCommandBufferPool; FRAMES_IN_FLIGHT],
   // pub device_copy_pool: DeviceCopyCommandBufferPool,
   pub data: GPUData,
@@ -251,8 +250,8 @@ impl Renderer {
     destructor.push(&descriptor_pool);
 
     let mut shader_loader = ShaderLoader::new();
-    log::debug!("Creating graphics pipeline");
-    let graphics_pipeline = GraphicsPipeline::new(
+    log::debug!("Creating render pipelines");
+    let render_pipelines = RenderPipelines::new(
       &device,
       pipeline_cache,
       &mut shader_loader,
@@ -262,19 +261,7 @@ impl Renderer {
       sample_count,
     )
     .on_err(|_| destroy_objs(&destructor))?;
-    destructor.push(&graphics_pipeline);
-    log::debug!("Creating text pipeline");
-    let text_pipeline = TextPipeline::new(
-      &device,
-      pipeline_cache,
-      &mut shader_loader,
-      &descriptor_pool,
-      render_format,
-      RENDER_EXTENT,
-      sample_count,
-    )
-    .on_err(|_| destroy_objs(&destructor))?;
-    destructor.push(&text_pipeline);
+    destructor.push(&render_pipelines);
 
     log::debug!("Creating command pools");
     let graphics_pools = fill_destroyable_array_with_expression!(
@@ -316,13 +303,12 @@ impl Renderer {
         queues,
         graphics_pools,
         data: gpu_data,
-        pipeline: graphics_pipeline,
+        render_pipelines,
         pipeline_cache,
         swapchains,
         descriptor_pool,
         render_targets,
         screenshot_buffer,
-        text_pipeline,
       },
       texture_format,
     ))
@@ -388,7 +374,7 @@ impl Renderer {
         &self.device,
         &self.descriptor_pool,
         &self.data,
-        &self.text_pipeline,
+        &self.render_pipelines.text,
       );
     }
 
@@ -398,8 +384,8 @@ impl Renderer {
       &self.render_targets,
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
-      &self.pipeline,
-      &self.text_pipeline,
+      &self.render_pipelines.graphics,
+      &self.render_pipelines.text,
       &self.descriptor_pool,
       &self.data,
       scene,
@@ -471,8 +457,8 @@ impl Renderer {
       )
       .on_err(|_| self.swapchains.revert_recreate(&self.device))?;
 
-      log::info!("[Frame {}] Recreating pipeline", cur_total_frame);
-      match self.pipeline.recreate(
+      log::info!("[Frame {}] Recreating render pipelines", cur_total_frame);
+      match self.render_pipelines.recreate(
         &self.device,
         self.pipeline_cache,
         self.swapchains.get_format(),
@@ -503,7 +489,9 @@ impl Renderer {
   // destroy old objects that resulted of a swapchain recreation
   // this should only be called when they stop being in use
   pub unsafe fn cleanup_after_old_swapchain(&mut self, cur_total_frame: usize) {
-    self.pipeline.destroy_old(&self.device, cur_total_frame);
+    self
+      .render_pipelines
+      .destroy_old(&self.device, cur_total_frame);
   }
 
   pub fn render_format(&self) -> vk::Format {
@@ -573,8 +561,7 @@ impl Drop for Renderer {
 
       self.graphics_pools.destroy_self(&self.device);
 
-      self.text_pipeline.destroy_self(&self.device);
-      self.pipeline.destroy_self(&self.device);
+      self.render_pipelines.destroy_self(&self.device);
       self.pipeline_cache.destroy_self(&self.device);
       self.descriptor_pool.destroy_self(&self.device);
 

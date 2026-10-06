@@ -1,10 +1,8 @@
 mod cache;
 mod graphics;
-mod text;
 
 pub use cache::{create_pipeline_cache, save_pipeline_cache, PipelineCacheError};
-pub use graphics::{GraphicsPipeline, GraphicsPushConstants};
-pub use text::TextPipeline;
+pub use graphics::{GraphicsPipeline, GraphicsPushConstants, RenderPipelines, TextPipeline};
 use vkobjects::errors::OutOfMemoryError;
 
 use crate::asset_loader::ShaderLoadError;
