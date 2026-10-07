@@ -78,7 +78,7 @@ const PREFERRED_PRESENTATION_METHOD: vk::PresentModeKHR = vk::PresentModeKHR::IM
 
 // todo: bypass multisampling if sample count is set to TYPE_1
 // Max amount of samples used in Multisample antialiasing (MSAA)
-const MAX_MULTISAMPLE_COUNT: vk::SampleCountFlags = vk::SampleCountFlags::TYPE_2;
+const MAX_MULTISAMPLE_COUNT: vk::SampleCountFlags = vk::SampleCountFlags::TYPE_8;
 
 // prints current frame 1 / <time since last frame> every x time
 const PRINT_FPS_EVERY: Duration = Duration::from_millis(1000);

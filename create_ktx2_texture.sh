@@ -1,1 +1,1 @@
-ktx create --format R8G8B8A8_SRGB --generate-mipmap ./assets_extra/sprites.png ./assets/textures.ktx
+ktx create --format R8G8B8A8_SRGB --generate-mipmap ./assets_dev/sprites.png ./assets/textures.ktx
