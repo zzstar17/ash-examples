@@ -30,8 +30,11 @@ use super::create_objs::create_color_image_view;
 //    are requested
 #[derive(thiserror::Error)]
 pub enum SwapchainCreationError {
-  #[error("Out of memory")]
-  OutOfMemory(#[source] OutOfMemoryError),
+  #[error(transparent)]
+  OutOfMemory(#[from] OutOfMemoryError),
+
+  #[error("Could not create a swapchain with R8G8B8A8_SRGB or B8G8R8A8_SRGB formats")]
+  SRGBANotSupported,
 
   #[error("Device is lost (https://registry.khronos.org/vulkan/specs/1.3-extensions/html/vkspec.html#devsandqueues-lost-device)")]
   DeviceIsLost,
@@ -101,12 +104,6 @@ impl From<vk::Result> for AcquireNextImageError {
       }
       _ => panic!(),
     }
-  }
-}
-
-impl From<OutOfMemoryError> for SwapchainCreationError {
-  fn from(value: OutOfMemoryError) -> Self {
-    SwapchainCreationError::OutOfMemory(value)
   }
 }
 
@@ -660,18 +657,21 @@ impl Swapchain {
 fn select_swapchain_image_format(
   physical_device: vk::PhysicalDevice,
   surface: &Surface,
-) -> Result<vk::SurfaceFormatKHR, SurfaceError> {
+) -> Result<vk::SurfaceFormatKHR, SwapchainCreationError> {
   let formats = unsafe { surface.get_formats(physical_device) }?;
-  for available_format in formats.iter() {
-    // commonly available
-    if available_format.format == super::SWAPCHAIN_PREFERRED_IMAGE_FORMAT
-      && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
-    {
-      return Ok(*available_format);
+  log::debug!("Available swapchain formats:\n{:?}", formats);
+
+  for format in super::SWAPCHAIN_SUPPORTED_IMAGE_FORMATS {
+    for available_format in formats.iter() {
+      if available_format.format == format
+        && available_format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+      {
+        return Ok(*available_format);
+      }
     }
   }
 
-  Ok(formats[0])
+  Err(SwapchainCreationError::SRGBANotSupported)
 }
 
 fn select_swapchain_present_mode(

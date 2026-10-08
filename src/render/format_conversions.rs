@@ -1,11 +1,10 @@
 use ash::vk;
 
-// todo: if possible, reimplement old formats
-pub const KNOWN_FORMATS: [vk::Format; 1] = [
+pub const KNOWN_FORMATS: [vk::Format; 4] = [
   vk::Format::R8G8B8A8_SRGB,
-  // vk::Format::B8G8R8A8_SRGB,
-  // vk::Format::R8G8B8A8_UNORM,
-  // vk::Format::B8G8R8A8_UNORM,
+  vk::Format::B8G8R8A8_SRGB,
+  vk::Format::R8G8B8A8_UNORM,
+  vk::Format::B8G8R8A8_UNORM,
 ];
 
 fn convert_rgba_to_bgra(bytes: &mut [u8]) {

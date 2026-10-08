@@ -9,9 +9,6 @@ use crate::{
   SPRITES_TOTAL_SIZE_F32, TEXTURE_PATH,
 };
 
-pub const TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
-pub const TEXTURE_FORMAT_KTX2: ktx2::Format = ktx2::Format::R8G8B8A8_SRGB;
-
 pub struct TextureData {
   pub reader: ktx2::Reader<Vec<u8>>,
   pub width: u32,
@@ -73,6 +70,9 @@ pub const fn get_texture_offsets() -> TextureOffsets {
 }
 
 impl TextureData {
+  pub const TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
+  pub const TEXTURE_FORMAT_KTX2: ktx2::Format = ktx2::Format::R8G8B8A8_SRGB;
+
   pub fn read_texture_bytes_as_rgba8() -> Result<Self, TextureLoadError> {
     let mut file = fs::File::open(TEXTURE_PATH)?;
     let mut bytes = Vec::new();
@@ -80,7 +80,7 @@ impl TextureData {
 
     let reader = ktx2::Reader::new(bytes)?;
     let header = reader.header();
-    assert_eq!(header.format, Some(TEXTURE_FORMAT_KTX2));
+    assert_eq!(header.format, Some(Self::TEXTURE_FORMAT_KTX2));
 
     log::debug!("Texture image header:\n    {:?}", header);
     let width = header.pixel_width;

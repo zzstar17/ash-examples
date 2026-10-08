@@ -182,15 +182,16 @@ impl Renderer {
     destructor.push(&swapchains);
 
     let swapchain_format = swapchains.get_format();
-    let texture_format = if KNOWN_FORMATS.contains(&swapchain_format) {
-      swapchain_format
-    } else {
-      KNOWN_FORMATS
-        .into_iter()
-        .find(|&f| initialization::format_is_supported(&instance, *physical_device, f))
-        .unwrap()
-    };
-    log::info!("Creating texture with the format {:?}", texture_format);
+    if swapchain_format != vk::Format::R8G8B8A8_SRGB {
+      log::warn!("Swapchain: not using RGBA8 SRGB format");
+    }
+    let texture_format = swapchain_format;
+    assert!(KNOWN_FORMATS.contains(&texture_format));
+
+    // use same format for surface and the render target
+    // vkCmdCopyImage does not convert formats, while vkCmdBlitImage does, so using different formats
+    // would mean not using vkCmdCopyImage at all anymore
+    let render_format = swapchains.get_format();
 
     let sample_count = super::get_multisample_count(&physical_device);
     log::info!(
@@ -198,10 +199,12 @@ impl Renderer {
       sample_count
     );
 
+    log::info!("Creating texture with the format {:?}", texture_format);
     let gpu_data = GPUData::new(
       &device,
       &physical_device,
       texture_format,
+      render_format,
       loaded_models,
       texture_data,
       sample_count,
@@ -210,12 +213,6 @@ impl Renderer {
     )
     .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&gpu_data);
-
-    // use same format for surface and the render target
-    // see SWAPCHAIN_PREFERRED_IMAGE_FORMAT in render/mod.rs
-    // vkCmdCopyImage does not convert formats, while vkCmdBlitImage does, so using different formats
-    // would mean not using vkCmdCopyImage at all anymore
-    let render_format = swapchains.get_format();
 
     let render_targets = RenderTargets::new(
       &device,

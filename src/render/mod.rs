@@ -48,9 +48,14 @@ const IMAGE_WITH_RESOLUTION_MINIMAL_SIZE: u64 =
 
 // https://stackoverflow.com/questions/66401081/vulkan-swapchain-format-unorm-vs-srgb
 // https://stackoverflow.com/questions/75094730/why-prefer-non-srgb-format-for-vulkan-swapchain
-// we're using the same format for the render target and the swapchain, so there is no
-// difference in color for Ferris, only for the background color (as the color gets interpreted differently)
-const SWAPCHAIN_PREFERRED_IMAGE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
+// https://vulkan.gpuinfo.org/listsurfaceformats.php
+// surely the swapchain supports one of these
+const SWAPCHAIN_SUPPORTED_IMAGE_FORMATS: [vk::Format; 4] = [
+  vk::Format::R8G8B8A8_SRGB,
+  vk::Format::B8G8R8A8_SRGB,
+  vk::Format::R8G8B8A8_UNORM,
+  vk::Format::B8G8R8A8_UNORM,
+];
 
 fn get_multisample_count(physical_device: &PhysicalDevice) -> usize {
   let limit = physical_device

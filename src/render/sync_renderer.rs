@@ -6,10 +6,7 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{
-    texture_loader::{TextureData, TEXTURE_FORMAT},
-    LoadedModels,
-  },
+  asset_loader::{texture_loader::TextureData, LoadedModels},
   last_frames_durations::FPSDurations,
   render::create_objs::create_fence,
   scene::Scene,
@@ -47,7 +44,7 @@ impl SyncRenderer {
     loaded_models: &LoadedModels,
     texture_data: &mut TextureData,
   ) -> Result<Self, InitializationError> {
-    let (renderer, texture_format) = Renderer::initialize(
+    let (renderer, _texture_format) = Renderer::initialize(
       entry,
       instance,
       #[cfg(feature = "vl")]
@@ -76,17 +73,6 @@ impl SyncRenderer {
     )
     .on_err(|_err| unsafe { fence0.destroy_self(device) })?;
     let frame_fences = [fence0, fence1];
-
-    // let bytes = texture_data.bytes();
-    // let mut bytes_clone = Vec::new();
-    // let texture_bytes_ref = if texture_format != TEXTURE_FORMAT {
-    //   bytes_clone.extend_from_slice(bytes);
-    //   format_conversions::convert_rgba_data_to_format(&mut bytes_clone, texture_format);
-    //   &bytes_clone
-    // } else {
-    //   bytes
-    // };
-    assert_eq!(texture_format, TEXTURE_FORMAT);
 
     unsafe {
       Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_data)?;

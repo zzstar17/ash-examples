@@ -17,6 +17,7 @@ pub struct SpriteBuffers {
   pub texture: vk::Image,
   pub texture_mip_levels: u32,
   pub texture_extent: vk::Extent2D,
+  pub texture_format: vk::Format,
 
   pub vertices: vk::Buffer,
   pub indices: vk::Buffer,
@@ -73,6 +74,7 @@ impl SpriteBuffers {
       vertices,
       indices,
       models: loaded_models.models,
+      texture_format: render_format,
     })
   }
 }

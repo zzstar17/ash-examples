@@ -10,6 +10,7 @@ use crate::{
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
     create_objs::{create_color_image_view, create_image, create_image_sampled},
+    format_conversions,
     gpu_data::{
       sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, text_manager::TextManager,
     },
@@ -136,6 +137,7 @@ impl GPUData {
   pub fn new(
     device: &Device,
     physical_device: &PhysicalDevice,
+    texture_format: vk::Format,
     render_format: vk::Format,
     loaded_models: &LoadedModels,
     texture_data: &TextureData,
@@ -149,7 +151,7 @@ impl GPUData {
         width: texture_data.width,
         height: texture_data.height,
       },
-      render_format,
+      texture_format,
       texture_data.reader.header().level_count.max(1),
       #[cfg(feature = "vl")]
       marker,
@@ -295,12 +297,27 @@ impl GPUData {
         indices_size as usize,
       );
 
+      let mut level_copy_buffer = Vec::new();
       let mut local_level_offset = 0;
       let staging_texture_offset = staging_ptr.add(texture_offset as usize);
       for level in texture_data.reader.levels() {
         assert_eq!(level.data.len(), level.uncompressed_byte_length as usize);
+
+        // convert data if format is not RGBA
+        let data = level.data;
+        let converted_data = if TextureData::TEXTURE_FORMAT != self.sprite_buffers.texture_format {
+          level_copy_buffer.clear();
+          level_copy_buffer.extend_from_slice(data);
+          format_conversions::convert_rgba_data_to_format(
+            &mut level_copy_buffer,
+            self.sprite_buffers.texture_format,
+          );
+          &level_copy_buffer
+        } else {
+          data
+        };
         ptr::copy_nonoverlapping(
-          level.data.as_ptr(),
+          converted_data.as_ptr(),
           staging_texture_offset.add(local_level_offset).as_ptr(),
           level.uncompressed_byte_length as usize,
         );
