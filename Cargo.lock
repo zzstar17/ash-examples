@@ -2630,8 +2630,8 @@ dependencies = [
 
 [[package]]
 name = "vkobjects"
-version = "0.1.1"
-source = "git+https://github.com/zzstar17/vkobjects#daee39bb066f4c95bd4b445a0fa4d6add01cf862"
+version = "0.1.2"
+source = "git+https://github.com/zzstar17/vkobjects#3b1cda762fcf68e86ff62200a7c71a3bdd3c13d5"
 dependencies = [
  "ash",
  "thiserror 2.0.21",

@@ -20,7 +20,7 @@ obj-rs = "0.7.4"
 log = {version = "0.4"}
 env_logger = "0.11.0"
 thiserror = "2.0.18"
-vkobjects = { version = "0.1.1", git = "https://github.com/zzstar17/vkobjects" }
+vkobjects = { version = "0.1.2", git = "https://github.com/zzstar17/vkobjects" }
 vkinitialization = { version = "0.1.11", git = "https://github.com/zzstar17/vkinitialization", default-features = false, features = [
     "graphics_family",
     "transfer_family",

@@ -55,13 +55,35 @@ pub enum GPUDataAllocationError {
   QueueSubmitError(#[from] QueueSubmitError),
 }
 
-pub struct ImageViews {
+struct ImageViews {
   pub sprite: vk::ImageView,
   pub text_curve: vk::ImageView,
   pub text_band: vk::ImageView,
 
-  pub text_ui_multisampled: vk::ImageView,
-  pub text_ui: vk::ImageView,
+  pub text_ui_render: Option<vk::ImageView>,
+  pub text_ui_resolved: vk::ImageView,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TextUIImages {
+  pub render: Option<vk::Image>,
+  pub resolved: vk::Image,
+}
+
+pub struct TextUI {
+  // none if multisampling is 1 (disabled)
+  // multisampled color image
+  pub render: Option<vk::Image>,
+  pub render_view: Option<vk::ImageView>,
+
+  // resolve color images with 1 sample
+  // directly rendered to if multisampling is disabled
+  // used after rendering
+  pub resolved: vk::Image,
+  pub resolved_view: vk::ImageView,
+
+  pub line_size: f32,
+  pub size: vk::Extent2D,
 }
 
 pub struct GPUData {
@@ -73,13 +95,7 @@ pub struct GPUData {
   pub text: TextManager,
   pub text_curve_view: vk::ImageView,
   pub text_band_view: vk::ImageView,
-
-  pub text_ui_multisampled: vk::Image,
-  pub text_ui: vk::Image,
-  pub text_ui_line_size: f32,
-  pub text_ui_multisampled_view: vk::ImageView,
-  pub text_ui_view: vk::ImageView,
-  pub text_ui_size: vk::Extent2D,
+  pub text_ui: TextUI,
 
   device_memories: Vec<DetailedMemory>,
   host_device_memories: Vec<DetailedMemory>,
@@ -91,8 +107,7 @@ impl ImageViews {
     render_format: vk::Format,
     sprite_buffers: &SpriteBuffers,
     text_buffers: &TextBuffers,
-    text_ui_multisampled: vk::Image,
-    text_ui: vk::Image,
+    text_ui: TextUIImages,
   ) -> Result<Self, OutOfMemoryError> {
     let sprite = create_color_image_view(
       device,
@@ -116,20 +131,70 @@ impl ImageViews {
     )
     .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
 
-    let text_ui_multisampled =
-      create_color_image_view(device, text_ui_multisampled, render_format, 1)
+    let text_ui_render = if let Some(image) = text_ui.render {
+      let view = create_color_image_view(device, image, render_format, 1)
         .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
+      Some(view)
+    } else {
+      None
+    };
 
-    let text_ui = create_color_image_view(device, text_ui, render_format, 1)
-      .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
+    let text_ui_resolved = create_color_image_view(device, text_ui.resolved, render_format, 1)
+      .on_err(|_| unsafe {
+        destroy!(device => &text_ui_render, &text_band, &text_curve, &sprite)
+      })?;
 
     Ok(Self {
       sprite,
       text_curve,
       text_band,
-      text_ui_multisampled,
-      text_ui,
+      text_ui_render,
+      text_ui_resolved,
     })
+  }
+}
+
+impl TextUIImages {
+  pub fn new(
+    device: &Device,
+    render_format: vk::Format,
+    text_extent: vk::Extent2D,
+    sample_count: usize,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, OutOfMemoryError> {
+    let render = if sample_count > 1 {
+      let image = create_image_sampled(
+        device,
+        render_format,
+        text_extent.width,
+        text_extent.height,
+        sample_count,
+        vk::ImageUsageFlags::COLOR_ATTACHMENT,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Text UI",
+      )?;
+      Some(image)
+    } else {
+      None
+    };
+
+    let resolved = create_image(
+      device,
+      render_format,
+      text_extent.width,
+      text_extent.height,
+      1,
+      vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::SAMPLED),
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text UI",
+    )
+    .on_err(|_| unsafe { destroy!(device => &render) })?;
+
+    Ok(Self { render, resolved })
   }
 }
 
@@ -166,35 +231,15 @@ impl GPUData {
       .on_err(|_| unsafe { destroy!(device => &sprite_buffers) })?;
     let text_extent = text_window_rect.into_vk_extent();
 
-    let text_ui_multisampled = create_image_sampled(
+    let text_ui_images = TextUIImages::new(
       device,
       render_format,
-      text_extent.width,
-      text_extent.height,
+      text_extent,
       sample_count,
-      vk::ImageUsageFlags::COLOR_ATTACHMENT,
       #[cfg(feature = "vl")]
       marker,
-      #[cfg(feature = "vl")]
-      c"Text UI",
     )
     .on_err(|_| unsafe { destroy!(device => &text_manager, &sprite_buffers) })?;
-
-    let text_ui = create_image(
-      device,
-      render_format,
-      text_extent.width,
-      text_extent.height,
-      1,
-      vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::SAMPLED),
-      #[cfg(feature = "vl")]
-      marker,
-      #[cfg(feature = "vl")]
-      c"Text UI",
-    )
-    .on_err(|_| unsafe {
-      destroy!(device => &text_ui_multisampled, &text_manager, &sprite_buffers)
-    })?;
 
     let staging_size = (texture_data.total_mip_levels_size
       + loaded_models.vertices_size()
@@ -208,23 +253,21 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
     )
-    .on_err(|_| unsafe {
-      destroy!(device => &text_ui, &text_ui_multisampled, &text_manager, &sprite_buffers)
-    })?;
+    .on_err(|_| unsafe { destroy!(device => &text_ui_images, &text_manager, &sprite_buffers) })?;
     let device_alloc = allocations::allocate_device(
       device,
       physical_device,
       &sprite_buffers,
       &text_manager.buffers,
-      text_ui_multisampled,
-      text_ui,
-    ).on_err(|_| unsafe {
-      destroy!(device => &text_ui, &text_ui_multisampled, &text_manager, &sprite_buffers, &staging_alloc)
+      text_ui_images,
+    )
+    .on_err(|_| unsafe {
+      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc)
     })?;
     let device_alloc_ref: &[DetailedMemory] = &device_alloc;
     let host_device_alloc =
       allocations::allocate_host_device(device, physical_device, &mut text_manager.buffers).on_err(|_| unsafe {
-      destroy!(device => &text_ui, &text_ui_multisampled, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref)
+      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref)
     })?;
     let host_device_alloc_ref: &[DetailedMemory] = &host_device_alloc;
 
@@ -233,11 +276,20 @@ impl GPUData {
       render_format,
       &sprite_buffers,
       &text_manager.buffers,
-      text_ui_multisampled,
-      text_ui,
+      text_ui_images
     ).on_err(|_| unsafe {
-      destroy!(device => &text_ui, &text_ui_multisampled, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref)
+      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref)
     })?;
+
+    let text_ui = TextUI {
+      render: text_ui_images.render,
+      render_view: views.text_ui_render,
+      resolved: text_ui_images.resolved,
+      resolved_view: views.text_ui_resolved,
+
+      line_size,
+      size: text_extent,
+    };
 
     Ok(Self {
       staging: staging_alloc,
@@ -248,13 +300,7 @@ impl GPUData {
       text: text_manager,
       text_band_view: views.text_band,
       text_curve_view: views.text_curve,
-
-      text_ui_multisampled,
       text_ui,
-      text_ui_line_size: line_size,
-      text_ui_multisampled_view: views.text_ui_multisampled,
-      text_ui_view: views.text_ui,
-      text_ui_size: text_extent,
 
       device_memories: device_alloc,
       host_device_memories: host_device_alloc,
@@ -388,15 +434,29 @@ impl GPUData {
   }
 }
 
+impl DeviceManuallyDestroyed for TextUI {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.render_view.destroy_self(device);
+    self.resolved_view.destroy_self(device);
+
+    self.render.destroy_self(device);
+    self.resolved.destroy_self(device);
+  }
+}
+
+impl DeviceManuallyDestroyed for TextUIImages {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.render.destroy_self(device);
+    self.resolved.destroy_self(device);
+  }
+}
+
 impl DeviceManuallyDestroyed for GPUData {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.sprite_view.destroy_self(device);
     self.text_curve_view.destroy_self(device);
     self.text_band_view.destroy_self(device);
-    self.text_ui_multisampled_view.destroy_self(device);
-    self.text_ui_view.destroy_self(device);
 
-    self.text_ui_multisampled.destroy_self(device);
     self.text_ui.destroy_self(device);
     self.sprite_buffers.destroy_self(device);
     self.text.destroy_self(device);

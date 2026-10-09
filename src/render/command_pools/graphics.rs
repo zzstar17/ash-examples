@@ -340,17 +340,6 @@ impl GraphicsCommandBufferPool {
   ) {
     let cb = self.main;
 
-    let wait_ui = vk::ImageMemoryBarrier2 {
-      src_access_mask: vk::AccessFlags2::NONE,
-      dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-      src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-      dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-      old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
-      new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-      image: data.text_ui_multisampled,
-      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
-      ..Default::default()
-    };
     let wait_ui_resolved = vk::ImageMemoryBarrier2 {
       src_access_mask: vk::AccessFlags2::NONE,
       dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
@@ -358,33 +347,54 @@ impl GraphicsCommandBufferPool {
       dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
       old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
       new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-      image: data.text_ui,
+      image: data.text_ui.resolved,
       subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
       ..Default::default()
     };
-    device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui, wait_ui_resolved]));
+    if let Some(render) = data.text_ui.render {
+      let wait_ui = vk::ImageMemoryBarrier2 {
+        src_access_mask: vk::AccessFlags2::NONE,
+        dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+        new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+        image: render,
+        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+        ..Default::default()
+      };
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui, wait_ui_resolved]));
+    } else {
+      device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui_resolved]));
+    }
 
     let clear_value = vk::ClearValue {
       color: vk::ClearColorValue {
         float32: [0.0, 0.0, 0.0, 0.1],
       },
     };
-    let color_attachments = [vk::RenderingAttachmentInfo {
-      image_view: data.text_ui_multisampled_view,
+
+    let mut color_attachment = vk::RenderingAttachmentInfo {
+      image_view: data.text_ui.resolved_view,
       image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-      resolve_mode: vk::ResolveModeFlags::AVERAGE,
-      resolve_image_view: data.text_ui_view,
+      resolve_mode: vk::ResolveModeFlags::NONE,
+      resolve_image_view: data.text_ui.resolved_view,
       resolve_image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
       load_op: vk::AttachmentLoadOp::CLEAR,
       store_op: vk::AttachmentStoreOp::STORE,
       clear_value,
       ..Default::default()
-    }];
+    };
+    if let Some(render) = data.text_ui.render_view {
+      color_attachment.resolve_mode = vk::ResolveModeFlags::AVERAGE;
+      color_attachment.image_view = render;
+    };
+    let color_attachments = [color_attachment];
     let rendering_info = vk::RenderingInfo {
       flags: vk::RenderingFlags::empty(),
       render_area: vk::Rect2D {
         offset: vk::Offset2D { x: 0, y: 0 },
-        extent: data.text_ui_size,
+        extent: data.text_ui.size,
       },
       layer_count: 1,
       view_mask: 0,
@@ -399,7 +409,7 @@ impl GraphicsCommandBufferPool {
 
     let text_pc = SlugPushConstants::new_2d(
       [RENDER_SIZE.x, RENDER_SIZE.y],
-      [0.0, data.text_ui_line_size],
+      [0.0, data.text_ui.line_size],
     );
 
     device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
@@ -443,7 +453,7 @@ impl GraphicsCommandBufferPool {
       dst_stage_mask: vk::PipelineStageFlags2::FRAGMENT_SHADER,
       old_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
       new_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
-      image: data.text_ui,
+      image: data.text_ui.resolved,
       subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
       ..Default::default()
     };
@@ -524,15 +534,14 @@ impl GraphicsCommandBufferPool {
     // todo: it may be worth to create separate pipelines for UI and world drawing
     // it would at least technically mean I'm not binding the same pipelines twice
     {
-      // wait previous copy on render target
-      let wait_render_target_color = vk::ImageMemoryBarrier2 {
+      let wait_render_target_resolve = vk::ImageMemoryBarrier2 {
         src_access_mask: vk::AccessFlags2::NONE,
         dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-        src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+        src_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT), // previous copy operations
         dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
         old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
         new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        image: render_targets.color_images[frame_i],
+        image: render_targets.resolve_images[frame_i],
         subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
@@ -550,41 +559,61 @@ impl GraphicsCommandBufferPool {
         subresource_range: ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
         ..Default::default()
       };
-      let wait_render_target_resolve = vk::ImageMemoryBarrier2 {
-        src_access_mask: vk::AccessFlags2::NONE,
-        dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
-        src_stage_mask: vk::PipelineStageFlags2::COPY.bitor(vk::PipelineStageFlags2::BLIT), // previous copy operations
-        dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
-        old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
-        new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        image: render_targets.resolve_images[frame_i],
-        subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
-        ..Default::default()
-      };
-      device.cmd_pipeline_barrier2(
-        cb,
-        &dependency_info(
-          &[],
-          &[],
-          &[
-            wait_render_target_color,
-            wait_render_target_depth,
-            wait_render_target_resolve,
-          ],
-        ),
-      );
+      if let Some(images) = render_targets.color_images {
+        let image = images[frame_i];
+        // wait previous copy on render target
+        let wait_render_target_color = vk::ImageMemoryBarrier2 {
+          src_access_mask: vk::AccessFlags2::NONE,
+          dst_access_mask: vk::AccessFlags2::COLOR_ATTACHMENT_WRITE,
+          src_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+          dst_stage_mask: vk::PipelineStageFlags2::COLOR_ATTACHMENT_OUTPUT,
+          old_layout: vk::ImageLayout::UNDEFINED, // we don't care about old contents
+          new_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+          image,
+          subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+          ..Default::default()
+        };
 
-      let color_attachments = [vk::RenderingAttachmentInfo {
-        image_view: render_targets.color_views[frame_i],
+        device.cmd_pipeline_barrier2(
+          cb,
+          &dependency_info(
+            &[],
+            &[],
+            &[
+              wait_render_target_color,
+              wait_render_target_depth,
+              wait_render_target_resolve,
+            ],
+          ),
+        );
+      } else {
+        device.cmd_pipeline_barrier2(
+          cb,
+          &dependency_info(
+            &[],
+            &[],
+            &[wait_render_target_depth, wait_render_target_resolve],
+          ),
+        );
+      }
+
+      let mut color_attachment = vk::RenderingAttachmentInfo {
+        image_view: render_targets.resolve_views[frame_i],
         image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        resolve_mode: vk::ResolveModeFlags::AVERAGE,
+        resolve_mode: vk::ResolveModeFlags::NONE,
         resolve_image_view: render_targets.resolve_views[frame_i],
         resolve_image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
         load_op: vk::AttachmentLoadOp::CLEAR,
         store_op: vk::AttachmentStoreOp::STORE,
         clear_value: color_clear_value,
         ..Default::default()
-      }];
+      };
+      if let Some(views) = render_targets.color_views {
+        let view = views[frame_i];
+        color_attachment.resolve_mode = vk::ResolveModeFlags::AVERAGE;
+        color_attachment.image_view = view;
+      }
+      let color_attachments = [color_attachment];
       let depth_attachment = vk::RenderingAttachmentInfo {
         image_view: render_targets.depth_views[frame_i],
         image_layout: vk::ImageLayout::DEPTH_ATTACHMENT_OPTIMAL,
@@ -682,8 +711,8 @@ impl GraphicsCommandBufferPool {
           {
             // pipeline is still graphics
 
-            let ratio_x = data.text_ui_size.width as f32 / RENDER_SIZE.x;
-            let ratio_y = data.text_ui_size.height as f32 / RENDER_SIZE.y;
+            let ratio_x = data.text_ui.size.width as f32 / RENDER_SIZE.x;
+            let ratio_y = data.text_ui.size.height as f32 / RENDER_SIZE.y;
             let offset_pixels_x = 10.0;
             let offset_pixels_y = 10.0;
             // top left + pixels
@@ -761,7 +790,7 @@ impl GraphicsCommandBufferPool {
 
             let text_pc = SlugPushConstants::new_2d(
               [RENDER_SIZE.x, RENDER_SIZE.y],
-              [10.0, data.text_ui_line_size + 10.0],
+              [10.0, data.text_ui.line_size + 10.0],
             );
             device.cmd_push_constants(
               cb,

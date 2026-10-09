@@ -7,7 +7,9 @@ use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::render::{
   create_objs::create_buffer,
-  gpu_data::{sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, GPUDataAllocationError},
+  gpu_data::{
+    sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, GPUDataAllocationError, TextUIImages,
+  },
 };
 
 pub fn allocate_staging_memory(
@@ -52,46 +54,83 @@ pub fn allocate_device(
   physical_device: &PhysicalDevice,
   sprite_buffers: &SpriteBuffers,
   text_buffers: &TextBuffers,
-  text_ui_miltisampled: vk::Image,
-  text_ui: vk::Image,
+  text_ui_images: TextUIImages,
 ) -> Result<Vec<DetailedMemory>, GPUDataAllocationError> {
-  let device_alloc = vkallocator::allocate_and_bind_memory(
-    device,
-    physical_device,
-    [
-      vk::MemoryPropertyFlags::DEVICE_LOCAL,
-      vk::MemoryPropertyFlags::empty(),
-    ],
-    [
-      &sprite_buffers.vertices,
-      &sprite_buffers.indices,
-      &sprite_buffers.texture,
-      &text_ui_miltisampled,
-      &text_ui,
-      &text_buffers.curve_texture,
-      &text_buffers.band_texture,
-      &text_buffers.device.vertices,
-      &text_buffers.device.indices,
-    ],
-    0.5,
-    false,
-    #[cfg(feature = "log_alloc")]
-    Some([
-      "Vertices",
-      "Indices",
-      "Sprite texture",
-      "Text UI (multisample)",
-      "Text UI (resolve)",
-      "Text curve texture",
-      "Text band texture",
-      "Text device vertices",
-      "Text device indices",
-    ]),
-    #[cfg(feature = "log_alloc")]
-    "Device allocation",
-  )?;
+  let memories = if let Some(text_ui_render) = text_ui_images.render {
+    let alloc = vkallocator::allocate_and_bind_memory(
+      device,
+      physical_device,
+      [
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        vk::MemoryPropertyFlags::empty(),
+      ],
+      [
+        &sprite_buffers.vertices,
+        &sprite_buffers.indices,
+        &sprite_buffers.texture,
+        &text_ui_render,
+        &text_ui_images.resolved,
+        &text_buffers.curve_texture,
+        &text_buffers.band_texture,
+        &text_buffers.device.vertices,
+        &text_buffers.device.indices,
+      ],
+      0.5,
+      false,
+      #[cfg(feature = "log_alloc")]
+      Some([
+        "Vertices",
+        "Indices",
+        "Sprite texture",
+        "Text UI (multisampled)",
+        "Text UI (resolved)",
+        "Text curve texture",
+        "Text band texture",
+        "Text device vertices",
+        "Text device indices",
+      ]),
+      #[cfg(feature = "log_alloc")]
+      "Device allocation",
+    )?;
+    alloc.get_memories().to_vec()
+  } else {
+    let alloc = vkallocator::allocate_and_bind_memory(
+      device,
+      physical_device,
+      [
+        vk::MemoryPropertyFlags::DEVICE_LOCAL,
+        vk::MemoryPropertyFlags::empty(),
+      ],
+      [
+        &sprite_buffers.vertices,
+        &sprite_buffers.indices,
+        &sprite_buffers.texture,
+        &text_ui_images.resolved,
+        &text_buffers.curve_texture,
+        &text_buffers.band_texture,
+        &text_buffers.device.vertices,
+        &text_buffers.device.indices,
+      ],
+      0.5,
+      false,
+      #[cfg(feature = "log_alloc")]
+      Some([
+        "Vertices",
+        "Indices",
+        "Sprite texture",
+        "Text UI (resolved single sample)",
+        "Text curve texture",
+        "Text band texture",
+        "Text device vertices",
+        "Text device indices",
+      ]),
+      #[cfg(feature = "log_alloc")]
+      "Device allocation",
+    )?;
+    alloc.get_memories().to_vec()
+  };
 
-  Ok(device_alloc.get_memories().to_vec())
+  Ok(memories)
 }
 
 pub fn allocate_host_device(
