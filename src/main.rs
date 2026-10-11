@@ -15,6 +15,8 @@ use std::{
   ffi::CStr,
   time::{Duration, Instant},
 };
+#[cfg(feature = "force_x11")]
+use winit::platform::x11::EventLoopBuilderExtX11;
 use winit::{
   application::ApplicationHandler,
   dpi::{PhysicalPosition, PhysicalSize},
@@ -502,7 +504,7 @@ impl ApplicationHandler for App {
                 status.set_paused(event_loop, !status.paused);
               }
             }
-            KeyCode::F2 | KeyCode::F12 => {
+            KeyCode::F2 => {
               if pressed && !repeating {
                 status.renderer.screenshot();
               }
@@ -575,7 +577,13 @@ fn main() -> Result<(), EventLoopError> {
   #[cfg(not(feature = "vl"))]
   env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
+  #[cfg(not(feature = "force_x11"))]
   let event_loop = EventLoop::new().expect("Failed to initialize event loop");
+  #[cfg(feature = "force_x11")]
+  let event_loop = EventLoop::builder()
+    .with_x11()
+    .build()
+    .expect("Failed to initialize event loop");
 
   // make the event loop run continuously even if there is no new user input
   event_loop.set_control_flow(ControlFlow::Poll);

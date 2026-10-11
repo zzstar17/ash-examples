@@ -56,7 +56,7 @@ pub enum GPUDataAllocationError {
 }
 
 struct ImageViews {
-  pub sprite: vk::ImageView,
+  pub texture: vk::ImageView,
   pub text_curve: vk::ImageView,
   pub text_band: vk::ImageView,
 
@@ -108,12 +108,17 @@ impl ImageViews {
     sprite_buffers: &SpriteBuffers,
     text_buffers: &TextBuffers,
     text_ui: TextUIImages,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, OutOfMemoryError> {
-    let sprite = create_color_image_view(
+    let texture = create_color_image_view(
       device,
       sprite_buffers.texture,
       render_format,
       sprite_buffers.texture_mip_levels,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Texture view",
     )?;
 
     let text_curve = create_color_image_view(
@@ -121,31 +126,57 @@ impl ImageViews {
       text_buffers.curve_texture,
       TextBuffers::CURVES_FORMAT,
       1,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text Curve view",
     )
-    .on_err(|_| unsafe { destroy!(device => &sprite) })?;
+    .on_err(|_| unsafe { destroy!(device => &texture) })?;
     let text_band = create_color_image_view(
       device,
       text_buffers.band_texture,
       TextBuffers::BANDS_FORMAT,
       1,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text Band view",
     )
-    .on_err(|_| unsafe { destroy!(device => &text_curve, &sprite) })?;
+    .on_err(|_| unsafe { destroy!(device => &text_curve, &texture) })?;
 
     let text_ui_render = if let Some(image) = text_ui.render {
-      let view = create_color_image_view(device, image, render_format, 1)
-        .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &sprite) })?;
+      let view = create_color_image_view(
+        device,
+        image,
+        render_format,
+        1,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Text UI view (multisampled)",
+      )
+      .on_err(|_| unsafe { destroy!(device => &text_band, &text_curve, &texture) })?;
       Some(view)
     } else {
       None
     };
 
-    let text_ui_resolved = create_color_image_view(device, text_ui.resolved, render_format, 1)
-      .on_err(|_| unsafe {
-        destroy!(device => &text_ui_render, &text_band, &text_curve, &sprite)
-      })?;
+    let text_ui_resolved = create_color_image_view(
+      device,
+      text_ui.resolved,
+      render_format,
+      1,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text UI view (resolved)",
+    )
+    .on_err(|_| unsafe {
+      destroy!(device => &text_ui_render, &text_band, &text_curve, &texture)
+    })?;
 
     Ok(Self {
-      sprite,
+      texture,
       text_curve,
       text_band,
       text_ui_render,
@@ -276,7 +307,8 @@ impl GPUData {
       render_format,
       &sprite_buffers,
       &text_manager.buffers,
-      text_ui_images
+      text_ui_images,
+      #[cfg(feature = "vl")] marker,
     ).on_err(|_| unsafe {
       destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref)
     })?;
@@ -295,7 +327,7 @@ impl GPUData {
       staging: staging_alloc,
 
       sprite_buffers,
-      sprite_view: views.sprite,
+      sprite_view: views.texture,
 
       text: text_manager,
       text_band_view: views.text_band,

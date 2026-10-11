@@ -337,8 +337,12 @@ impl GraphicsCommandBufferPool {
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
     text_pipeline: &TextPipeline,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) {
     let cb = self.main;
+
+    #[cfg(feature = "vl")]
+    marker.cmd_begin_debug_utils_label(cb, c"Update Text UI", [0.0, 0.0, 1.0, 1.0]);
 
     let wait_ui_resolved = vk::ImageMemoryBarrier2 {
       src_access_mask: vk::AccessFlags2::NONE,
@@ -458,6 +462,9 @@ impl GraphicsCommandBufferPool {
       ..Default::default()
     };
     device.cmd_pipeline_barrier2(cb, &dependency_info(&[], &[], &[wait_ui]));
+
+    #[cfg(feature = "vl")]
+    marker.cmd_end_debug_utils_label(cb);
   }
 
   unsafe fn record_draw_indexed(
@@ -502,6 +509,7 @@ impl GraphicsCommandBufferPool {
 
     screenshot_buffer: Option<vk::Buffer>,
     draw_text: bool,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) {
     let cb = self.main;
 
@@ -530,6 +538,9 @@ impl GraphicsCommandBufferPool {
         stencil: 0,
       },
     };
+
+    #[cfg(feature = "vl")]
+    marker.cmd_begin_debug_utils_label(cb, c"Main", [0.0, 1.0, 0.0, 1.0]);
 
     // todo: it may be worth to create separate pipelines for UI and world drawing
     // it would at least technically mean I'm not binding the same pipelines twice
@@ -597,6 +608,8 @@ impl GraphicsCommandBufferPool {
         );
       }
 
+      #[cfg(feature = "vl")]
+      marker.cmd_begin_debug_utils_label(cb, c"Main begin render", [0.0, 0.8, 0.0, 1.0]);
       let mut color_attachment = vk::RenderingAttachmentInfo {
         image_view: render_targets.resolve_views[frame_i],
         image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
@@ -643,6 +656,8 @@ impl GraphicsCommandBufferPool {
 
       // switch to graphics and record world objects (with depth buffer)
       {
+        #[cfg(feature = "vl")]
+        marker.cmd_begin_debug_utils_label(cb, c"Main draw world objects", [0.0, 0.8, 0.0, 1.0]);
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
         device.cmd_set_depth_test_enable(cb, true);
 
@@ -658,10 +673,14 @@ impl GraphicsCommandBufferPool {
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT32);
 
         self.record_draw_scene_world_objects(device, pipeline, scene);
+        #[cfg(feature = "vl")]
+        marker.cmd_end_debug_utils_label(cb);
       }
 
       // switch to text pipeline and draw 3d world text
       {
+        #[cfg(feature = "vl")]
+        marker.cmd_begin_debug_utils_label(cb, c"Main draw world text", [0.0, 0.8, 0.0, 1.0]);
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
         device.cmd_set_depth_test_enable(cb, true);
 
@@ -687,10 +706,14 @@ impl GraphicsCommandBufferPool {
         );
 
         self.record_draw_world_text(device, text_pipeline, scene, data);
+        #[cfg(feature = "vl")]
+        marker.cmd_end_debug_utils_label(cb);
       }
 
       // switch back to graphics and draw ui
       {
+        #[cfg(feature = "vl")]
+        marker.cmd_begin_debug_utils_label(cb, c"Main draw UI", [0.0, 0.8, 0.0, 1.0]);
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
         device.cmd_set_depth_test_enable(cb, false);
 
@@ -761,6 +784,12 @@ impl GraphicsCommandBufferPool {
 
           // draw fast changing ui text
           {
+            #[cfg(feature = "vl")]
+            marker.cmd_begin_debug_utils_label(
+              cb,
+              c"Main draw device buffer text UI",
+              [0.0, 0.8, 0.0, 1.0],
+            );
             device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
             device.cmd_set_depth_test_enable(cb, false);
 
@@ -800,11 +829,17 @@ impl GraphicsCommandBufferPool {
               utility::any_as_u8_slice(&text_pc),
             );
             device.cmd_draw_indexed(cb, data.text.host_index_count, 1, 0, 0, 0);
+            #[cfg(feature = "vl")]
+            marker.cmd_end_debug_utils_label(cb);
           }
         }
+        #[cfg(feature = "vl")]
+        marker.cmd_end_debug_utils_label(cb);
       }
 
       device.cmd_end_rendering(cb);
+      #[cfg(feature = "vl")]
+      marker.cmd_end_debug_utils_label(cb);
     }
 
     // wait to be ready to copy on render target
@@ -997,6 +1032,9 @@ impl GraphicsCommandBufferPool {
         &dependency_info(&[], &[], &[swapchain_presentation_layout]),
       );
     }
+
+    #[cfg(feature = "vl")]
+    marker.cmd_end_debug_utils_label(cb);
   }
 
   pub fn end_recording(&self, device: &ash::Device) -> Result<(), OutOfMemoryError> {

@@ -1,3 +1,5 @@
+#[cfg(feature = "vl")]
+use std::ffi::CStr;
 use std::{
   ffi::c_void,
   marker::PhantomData,
@@ -75,26 +77,52 @@ impl RenderPipelines {
     render_format: vk::Format,
     extent: vk::Extent2D,
     sample_count: usize,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, PipelineCreationError> {
-    let graphics_layout = Self::create_graphics_layout(device, descriptor_pool)?;
-    let text_layout = Self::create_text_layout(device, descriptor_pool).on_err(|_err| unsafe {
+    let graphics_layout = Self::create_graphics_layout(
+      device,
+      descriptor_pool,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Graphics layout",
+    )?;
+    let text_layout = Self::create_text_layout(
+      device,
+      descriptor_pool,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text layout",
+    )
+    .on_err(|_err| unsafe {
       device.destroy_pipeline_layout(graphics_layout, None);
     })?;
 
-    let graphics_shader = shaders::Shader::load(device, shader_loader)
-      .map_err(PipelineCreationError::ShaderFailed)
-      .on_err(|_err| unsafe {
-        device.destroy_pipeline_layout(graphics_layout, None);
-        device.destroy_pipeline_layout(text_layout, None);
-      })?;
+    let graphics_shader = shaders::Shader::load(
+      device,
+      shader_loader,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .map_err(PipelineCreationError::ShaderFailed)
+    .on_err(|_err| unsafe {
+      device.destroy_pipeline_layout(graphics_layout, None);
+      device.destroy_pipeline_layout(text_layout, None);
+    })?;
 
-    let text_shader = shaders::TextShader::load(device, shader_loader)
-      .map_err(PipelineCreationError::ShaderFailed)
-      .on_err(|_err| unsafe {
-        device.destroy_pipeline_layout(graphics_layout, None);
-        device.destroy_pipeline_layout(text_layout, None);
-        graphics_shader.destroy_self(device);
-      })?;
+    let text_shader = shaders::TextShader::load(
+      device,
+      shader_loader,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .map_err(PipelineCreationError::ShaderFailed)
+    .on_err(|_err| unsafe {
+      device.destroy_pipeline_layout(graphics_layout, None);
+      device.destroy_pipeline_layout(text_layout, None);
+      graphics_shader.destroy_self(device);
+    })?;
 
     let [initial_graphics, initial_text] = Self::create_with_base(
       device,
@@ -108,6 +136,8 @@ impl RenderPipelines {
       render_format,
       extent,
       sample_count,
+      #[cfg(feature = "vl")]
+      marker,
     )?;
 
     let graphics = GraphicsPipeline {
@@ -134,6 +164,7 @@ impl RenderPipelines {
     render_format: vk::Format,
     extent: vk::Extent2D,
     sample_count: usize,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(), PipelineCreationError> {
     assert!(self.graphics.old.is_none());
     assert!(self.text.old.is_none());
@@ -150,6 +181,8 @@ impl RenderPipelines {
       render_format,
       extent,
       sample_count,
+      #[cfg(feature = "vl")]
+      marker,
     )?;
 
     let old_graphics = {
@@ -195,6 +228,8 @@ impl RenderPipelines {
   fn create_graphics_layout(
     device: &ash::Device,
     descriptor_pool: &DescriptorPool,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] name: &CStr,
   ) -> Result<vk::PipelineLayout, OutOfMemoryError> {
     let push_constant_range = vk::PushConstantRange {
       stage_flags: vk::ShaderStageFlags::VERTEX,
@@ -209,13 +244,19 @@ impl RenderPipelines {
       p_push_constant_ranges: &push_constant_range,
       ..Default::default()
     };
-    unsafe { device.create_pipeline_layout(&layout_create_info, None) }
-      .map_err(OutOfMemoryError::from)
+    unsafe {
+      let layout = device.create_pipeline_layout(&layout_create_info, None)?;
+      #[cfg(feature = "vl")]
+      marker.set_obj_name(vk::ObjectType::PIPELINE_LAYOUT, layout.as_raw(), name)?;
+      Ok(layout)
+    }
   }
 
   fn create_text_layout(
     device: &ash::Device,
     descriptor_pool: &DescriptorPool,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] name: &CStr,
   ) -> Result<vk::PipelineLayout, OutOfMemoryError> {
     let push_constant_range = vk::PushConstantRange {
       stage_flags: vk::ShaderStageFlags::VERTEX,
@@ -229,8 +270,12 @@ impl RenderPipelines {
       p_push_constant_ranges: &push_constant_range,
       ..Default::default()
     };
-    unsafe { device.create_pipeline_layout(&layout_create_info, None) }
-      .map_err(OutOfMemoryError::from)
+    unsafe {
+      let layout = device.create_pipeline_layout(&layout_create_info, None)?;
+      #[cfg(feature = "vl")]
+      marker.set_obj_name(vk::ObjectType::PIPELINE_LAYOUT, layout.as_raw(), name)?;
+      Ok(layout)
+    }
   }
 
   fn create_with_base(
@@ -245,6 +290,7 @@ impl RenderPipelines {
     render_format: vk::Format,
     extent: vk::Extent2D,
     sample_count: usize,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<[vk::Pipeline; 2], PipelineCreationError> {
     let graphics_shader_stages = graphics_shader.get_pipeline_shader_creation_info();
     let text_shader_stages = text_shader.get_pipeline_shader_creation_info();
@@ -419,6 +465,16 @@ impl RenderPipelines {
     }?;
     let graphics = pipelines[0];
     let text = pipelines[1];
+
+    #[cfg(feature = "vl")]
+    unsafe {
+      marker.set_obj_name(
+        vk::ObjectType::PIPELINE,
+        graphics.as_raw(),
+        c"Graphics Pipeline",
+      )?;
+      marker.set_obj_name(vk::ObjectType::PIPELINE, text.as_raw(), c"Text Pipeline")?;
+    }
 
     Ok([graphics, text])
   }

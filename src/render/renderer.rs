@@ -242,8 +242,13 @@ impl Renderer {
     }
     destructor.push(&pipeline_cache);
 
-    let descriptor_pool =
-      DescriptorPool::new(&device, &gpu_data).on_err(|_| destroy_objs(&destructor))?;
+    let descriptor_pool = DescriptorPool::new(
+      &device,
+      &gpu_data,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
+    )
+    .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&descriptor_pool);
 
     let mut shader_loader = ShaderLoader::new();
@@ -256,6 +261,8 @@ impl Renderer {
       render_format,
       RENDER_EXTENT,
       sample_count,
+      #[cfg(feature = "vl")]
+      &debug_utils_marker,
     )
     .on_err(|_| destroy_objs(&destructor))?;
     destructor.push(&render_pipelines);
@@ -372,6 +379,8 @@ impl Renderer {
         &self.descriptor_pool,
         &self.data,
         &self.render_pipelines.text,
+        #[cfg(feature = "vl")]
+        &self.debug_utils_marker,
       );
     }
 
@@ -392,6 +401,8 @@ impl Renderer {
         None
       },
       draw_text,
+      #[cfg(feature = "vl")]
+      &self.debug_utils_marker,
     );
   }
 
@@ -461,6 +472,8 @@ impl Renderer {
         self.swapchains.get_format(),
         RENDER_EXTENT,
         sample_count,
+        #[cfg(feature = "vl")]
+        &self.debug_utils_marker,
       ) {
         Ok(v) => v,
         Err(err) => unsafe {

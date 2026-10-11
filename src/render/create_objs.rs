@@ -154,6 +154,8 @@ pub fn create_color_image_view(
   image: vk::Image,
   format: vk::Format,
   mip_levels: u32,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::ImageView, OutOfMemoryError> {
   let create_info = vk::ImageViewCreateInfo {
     flags: vk::ImageViewCreateFlags::empty(),
@@ -177,9 +179,10 @@ pub fn create_color_image_view(
   };
 
   unsafe {
-    device
-      .create_image_view(&create_info, None)
-      .map_err(|err| err.into())
+    let view = device.create_image_view(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE_VIEW, view.as_raw(), name)?;
+    Ok(view)
   }
 }
 
@@ -187,6 +190,8 @@ pub fn create_depth_image_view(
   device: &ash::Device,
   image: vk::Image,
   format: vk::Format,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::ImageView, OutOfMemoryError> {
   let create_info = vk::ImageViewCreateInfo {
     flags: vk::ImageViewCreateFlags::empty(),
@@ -210,8 +215,9 @@ pub fn create_depth_image_view(
   };
 
   unsafe {
-    device
-      .create_image_view(&create_info, None)
-      .map_err(|err| err.into())
+    let view = device.create_image_view(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE_VIEW, view.as_raw(), name)?;
+    Ok(view)
   }
 }

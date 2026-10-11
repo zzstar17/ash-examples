@@ -1,13 +1,20 @@
+#[cfg(feature = "vl")]
+use std::ffi::CStr;
 use std::{marker::PhantomData, ptr};
 
 use ash::vk;
-use vkobjects::{errors::OutOfMemoryError, DeviceManuallyDestroyed};
+#[cfg(feature = "vl")]
+use ash::vk::Handle;
+use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::render::gpu_data::GPUData;
 
 use super::texture_write_descriptor_set;
 
-fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
+fn create_texture_sampler(
+  device: &ash::Device,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+) -> Result<vk::Sampler, OutOfMemoryError> {
   let sampler_create_info = vk::SamplerCreateInfo {
     s_type: vk::StructureType::SAMPLER_CREATE_INFO,
     p_next: ptr::null(),
@@ -29,11 +36,23 @@ fn create_texture_sampler(device: &ash::Device) -> Result<vk::Sampler, OutOfMemo
     max_lod: vk::LOD_CLAMP_NONE,
     _marker: PhantomData,
   };
-  unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let sampler = device.create_sampler(&sampler_create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(
+      vk::ObjectType::SAMPLER,
+      sampler.as_raw(),
+      c"Texture Sampler",
+    )?;
+    Ok(sampler)
+  }
 }
 
 // lookup nearest float
-fn create_sampler_nearest_float(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
+fn create_sampler_nearest_float(
+  device: &ash::Device,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+) -> Result<vk::Sampler, OutOfMemoryError> {
   let sampler_create_info = vk::SamplerCreateInfo {
     s_type: vk::StructureType::SAMPLER_CREATE_INFO,
     p_next: ptr::null(),
@@ -55,11 +74,23 @@ fn create_sampler_nearest_float(device: &ash::Device) -> Result<vk::Sampler, Out
     min_lod: 0.0,
     _marker: PhantomData,
   };
-  unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let sampler = device.create_sampler(&sampler_create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(
+      vk::ObjectType::SAMPLER,
+      sampler.as_raw(),
+      c"Nearest float sampler",
+    )?;
+    Ok(sampler)
+  }
 }
 
 // lookup nearest int
-fn create_sampler_nearest_int(device: &ash::Device) -> Result<vk::Sampler, OutOfMemoryError> {
+fn create_sampler_nearest_int(
+  device: &ash::Device,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+) -> Result<vk::Sampler, OutOfMemoryError> {
   let sampler_create_info = vk::SamplerCreateInfo {
     s_type: vk::StructureType::SAMPLER_CREATE_INFO,
     p_next: ptr::null(),
@@ -81,7 +112,16 @@ fn create_sampler_nearest_int(device: &ash::Device) -> Result<vk::Sampler, OutOf
     min_lod: 0.0,
     _marker: PhantomData,
   };
-  unsafe { device.create_sampler(&sampler_create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let sampler = device.create_sampler(&sampler_create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(
+      vk::ObjectType::SAMPLER,
+      sampler.as_raw(),
+      c"Nearest int sampler",
+    )?;
+    Ok(sampler)
+  }
 }
 
 pub struct DescriptorPool {
@@ -144,13 +184,52 @@ impl DescriptorPool {
     ]
   }
 
-  pub fn new(device: &ash::Device, gpu_data: &GPUData) -> Result<Self, OutOfMemoryError> {
-    let sprites_sampler = create_texture_sampler(device)?;
-    let text_curves_sampler = create_sampler_nearest_float(device)?;
-    let text_bands_sampler = create_sampler_nearest_int(device)?;
+  pub fn new(
+    device: &ash::Device,
+    gpu_data: &GPUData,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, OutOfMemoryError> {
+    let sprites_sampler = create_texture_sampler(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
+    let text_curves_sampler = create_sampler_nearest_float(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &sprites_sampler);
+    })?;
+    let text_bands_sampler = create_sampler_nearest_int(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &text_curves_sampler, &sprites_sampler);
+    })?;
 
-    let sprites_layout = Self::create_graphics_layout(device, sprites_sampler)?;
-    let text_layout = Self::create_text_layout(device, text_curves_sampler, text_bands_sampler)?;
+    let sprites_layout = Self::create_graphics_layout(
+      device,
+      sprites_sampler,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+    })?;
+    let text_layout = Self::create_text_layout(
+      device,
+      text_curves_sampler,
+      text_bands_sampler,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+    })?;
 
     let pool = {
       let pool_create_info = vk::DescriptorPoolCreateInfo {
@@ -163,9 +242,13 @@ impl DescriptorPool {
         _marker: PhantomData,
       };
       unsafe { device.create_descriptor_pool(&pool_create_info, None) }
-    }?;
+    }.on_err(|_err| unsafe {
+      destroy!(device => &text_layout, &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+    })?;
 
-    let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout])?;
+    let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout]).on_err(|_err| unsafe {
+      destroy!(device => &pool, &text_layout, &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+    })?;
     let writes = [
       texture_write_descriptor_set(sets[0], gpu_data.sprite_view, 0),
       texture_write_descriptor_set(sets[1], gpu_data.text_ui.resolved_view, 0),
@@ -199,21 +282,37 @@ impl DescriptorPool {
   fn create_graphics_layout(
     device: &ash::Device,
     texture_sampler: vk::Sampler,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<vk::DescriptorSetLayout, OutOfMemoryError> {
     let ptr = &texture_sampler;
     let bindings = Self::graphics_layout_bindings(ptr);
-    create_layout(device, &bindings)
+    create_layout(
+      device,
+      &bindings,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Graphics Layout",
+    )
   }
 
   fn create_text_layout(
     device: &ash::Device,
     curves_sampler: vk::Sampler,
     bands_sampler: vk::Sampler,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<vk::DescriptorSetLayout, OutOfMemoryError> {
     let curves_sampler_ptr = &curves_sampler;
     let bands_sampler_ptr = &bands_sampler;
     let bindings = Self::text_layout_bindings(curves_sampler_ptr, bands_sampler_ptr);
-    create_layout(device, &bindings)
+    create_layout(
+      device,
+      &bindings,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Text Layout",
+    )
   }
 }
 
@@ -233,6 +332,8 @@ impl DeviceManuallyDestroyed for DescriptorPool {
 fn create_layout(
   device: &ash::Device,
   bindings: &[vk::DescriptorSetLayoutBinding],
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
 ) -> Result<vk::DescriptorSetLayout, OutOfMemoryError> {
   let create_info = vk::DescriptorSetLayoutCreateInfo {
     s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -242,7 +343,12 @@ fn create_layout(
     p_bindings: bindings.as_ptr(),
     _marker: PhantomData,
   };
-  unsafe { device.create_descriptor_set_layout(&create_info, None) }.map_err(|err| err.into())
+  unsafe {
+    let layout = device.create_descriptor_set_layout(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::DESCRIPTOR_SET_LAYOUT, layout.as_raw(), name)?;
+    Ok(layout)
+  }
 }
 
 fn allocate_sets(

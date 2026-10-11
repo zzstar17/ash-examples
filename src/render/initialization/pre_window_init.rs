@@ -29,10 +29,10 @@ pub struct RenderInit {
 
 #[derive(Debug, thiserror::Error)]
 pub enum RenderInitError {
-  #[error("Failed to create a Vulkan Instance")]
+  #[error("Failed to create a Vulkan Instance:\n{0}")]
   InstanceCreationFailed(#[source] InstanceCreationError),
 
-  #[error("Failed to get display handle")]
+  #[error("Failed to get a display handle:\n{0}")]
   DisplayHandle(#[source] HandleError),
 
   #[error(transparent)]

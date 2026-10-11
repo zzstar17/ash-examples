@@ -202,9 +202,16 @@ impl RenderTargets {
 
     let resolve_views = fill_destroyable_array_from_iter!(
       device,
-      resolve_images
-        .iter()
-        .map(|image| create_color_image_view(device, *image, render_format, 1)),
+      resolve_images.iter().map(|image| create_color_image_view(
+        device,
+        *image,
+        render_format,
+        1,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Main render target resolve views"
+      )),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| {
@@ -212,9 +219,15 @@ impl RenderTargets {
     })?;
     let depth_views = fill_destroyable_array_from_iter!(
       device,
-      depth_images
-        .iter()
-        .map(|image| create_depth_image_view(device, *image, DEPTH_FORMAT)),
+      depth_images.iter().map(|image| create_depth_image_view(
+        device,
+        *image,
+        DEPTH_FORMAT,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Main render target depth views"
+      )),
       FRAMES_IN_FLIGHT
     )
     .on_err(|_| unsafe {
@@ -225,9 +238,16 @@ impl RenderTargets {
     let color_views = if let Some(images) = color_images {
       let views = fill_destroyable_array_from_iter!(
         device,
-        images
-          .iter()
-          .map(|image| create_color_image_view(device, *image, render_format, 1)),
+        images.iter().map(|image| create_color_image_view(
+          device,
+          *image,
+          render_format,
+          1,
+          #[cfg(feature = "vl")]
+          marker,
+          #[cfg(feature = "vl")]
+          c"Main Render target color views"
+        )),
         FRAMES_IN_FLIGHT
       )
       .on_err(|_| unsafe {

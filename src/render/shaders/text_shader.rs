@@ -24,6 +24,7 @@ impl TextShader {
   pub fn load(
     device: &ash::Device,
     shader_loader: &mut ShaderLoader,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, ShaderLoadError> {
     let vert_path = Path::new(if ENABLE_USE_DEBUG_SHADERS {
       VERT_DEBUG_SHADER_PATH
@@ -36,8 +37,22 @@ impl TextShader {
       FRAG_SHADER_PATH
     });
     Ok(Self {
-      vert: shader_loader.load_shader(device, vert_path)?,
-      frag: shader_loader.load_shader(device, frag_path)?,
+      vert: shader_loader.load_shader(
+        device,
+        vert_path,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Text Vertex shader",
+      )?,
+      frag: shader_loader.load_shader(
+        device,
+        frag_path,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Text Fragment shader",
+      )?,
     })
   }
 }

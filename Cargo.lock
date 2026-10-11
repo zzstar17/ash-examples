@@ -2616,8 +2616,8 @@ dependencies = [
 
 [[package]]
 name = "vkinitialization"
-version = "0.1.12"
-source = "git+https://github.com/zzstar17/vkinitialization#ebbd691a02915e2dc6660ac4ccd521fc72195753"
+version = "0.1.13"
+source = "git+https://github.com/zzstar17/vkinitialization#5a54b706553f9f5a56bd1232747ecfa83f6c6e6d"
 dependencies = [
  "ash",
  "ash-window",
@@ -2630,8 +2630,8 @@ dependencies = [
 
 [[package]]
 name = "vkobjects"
-version = "0.1.2"
-source = "git+https://github.com/zzstar17/vkobjects#3b1cda762fcf68e86ff62200a7c71a3bdd3c13d5"
+version = "0.1.3"
+source = "git+https://github.com/zzstar17/vkobjects#d4f821c245e36be62a3b104e3cafe51e84c8e4e6"
 dependencies = [
  "ash",
  "thiserror 2.0.21",

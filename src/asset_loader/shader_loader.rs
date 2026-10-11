@@ -1,3 +1,5 @@
+#[cfg(feature = "vl")]
+use std::ffi::CStr;
 use std::{
   fs::File,
   io::{self, Read},
@@ -5,6 +7,8 @@ use std::{
 };
 
 use ash::vk;
+#[cfg(feature = "vl")]
+use ash::vk::Handle;
 use vkobjects::errors::OutOfMemoryError;
 
 pub struct ShaderLoader {
@@ -34,6 +38,8 @@ impl ShaderLoader {
     &mut self,
     device: &ash::Device,
     shader_path: &Path,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] name: &CStr,
   ) -> Result<vk::ShaderModule, ShaderLoadError> {
     self
       .read_shader_code(shader_path)
@@ -48,7 +54,13 @@ impl ShaderLoader {
       return Err(ShaderLoadError::Invalid);
     }
 
-    let module = self.create_shader_module(device)?;
+    let module = self.create_shader_module(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      name,
+    )?;
     Ok(module)
   }
 
@@ -62,6 +74,8 @@ impl ShaderLoader {
   fn create_shader_module(
     &self,
     device: &ash::Device,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] name: &CStr,
   ) -> Result<vk::ShaderModule, ShaderLoadError> {
     let create_info = vk::ShaderModuleCreateInfo {
       p_code: self.shader_buffer.as_ptr() as *const u32,
@@ -69,12 +83,21 @@ impl ShaderLoader {
       ..Default::default()
     };
 
-    unsafe { device.create_shader_module(&create_info, None) }.map_err(|vkerr| match vkerr {
-      vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
-        ShaderLoadError::OutOfMemory(vkerr.into())
-      }
-      vk::Result::ERROR_INVALID_SHADER_NV => ShaderLoadError::Invalid,
-      _ => panic!(),
-    })
+    unsafe {
+      let module =
+        device
+          .create_shader_module(&create_info, None)
+          .map_err(|vkerr| match vkerr {
+            vk::Result::ERROR_OUT_OF_HOST_MEMORY | vk::Result::ERROR_OUT_OF_DEVICE_MEMORY => {
+              ShaderLoadError::OutOfMemory(vkerr.into())
+            }
+            vk::Result::ERROR_INVALID_SHADER_NV => ShaderLoadError::Invalid,
+            _ => panic!(),
+          })?;
+      #[cfg(feature = "vl")]
+      marker.set_obj_name(vk::ObjectType::SHADER_MODULE, module.as_raw(), name)?;
+
+      Ok(module)
+    }
   }
 }

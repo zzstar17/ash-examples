@@ -1,4 +1,4 @@
-use std::{marker::PhantomData, ptr};
+use std::{ffi::CString, marker::PhantomData, ptr};
 
 use ash::vk;
 use vkallocator::HostMemorySyncError;
@@ -310,11 +310,34 @@ impl SyncRenderer {
       .wait_semaphore_infos(&wait_semaphores)
       .signal_semaphore_infos(&signal_semaphores);
     unsafe {
+      #[cfg(feature = "vl")]
+      {
+        let name = format!(
+          "Graphics Frame {}, index {}, image {}",
+          cur_total_frame, cur_frame_i, cur_image_i
+        );
+        let cname = CString::new(name).unwrap();
+        self
+          .renderer
+          .debug_utils_marker
+          .queue_begin_debug_utils_label(
+            self.renderer.queues.graphics.handle,
+            &cname,
+            [0.0, 0.8, 0.8, 1.0],
+          );
+      }
+
       self.renderer.device.queue_submit2(
         self.renderer.queues.graphics.handle,
         &[submit_info],
         self.frame_fences[cur_frame_i],
       )?;
+
+      #[cfg(feature = "vl")]
+      self
+        .renderer
+        .debug_utils_marker
+        .queue_end_debug_utils_label(self.renderer.queues.graphics.handle);
     }
 
     unsafe {
