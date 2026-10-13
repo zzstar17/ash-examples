@@ -49,6 +49,7 @@ pub struct RenderCamera {
   /// normalized front vector
   front: Vector3<f32>,
   fov: f32,
+  inv_fov_tan: f32,
   aspect_ratio: f32,
   /// cached because it's not frequently updated
   projection_matrix: Matrix4<f32>,
@@ -59,16 +60,22 @@ impl RenderCamera {
   const MIN_FOV: f32 = PI / 15.0;
   const ZOOM_SENTIVITY: f32 = 0.07;
 
-  pub fn new(camera: Camera, fov: f32, aspect_ratio: f32, sensitivity: f32) -> Self {
+  pub fn new(camera: Camera, fov: f32, aspect_ratio: f32) -> Self {
     let front = camera.get_front();
+    let inv_fov_tan = Self::get_inv_fov_tan(fov);
 
     Self {
       camera,
       front,
       fov,
+      inv_fov_tan,
       aspect_ratio,
-      projection_matrix: calc_projection_matrix(fov, aspect_ratio),
+      projection_matrix: calc_projection_matrix(inv_fov_tan, aspect_ratio),
     }
+  }
+
+  fn get_inv_fov_tan(fov: f32) -> f32 {
+    1.0 / f32::tan(fov * 0.5)
   }
 
   pub fn speed_mut(&mut self) -> &mut f32 {
@@ -88,7 +95,7 @@ impl RenderCamera {
   }
 
   fn update_projection_matrix(&mut self) {
-    self.projection_matrix = calc_projection_matrix(self.fov, self.aspect_ratio);
+    self.projection_matrix = calc_projection_matrix(self.inv_fov_tan, self.aspect_ratio);
   }
 
   pub fn projection_matrix(&self) -> &Matrix4<f32> {
@@ -106,6 +113,7 @@ impl RenderCamera {
 
   pub fn zoom_relative(&mut self, amount: f32) {
     self.fov = (self.fov + (amount * Self::ZOOM_SENTIVITY)).clamp(Self::MIN_FOV, Self::MAX_FOV);
+    self.inv_fov_tan = Self::get_inv_fov_tan(self.fov);
     self.update_projection_matrix();
   }
 
@@ -154,22 +162,20 @@ impl RenderCamera {
   }
 }
 
-fn calc_projection_matrix(fov: f32, aspect_ratio: f32) -> Matrix4<f32> {
+fn calc_projection_matrix(inv_fov_tan: f32, aspect_ratio: f32) -> Matrix4<f32> {
   let far = 1000.0;
   let near = 0.05;
 
-  let y_scale = 1.0 / f32::tan(fov * 0.5);
+  let y_scale = inv_fov_tan;
   let x_scale = y_scale / aspect_ratio;
 
   // right handed projection perspective fov matrix that keeps the deep range in [0, 1]
   // yoinked from https://learn.microsoft.com/en-us/windows/win32/direct3d9/d3dxmatrixperspectivefovrh
   // see https://github.com/rustgd/cgmath/issues/449
-  let m = Matrix4 {
+  Matrix4 {
     x: Vector4::new(x_scale, 0.0, 0.0, 0.0),
     y: Vector4::new(0.0, y_scale, 0.0, 0.0),
     z: Vector4::new(0.0, 0.0, far / (near - far), -1.0),
     w: Vector4::new(0.0, 0.0, near * far / (near - far), 0.0),
-  };
-
-  m
+  }
 }

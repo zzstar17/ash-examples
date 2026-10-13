@@ -120,7 +120,7 @@ impl GraphicsCommandBufferPool {
     data: &GPUData,
   ) {
     let matrix = (scene.last_update_projection_view * scene.niko_text.model()).transpose();
-    let arrays = std::mem::transmute(matrix);
+    let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
     let text_pc = SlugPushConstants {
       mvp_matrix: arrays,
       viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
@@ -142,7 +142,7 @@ impl GraphicsCommandBufferPool {
     );
 
     let matrix = (scene.last_update_projection_view * scene.kakyoin_text.model()).transpose();
-    let arrays = std::mem::transmute(matrix);
+    let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
     let text_pc = SlugPushConstants {
       mvp_matrix: arrays,
       viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],

@@ -263,7 +263,7 @@ impl SyncRenderer {
       self.renderer.record_graphics(
         cur_frame_i,
         cur_image_i as usize,
-        &scene,
+        scene,
         record_screenshot,
         cur_total_frame == 0,
         true,

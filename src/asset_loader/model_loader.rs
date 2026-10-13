@@ -284,10 +284,8 @@ impl LoadedModels {
     // todo: Fix niko model's vertices's face orientation
     // temporary fix to flip triangles orientation counter-clockwise
     assert!(niko_obj.indices.len().is_multiple_of(3));
-    for triangle in niko_obj.indices.chunks_exact_mut(3) {
-      let temp = triangle[0];
-      triangle[0] = triangle[2];
-      triangle[2] = temp;
+    for triangle in niko_obj.indices.as_chunks_mut::<3>().0 {
+      triangle.swap(0, 2);
     }
 
     let kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {

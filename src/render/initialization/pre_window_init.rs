@@ -97,7 +97,7 @@ impl RenderInit {
     let mut texture_data = unsafe { ManuallyDrop::take(&mut self.texture_data) };
     mem::forget(self);
 
-    let renderer = SyncRenderer::new(
+    SyncRenderer::new(
       entry,
       instance,
       #[cfg(feature = "vl")]
@@ -105,9 +105,7 @@ impl RenderInit {
       event_loop,
       &models,
       &mut texture_data,
-    );
-
-    renderer
+    )
   }
 }
 

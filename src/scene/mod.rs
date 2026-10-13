@@ -62,7 +62,6 @@ impl Scene {
       Camera::new(1.0, f32::consts::PI / -2.0, 0.0),
       0.8,
       aspect_ratio,
-      3.0,
     );
 
     let angle: f32 = 0.0;
@@ -122,9 +121,9 @@ impl Scene {
       Vector3::new(1.0, 1.0, 1.0),
     );
 
-    let mut niko_text = niko_obj.clone();
+    let mut niko_text = niko_obj;
     niko_text.move_y(-3.5);
-    let mut kakyoin_text = kakyoin_obj.clone();
+    let mut kakyoin_text = kakyoin_obj;
     kakyoin_text.move_y(-1.5);
 
     Self {

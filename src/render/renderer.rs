@@ -133,6 +133,7 @@ impl Renderer {
       DeviceFeatures {
         synchronization2: true,
         dynamic_rendering: true,
+        shader_demote_to_helper_invocation: true,
         ..Default::default()
       },
       DeviceFeatures {
