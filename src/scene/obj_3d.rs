@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector2, Vector3, Vector4};
+use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Rotation, Vector2, Vector3, Vector4};
 
 use crate::scene::{quaternion_from_angle, UP};
 
@@ -13,6 +13,7 @@ pub struct Render3dObj {
 
 // XZ front vector at 0 degree rotation
 const NORMAL_FRONT2: Vector2<f32> = Vector2::new(0.0, 1.0);
+const NORMAL_FRONT3: Vector3<f32> = Vector3::new(0.0, 0.0, 1.0);
 
 fn compose_model_matrix(
   position: Point3<f32>,
@@ -121,6 +122,10 @@ impl Render3dObj {
     debug_assert!((self.rotation.magnitude2() - 1.0).abs() < 0.001);
 
     self.update_model_matrix_full();
+  }
+
+  pub fn get_front_vector(&self) -> Vector3<f32> {
+    self.rotation.rotate_vector(NORMAL_FRONT3)
   }
 
   pub fn linearly_vertically_rotate_to_point(&mut self, point: Point3<f32>, amount: f32) {

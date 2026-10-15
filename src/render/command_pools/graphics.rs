@@ -89,6 +89,8 @@ impl GraphicsCommandBufferPool {
     }
     self.record_draw_indexed(device, pipeline.layout, scene.get_niko_data());
     self.record_draw_indexed(device, pipeline.layout, scene.get_kakyoin());
+
+    self.record_draw_indexed(device, pipeline.layout, scene.get_niko_light_data());
   }
 
   unsafe fn record_draw_crosshair(

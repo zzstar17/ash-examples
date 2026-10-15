@@ -37,6 +37,7 @@ pub struct Scene {
 
   pub ferris_obj: Render3dObj,
   pub niko_obj: Render3dObj,
+  pub niko_light_obj: Render3dObj,
   pub kakyoin_obj: Render3dObj,
   pub ferris_borders: [Render3dObj; 4],
   pub crosshair: [Render3dObj; 3],
@@ -115,6 +116,7 @@ impl Scene {
       quaternion_from_angle(angle, Vector3::new(0.2, 1.0, 0.0).normalize()),
       Vector3::new(1.0, 1.0, 1.0),
     );
+    let niko_light_obj = niko_obj;
     let kakyoin_obj = Render3dObj::from_full(
       Point3::new(-16.0, 0.0, -4.0),
       quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0)),
@@ -122,7 +124,7 @@ impl Scene {
     );
 
     let mut niko_text = niko_obj;
-    niko_text.move_y(-3.5);
+    niko_text.move_y(-1.0);
     let mut kakyoin_text = kakyoin_obj;
     kakyoin_text.move_y(-1.5);
 
@@ -136,6 +138,7 @@ impl Scene {
       ferris_obj,
       ferris_borders,
       niko_obj,
+      niko_light_obj,
       kakyoin_obj,
       crosshair,
 
@@ -178,6 +181,10 @@ impl Scene {
 
     self.kakyoin_obj.rotate(rotation);
     self.niko_obj.rotate(rotation);
+    self
+      .niko_light_obj
+      .set_position(self.niko_obj.position() + self.niko_obj.get_front_vector() * 0.5);
+    self.niko_light_obj.rotate(rotation);
 
     // make text gradually rotate towards the camera
     let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
@@ -254,6 +261,16 @@ impl Scene {
     };
 
     (push_constants, self.models.niko)
+  }
+
+  pub fn get_niko_light_data(&self) -> (GraphicsPushConstants, ModelOffset) {
+    let push_constants = GraphicsPushConstants {
+      matrix: self.last_update_projection_view * self.niko_light_obj.model(),
+      tex_offset: self.textures.niko.offset,
+      tex_size: self.textures.niko.size,
+    };
+
+    (push_constants, self.models.niko_light)
   }
 
   pub fn get_kakyoin(&self) -> (GraphicsPushConstants, ModelOffset) {

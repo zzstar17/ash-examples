@@ -1,6 +1,6 @@
 use std::{fs::File, io::BufReader};
 
-use crate::{render::TexturedVertex, KAKYOIN_MODEL_PATH, NIKO_MODEL_PATH};
+use crate::{render::TexturedVertex, KAKYOIN_MODEL_PATH, NIKO_LIGHT_MODEL_PATH, NIKO_MODEL_PATH};
 
 pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   // top left
@@ -37,7 +37,7 @@ pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   },
 ];
 
-pub const QUAD_INDICES: [u32; 6] = [0, 1, 2, 3, 2, 1];
+pub const QUAD_INDICES: [u32; 6] = [2, 1, 0, 1, 2, 3];
 
 pub const CUBE_VERTICES: [TexturedVertex; 24] = [
   // FRONT FACE
@@ -241,12 +241,12 @@ pub const CUBE_VERTICES: [TexturedVertex; 24] = [
 ];
 
 pub const CUBE_INDICES: [u32; 36] = [
-  0, 1, 2, 3, 2, 1, // front
-  4, 5, 6, 7, 6, 5, // left
-  8, 9, 10, 11, 10, 9, // back
-  12, 13, 14, 15, 14, 13, // right
-  16, 17, 18, 19, 18, 17, // right
-  20, 21, 22, 23, 22, 21, // right
+  2, 1, 0, 1, 2, 3, // front
+  6, 5, 4, 5, 6, 7, // left
+  10, 9, 8, 9, 10, 11, // back
+  14, 13, 12, 13, 14, 15, // right
+  18, 17, 16, 17, 18, 19, // right
+  22, 21, 20, 21, 22, 23, // right
 ];
 
 pub struct LoadedModels {
@@ -261,6 +261,7 @@ pub struct Models {
   pub quad: ModelOffset,
   pub cube: ModelOffset,
   pub niko: ModelOffset,
+  pub niko_light: ModelOffset,
   pub kakyoin: ModelOffset,
 }
 
@@ -274,26 +275,31 @@ pub struct ModelOffset {
 
 impl LoadedModels {
   pub fn load() -> Result<Self, (obj::ObjError, &'static str)> {
-    let mut niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
+    let niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
       let niko_f =
         File::open(NIKO_MODEL_PATH).map_err(|err| (obj::ObjError::from(err), NIKO_MODEL_PATH))?;
       let mut buff_reader = BufReader::new(niko_f);
       obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_MODEL_PATH))?
     };
+    let niko_light_obj: obj::Obj<obj::TexturedVertex, u32> = {
+      let niko_f = File::open(NIKO_LIGHT_MODEL_PATH)
+        .map_err(|err| (obj::ObjError::from(err), NIKO_LIGHT_MODEL_PATH))?;
+      let mut buff_reader = BufReader::new(niko_f);
+      obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_LIGHT_MODEL_PATH))?
+    };
 
-    // todo: Fix niko model's vertices's face orientation
-    // temporary fix to flip triangles orientation counter-clockwise
-    assert!(niko_obj.indices.len().is_multiple_of(3));
-    for triangle in niko_obj.indices.as_chunks_mut::<3>().0 {
-      triangle.swap(0, 2);
-    }
-
-    let kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {
+    let mut kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {
       let niko_f = File::open(KAKYOIN_MODEL_PATH)
         .map_err(|err| (obj::ObjError::from(err), KAKYOIN_MODEL_PATH))?;
       let mut buff_reader = BufReader::new(niko_f);
       obj::load_obj(&mut buff_reader).map_err(|err| (err, KAKYOIN_MODEL_PATH))?
     };
+
+    // Fix kakyoin model's vertices's face orientation
+    assert!(kakyoin_obj.indices.len().is_multiple_of(3));
+    for triangle in kakyoin_obj.indices.as_chunks_mut::<3>().0 {
+      triangle.swap(0, 2);
+    }
 
     let quad_model = ModelOffset {
       vertices_offset: 0,
@@ -314,19 +320,31 @@ impl LoadedModels {
       vertices_len: niko_obj.vertices.len(),
       indices_len: niko_obj.indices.len(),
     };
-
-    let kakyoin_model = ModelOffset {
+    let niko_light_model = ModelOffset {
       vertices_offset: niko_model.vertices_offset + niko_model.vertices_len,
       indices_offset: niko_model.indices_offset + niko_model.indices_len,
+      vertices_len: niko_light_obj.vertices.len(),
+      indices_len: niko_light_obj.indices.len(),
+    };
+
+    let kakyoin_model = ModelOffset {
+      vertices_offset: niko_light_model.vertices_offset + niko_light_model.vertices_len,
+      indices_offset: niko_light_model.indices_offset + niko_light_model.indices_len,
       vertices_len: kakyoin_obj.vertices.len(),
       indices_len: kakyoin_obj.indices.len(),
     };
 
     let mut vertices = Vec::with_capacity(
-      quad_model.vertices_len + niko_model.vertices_len + kakyoin_model.vertices_len,
+      quad_model.vertices_len
+        + niko_model.vertices_len
+        + niko_light_model.vertices_len
+        + kakyoin_model.vertices_len,
     );
     let mut indices = Vec::with_capacity(
-      quad_model.indices_len + niko_model.indices_len + kakyoin_model.indices_len,
+      quad_model.indices_len
+        + niko_model.indices_len
+        + niko_light_model.indices_len
+        + kakyoin_model.indices_len,
     );
 
     vertices.extend_from_slice(&QUAD_VERTICES);
@@ -335,7 +353,12 @@ impl LoadedModels {
     indices.extend_from_slice(&CUBE_INDICES);
 
     // flip y coordinates
-    for vertex in niko_obj.vertices.into_iter().chain(kakyoin_obj.vertices) {
+    for vertex in niko_obj
+      .vertices
+      .into_iter()
+      .chain(niko_light_obj.vertices)
+      .chain(kakyoin_obj.vertices)
+    {
       vertices.push(TexturedVertex {
         pos: [
           vertex.position[0],
@@ -350,12 +373,14 @@ impl LoadedModels {
     }
 
     indices.extend_from_slice(&niko_obj.indices);
+    indices.extend_from_slice(&niko_light_obj.indices);
     indices.extend_from_slice(&kakyoin_obj.indices);
 
     let models = Models {
       quad: quad_model,
       cube: cube_model,
       niko: niko_model,
+      niko_light: niko_light_model,
       kakyoin: kakyoin_model,
     };
 
