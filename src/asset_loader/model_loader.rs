@@ -1,6 +1,23 @@
-use std::{fs::File, io::BufReader};
+use std::{
+  fs::{self},
+  io::Read,
+  path::Path,
+  time::Instant,
+};
 
-use crate::{render::TexturedVertex, KAKYOIN_MODEL_PATH, NIKO_LIGHT_MODEL_PATH, NIKO_MODEL_PATH};
+use gltf::{
+  accessor::{DataType, Dimensions},
+  buffer::Source as BufferSource,
+  image::Source as ImageSource,
+  Gltf, Semantic,
+};
+use itertools::Itertools;
+use relative_path::RelativePath;
+
+use crate::{
+  asset_loader::texture_loader::{ImageLoadError, LoadedImageData},
+  render::TexturedVertex,
+};
 
 pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   // top left
@@ -37,7 +54,7 @@ pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   },
 ];
 
-pub const QUAD_INDICES: [u32; 6] = [2, 1, 0, 1, 2, 3];
+pub const QUAD_INDICES: [u16; 6] = [2, 1, 0, 1, 2, 3];
 
 pub const CUBE_VERTICES: [TexturedVertex; 24] = [
   // FRONT FACE
@@ -240,7 +257,7 @@ pub const CUBE_VERTICES: [TexturedVertex; 24] = [
   },
 ];
 
-pub const CUBE_INDICES: [u32; 36] = [
+pub const CUBE_INDICES: [u16; 36] = [
   2, 1, 0, 1, 2, 3, // front
   6, 5, 4, 5, 6, 7, // left
   10, 9, 8, 9, 10, 11, // back
@@ -250,144 +267,349 @@ pub const CUBE_INDICES: [u32; 36] = [
 ];
 
 pub struct LoadedModels {
+  pub gltf: Gltf,
+
   pub vertices: Vec<TexturedVertex>,
-  pub indices: Vec<u32>,
+  pub indices: Vec<u16>,
+  pub meshes: Vec<Mesh>,
+  pub images: Vec<LoadedImageData>,
 
-  pub models: Models,
+  pub quad_mesh_index: usize,
+  pub cube_mesh_index: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Models {
-  pub quad: ModelOffset,
-  pub cube: ModelOffset,
-  pub niko: ModelOffset,
-  pub niko_light: ModelOffset,
-  pub kakyoin: ModelOffset,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ModelOffset {
+pub struct Mesh {
   pub vertices_offset: usize,
+  pub vertices_size: usize,
   pub indices_offset: usize,
-  pub vertices_len: usize,
-  pub indices_len: usize,
+  pub indices_size: usize,
+  pub image_index: Option<usize>,
+}
+
+fn print_tree(node: &gltf::Node, depth: i32) {
+  for _ in 0..(depth - 1) {
+    print!("  ");
+  }
+  print!(" -");
+  print!(" Node {}", node.index());
+  print!(" ({})", node.name().unwrap_or("<Unnamed>"));
+  println!();
+
+  for child in node.children() {
+    print_tree(&child, depth + 1);
+  }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ModelLoadError {
+  #[error("Failed to open or read files: {0}")]
+  SystemIO(#[from] std::io::Error),
+
+  #[error("Failed to parse glTF model file")]
+  GLTFError(#[from] gltf::Error),
+
+  #[error("Failed to load image:\n{0}")]
+  ImageLoadError(#[from] ImageLoadError),
+}
+
+struct BufferSlice<'a> {
+  pub bytes: &'a [u8],
+  pub offset: usize,
+  pub count: usize,
+  pub data_type: DataType,
+  pub dimensions: Dimensions,
+}
+
+fn read_buffer_with_accessor<'a>(
+  buffer_bytes: &'a [Vec<u8>],
+  accessor: gltf::Accessor,
+) -> BufferSlice<'a> {
+  let accessor_offset = accessor.offset();
+  match accessor.view() {
+    Some(view) => {
+      let buffer_index = view.buffer().index();
+      let view_size = view.length();
+      let view_offset = view.offset();
+      assert!(view.stride().is_none());
+
+      let start_i = accessor_offset + view_offset;
+      let bytes = &buffer_bytes[buffer_index][start_i..(start_i + view_size)];
+
+      BufferSlice {
+        bytes,
+        offset: start_i,
+        count: accessor.count(),
+        data_type: accessor.data_type(),
+        dimensions: accessor.dimensions(),
+      }
+    }
+    None => unimplemented!(),
+  }
+}
+
+unsafe fn read_xyz(slice: &[u8; 12]) -> [f32; 3] {
+  (slice.as_ptr() as *const [f32; 3]).read()
+}
+
+unsafe fn read_xy(slice: &[u8; 8]) -> [f32; 2] {
+  (slice.as_ptr() as *const [f32; 2]).read()
+}
+
+fn append_vertices(
+  vertices: &mut Vec<TexturedVertex>,
+  positions_slice: BufferSlice,
+  normals_slice: BufferSlice,
+  texture_coors_slice: BufferSlice,
+) {
+  assert_eq!(positions_slice.data_type, DataType::F32);
+  assert_eq!(normals_slice.data_type, DataType::F32);
+  assert_eq!(texture_coors_slice.data_type, DataType::F32);
+  assert_eq!(positions_slice.dimensions, Dimensions::Vec3);
+  assert_eq!(normals_slice.dimensions, Dimensions::Vec3);
+  assert_eq!(texture_coors_slice.dimensions, Dimensions::Vec2);
+
+  assert!(positions_slice.bytes.len().is_multiple_of(12));
+  assert!(normals_slice.bytes.len().is_multiple_of(12));
+  assert!(texture_coors_slice.bytes.len().is_multiple_of(8));
+
+  let positions_iter = positions_slice
+    .bytes
+    .as_chunks::<12>()
+    .0
+    .iter()
+    .map(|subslice| unsafe { read_xyz(subslice) });
+  let normals_iter = normals_slice
+    .bytes
+    .as_chunks::<12>()
+    .0
+    .iter()
+    .map(|subslice| unsafe { read_xyz(subslice) });
+  let texture_coors_iter = texture_coors_slice
+    .bytes
+    .as_chunks::<8>()
+    .0
+    .iter()
+    .map(|subslice| unsafe { read_xy(subslice) });
+
+  vertices.reserve(positions_slice.count);
+  for ((position, normal), texture) in positions_iter
+    .zip_eq(normals_iter)
+    .zip_eq(texture_coors_iter)
+  {
+    vertices.push(TexturedVertex {
+      pos: [
+        position[0],
+        // vertex.position[1],
+        1.0 - position[1],
+        position[2],
+      ],
+      normal: [normal[0], 1.0 - normal[1], normal[2]],
+      tex_coords: [texture[0], 1.0 - texture[1]],
+      ..Default::default()
+    });
+  }
+}
+
+fn append_indices(indices: &mut Vec<u16>, indices_slice: BufferSlice) {
+  assert_eq!(indices_slice.data_type, DataType::U16);
+
+  assert!(indices_slice.bytes.len().is_multiple_of(2));
+
+  let indices_iter = indices_slice
+    .bytes
+    .as_chunks::<2>()
+    .0
+    .iter()
+    .map(|subslice| u16::from_ne_bytes(*subslice));
+
+  indices.reserve(indices_slice.count);
+  for index in indices_iter {
+    indices.push(index);
+  }
 }
 
 impl LoadedModels {
-  pub fn load() -> Result<Self, (obj::ObjError, &'static str)> {
-    let niko_obj: obj::Obj<obj::TexturedVertex, u32> = {
-      let niko_f =
-        File::open(NIKO_MODEL_PATH).map_err(|err| (obj::ObjError::from(err), NIKO_MODEL_PATH))?;
-      let mut buff_reader = BufReader::new(niko_f);
-      obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_MODEL_PATH))?
-    };
-    let niko_light_obj: obj::Obj<obj::TexturedVertex, u32> = {
-      let niko_f = File::open(NIKO_LIGHT_MODEL_PATH)
-        .map_err(|err| (obj::ObjError::from(err), NIKO_LIGHT_MODEL_PATH))?;
-      let mut buff_reader = BufReader::new(niko_f);
-      obj::load_obj(&mut buff_reader).map_err(|err| (err, NIKO_LIGHT_MODEL_PATH))?
-    };
+  pub fn load() -> Result<Self, ModelLoadError> {
+    let scene_path = Path::new("./assets/models/Niko_xinus22.gltf");
+    let mut scene_dir = scene_path.to_path_buf();
+    scene_dir.pop();
 
-    let mut kakyoin_obj: obj::Obj<obj::TexturedVertex, u32> = {
-      let niko_f = File::open(KAKYOIN_MODEL_PATH)
-        .map_err(|err| (obj::ObjError::from(err), KAKYOIN_MODEL_PATH))?;
-      let mut buff_reader = BufReader::new(niko_f);
-      obj::load_obj(&mut buff_reader).map_err(|err| (err, KAKYOIN_MODEL_PATH))?
-    };
+    let file = std::fs::File::open(&scene_path)?;
+    let reader = std::io::BufReader::new(file);
+    let gltf = gltf::Gltf::from_reader(reader)?;
 
-    // Fix kakyoin model's vertices's face orientation
-    assert!(kakyoin_obj.indices.len().is_multiple_of(3));
-    for triangle in kakyoin_obj.indices.as_chunks_mut::<3>().0 {
-      triangle.swap(0, 2);
+    let scene: gltf::Scene<'_> = gltf.scenes().next().unwrap();
+
+    log::info!("Loading scene \"{}\"", scene.name().unwrap_or("<Unnamed>"));
+    for node in scene.nodes() {
+      print_tree(&node, 1);
     }
 
-    let quad_model = ModelOffset {
-      vertices_offset: 0,
-      indices_offset: 0,
-      vertices_len: QUAD_VERTICES.len(),
-      indices_len: QUAD_INDICES.len(),
-    };
-    let cube_model = ModelOffset {
-      vertices_offset: quad_model.vertices_len,
-      indices_offset: quad_model.indices_len,
-      vertices_len: CUBE_VERTICES.len(),
-      indices_len: CUBE_INDICES.len(),
-    };
+    let mut buffers = Vec::with_capacity(gltf.buffers().len());
+    for buffer_ref in gltf.buffers() {
+      let buffer_data = match buffer_ref.source() {
+        BufferSource::Bin => {
+          unimplemented!()
+        }
+        BufferSource::Uri(uri) => {
+          let buffer_path = RelativePath::new(uri).to_logical_path(&scene_dir);
+          log::info!(
+            "Loading model buffer \"{}\" at {:?}",
+            buffer_ref.name().unwrap_or("<Unnamed>"),
+            buffer_path
+          );
 
-    let niko_model = ModelOffset {
-      vertices_offset: cube_model.vertices_offset + cube_model.vertices_len,
-      indices_offset: cube_model.indices_offset + cube_model.indices_len,
-      vertices_len: niko_obj.vertices.len(),
-      indices_len: niko_obj.indices.len(),
-    };
-    let niko_light_model = ModelOffset {
-      vertices_offset: niko_model.vertices_offset + niko_model.vertices_len,
-      indices_offset: niko_model.indices_offset + niko_model.indices_len,
-      vertices_len: niko_light_obj.vertices.len(),
-      indices_len: niko_light_obj.indices.len(),
-    };
+          let now = Instant::now();
+          let mut file = fs::File::open(&buffer_path)?;
+          let mut bytes = Vec::new();
+          file.read_to_end(&mut bytes)?;
 
-    let kakyoin_model = ModelOffset {
-      vertices_offset: niko_light_model.vertices_offset + niko_light_model.vertices_len,
-      indices_offset: niko_light_model.indices_offset + niko_light_model.indices_len,
-      vertices_len: kakyoin_obj.vertices.len(),
-      indices_len: kakyoin_obj.indices.len(),
-    };
+          assert_eq!(bytes.len(), buffer_ref.length());
+          log::info!(
+            "Loaded model buffer \"{}\" at {:?} in {}μs",
+            buffer_ref.name().unwrap_or("<Unnamed>"),
+            buffer_path,
+            now.elapsed().as_micros()
+          );
 
-    let mut vertices = Vec::with_capacity(
-      quad_model.vertices_len
-        + niko_model.vertices_len
-        + niko_light_model.vertices_len
-        + kakyoin_model.vertices_len,
-    );
-    let mut indices = Vec::with_capacity(
-      quad_model.indices_len
-        + niko_model.indices_len
-        + niko_light_model.indices_len
-        + kakyoin_model.indices_len,
-    );
+          bytes
+        }
+      };
+      buffers.push(buffer_data);
+    }
+
+    let mut vertices = Vec::with_capacity(QUAD_VERTICES.len() + CUBE_VERTICES.len());
+    let mut indices = Vec::with_capacity(QUAD_INDICES.len() + CUBE_INDICES.len());
+    let mut meshes = Vec::with_capacity(gltf.meshes().len() + 2);
 
     vertices.extend_from_slice(&QUAD_VERTICES);
     indices.extend_from_slice(&QUAD_INDICES);
+    let quad_mesh_index = meshes.len();
+    meshes.push(Mesh {
+      vertices_offset: vertices.len(),
+      vertices_size: QUAD_VERTICES.len(),
+      indices_offset: indices.len(),
+      indices_size: QUAD_INDICES.len(),
+      image_index: None,
+    });
+
     vertices.extend_from_slice(&CUBE_VERTICES);
     indices.extend_from_slice(&CUBE_INDICES);
+    let cube_mesh_index = meshes.len();
+    meshes.push(Mesh {
+      vertices_offset: vertices.len(),
+      vertices_size: CUBE_VERTICES.len(),
+      indices_offset: indices.len(),
+      indices_size: CUBE_INDICES.len(),
+      image_index: None,
+    });
 
-    // flip y coordinates
-    for vertex in niko_obj
-      .vertices
-      .into_iter()
-      .chain(niko_light_obj.vertices)
-      .chain(kakyoin_obj.vertices)
-    {
-      vertices.push(TexturedVertex {
-        pos: [
-          vertex.position[0],
-          // vertex.position[1],
-          1.0 - vertex.position[1],
-          vertex.position[2],
-        ],
-        normal: [vertex.normal[0], 1.0 - vertex.normal[1], vertex.normal[2]],
-        tex_coords: [vertex.texture[0], 1.0 - vertex.texture[1]],
-        ..Default::default()
-      });
+    for mesh_ref in gltf.meshes() {
+      let primitive = mesh_ref.primitives().next().unwrap();
+      let mut positions = None;
+      let mut normals = None;
+      let mut texture_coors = None;
+      for (semantic, accessor) in primitive.attributes() {
+        match semantic {
+          Semantic::Positions => {
+            positions = Some(read_buffer_with_accessor(buffers.as_slice(), accessor))
+          }
+          Semantic::Normals => {
+            normals = Some(read_buffer_with_accessor(buffers.as_slice(), accessor))
+          }
+          Semantic::TexCoords(_) => {
+            assert!(texture_coors.is_none());
+            texture_coors = Some(read_buffer_with_accessor(buffers.as_slice(), accessor));
+          }
+          _ => {}
+        }
+      }
+
+      let positions = positions.unwrap();
+      let normals = normals.unwrap();
+      if texture_coors.is_none() {
+        continue;
+      }
+      let texture_coors = texture_coors.unwrap();
+
+      let indices_slice =
+        read_buffer_with_accessor(buffers.as_slice(), primitive.indices().unwrap());
+
+      let material = primitive.material();
+      let texture = material
+        .pbr_metallic_roughness()
+        .base_color_texture()
+        .unwrap()
+        .texture();
+      let image_index = texture.source().index();
+
+      let vertices_offset = vertices.len();
+      let indices_offset = indices.len();
+      let vertices_size = positions.count;
+      let indices_size = indices_slice.count;
+
+      log::debug!(
+        "Adding mesh \"{}\", material \"{}\" (image \"{}\") with {} vertices and {} indices",
+        mesh_ref.name().unwrap_or("<Unnamed>"),
+        material.name().unwrap_or("<Unnamed>"),
+        texture.source().name().unwrap_or("<Unnamed>"),
+        positions.count,
+        indices_slice.count
+      );
+      append_vertices(&mut vertices, positions, normals, texture_coors);
+      append_indices(&mut indices, indices_slice);
+
+      meshes.push(Mesh {
+        vertices_offset,
+        vertices_size,
+        indices_offset,
+        indices_size,
+        image_index: Some(image_index),
+      })
     }
 
-    indices.extend_from_slice(&niko_obj.indices);
-    indices.extend_from_slice(&niko_light_obj.indices);
-    indices.extend_from_slice(&kakyoin_obj.indices);
+    let mut images = Vec::with_capacity(gltf.images().len());
+    for image_ref in gltf.images() {
+      let image_data = match image_ref.source() {
+        ImageSource::View { .. } => {
+          unimplemented!()
+        }
+        ImageSource::Uri { uri, mime_type } => {
+          let image_path = RelativePath::new(uri).to_logical_path(&scene_dir);
+          log::info!(
+            "Loading image \"{}\" at {:?}",
+            image_ref.name().unwrap_or("<Unnamed>"),
+            image_path
+          );
 
-    let models = Models {
-      quad: quad_model,
-      cube: cube_model,
-      niko: niko_model,
-      niko_light: niko_light_model,
-      kakyoin: kakyoin_model,
-    };
+          let now = Instant::now();
+          let mime_type = mime_type.expect("Texture missing mimetype");
+          let data = match mime_type {
+            "image/ktx2" => LoadedImageData::read_texture_bytes_as_rgba8(&image_path),
+            _ => unimplemented!(),
+          }?;
+          log::info!(
+            "Loaded image \"{}\" at {:?} in {}μs",
+            image_ref.name().unwrap_or("<Unnamed>"),
+            image_path,
+            now.elapsed().as_micros()
+          );
+
+          data
+        }
+      };
+      images.push(image_data);
+    }
 
     Ok(Self {
+      gltf,
       vertices,
       indices,
-      models,
+      meshes,
+      images,
+      quad_mesh_index,
+      cube_mesh_index,
     })
   }
 

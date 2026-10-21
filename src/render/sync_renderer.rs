@@ -6,7 +6,7 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{texture_loader::TextureData, LoadedModels},
+  asset_loader::{texture_loader::LoadedImageData, LoadedModels},
   last_frames_durations::FPSDurations,
   render::create_objs::create_fence,
   scene::Scene,
@@ -42,7 +42,7 @@ impl SyncRenderer {
     event_loop: &ActiveEventLoop,
 
     loaded_models: &LoadedModels,
-    texture_data: &mut TextureData,
+    texture_data: &mut LoadedImageData,
   ) -> Result<Self, InitializationError> {
     let (renderer, _texture_format) = Renderer::initialize(
       entry,
@@ -107,7 +107,7 @@ impl SyncRenderer {
     renderer: &Renderer,
     fence: vk::Fence,
     loaded_models: &LoadedModels,
-    texture_data: &TextureData,
+    texture_data: &LoadedImageData,
   ) -> Result<(), HostMemorySyncError> {
     renderer.full_record_upload_initial_staging(0, loaded_models, texture_data)?;
 

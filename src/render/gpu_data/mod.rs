@@ -6,7 +6,7 @@ pub mod text_manager;
 use std::{ops::BitOr, ptr};
 
 use crate::{
-  asset_loader::{texture_loader::TextureData, LoadedModels},
+  asset_loader::{texture_loader::LoadedImageData, LoadedModels},
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
     create_objs::{create_color_image_view, create_image, create_image_sampled},
@@ -236,7 +236,7 @@ impl GPUData {
     texture_format: vk::Format,
     render_format: vk::Format,
     loaded_models: &LoadedModels,
-    texture_data: &TextureData,
+    texture_data: &LoadedImageData,
     sample_count: usize,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
@@ -343,7 +343,7 @@ impl GPUData {
     &self,
     device: &Device,
     loaded_models: &LoadedModels,
-    texture_data: &TextureData,
+    texture_data: &LoadedImageData,
     pool: &GraphicsCommandBufferPool,
   ) -> Result<(), HostMemorySyncError> {
     let vertices_size = loaded_models.vertices_size();
@@ -383,17 +383,18 @@ impl GPUData {
 
         // convert data if format is not RGBA
         let data = level.data;
-        let converted_data = if TextureData::TEXTURE_FORMAT != self.sprite_buffers.texture_format {
-          level_copy_buffer.clear();
-          level_copy_buffer.extend_from_slice(data);
-          format_conversions::convert_rgba_data_to_format(
-            &mut level_copy_buffer,
-            self.sprite_buffers.texture_format,
-          );
-          &level_copy_buffer
-        } else {
-          data
-        };
+        let converted_data =
+          if LoadedImageData::TEXTURE_FORMAT != self.sprite_buffers.texture_format {
+            level_copy_buffer.clear();
+            level_copy_buffer.extend_from_slice(data);
+            format_conversions::convert_rgba_data_to_format(
+              &mut level_copy_buffer,
+              self.sprite_buffers.texture_format,
+            );
+            &level_copy_buffer
+          } else {
+            data
+          };
         ptr::copy_nonoverlapping(
           converted_data.as_ptr(),
           staging_texture_offset.add(local_level_offset).as_ptr(),

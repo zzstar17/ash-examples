@@ -5,7 +5,8 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::{
   asset_loader::{
-    texture_loader::{TextureData, TextureLoadError},
+    model_loader::ModelLoadError,
+    texture_loader::{ImageLoadError, LoadedImageData},
     LoadedModels,
   },
   render::{errors::InitializationError, SyncRenderer},
@@ -24,7 +25,7 @@ pub struct RenderInit {
   pub debug_utils: ManuallyDrop<vkinitialization::DebugUtils>,
 
   pub loaded_models: ManuallyDrop<LoadedModels>,
-  pub texture_data: ManuallyDrop<TextureData>,
+  pub texture_data: ManuallyDrop<LoadedImageData>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -37,11 +38,11 @@ pub enum RenderInitError {
 
   #[error(transparent)]
   IOError(#[from] std::io::Error),
-  #[error("Failed to load models\n{0}\nPath: {1}")]
-  ModelLoadFailed(#[source] obj::ObjError, &'static str),
+  #[error("Failed to load models:\n{0}")]
+  ModelLoadFailed(#[from] ModelLoadError),
 
   #[error("Failed to load textures\n{0}")]
-  TextureLoadFailed(#[from] TextureLoadError),
+  TextureLoadFailed(#[from] ImageLoadError),
 }
 
 impl From<InstanceCreationError> for RenderInitError {
@@ -54,7 +55,7 @@ impl RenderInit {
   pub fn new(
     event_loop: &EventLoop<()>,
     models: LoadedModels,
-    texture_data: TextureData,
+    texture_data: LoadedImageData,
   ) -> Result<Self, RenderInitError> {
     let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 

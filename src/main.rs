@@ -28,7 +28,7 @@ use winit::{
 
 use crate::{
   asset_loader::{
-    texture_loader::{self, TextureData},
+    texture_loader::{self, LoadedImageData},
     LoadedModels,
   },
   keys::Keys,
@@ -238,9 +238,8 @@ impl StartedStatus {
 
 impl RenderStatus {
   pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let loaded_models =
-      LoadedModels::load().map_err(|(err, path)| RenderInitError::ModelLoadFailed(err, path))?;
-    let texture_data = TextureData::read_texture_bytes_as_rgba8()?;
+    let loaded_models = LoadedModels::load()?;
+    let texture_data = LoadedImageData::read_texture_bytes_as_rgba8(TEXTURE_PATH)?;
 
     let render = RenderInit::new(event_loop, loaded_models, texture_data)?;
     Ok(RenderStatus::Initialized(render))

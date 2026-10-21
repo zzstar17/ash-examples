@@ -9,7 +9,7 @@ use crate::{
   SPRITES_TOTAL_SIZE_F32, TEXTURE_PATH,
 };
 
-pub struct TextureData {
+pub struct LoadedImageData {
   pub reader: ktx2::Reader<Vec<u8>>,
   pub width: u32,
   pub height: u32,
@@ -17,7 +17,7 @@ pub struct TextureData {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TextureLoadError {
+pub enum ImageLoadError {
   #[error("Failed to open or read files: {0}")]
   SystemIO(#[from] std::io::Error),
 
@@ -69,12 +69,15 @@ pub const fn get_texture_offsets() -> TextureOffsets {
   }
 }
 
-impl TextureData {
+impl LoadedImageData {
   pub const TEXTURE_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
   pub const TEXTURE_FORMAT_KTX2: ktx2::Format = ktx2::Format::R8G8B8A8_SRGB;
 
-  pub fn read_texture_bytes_as_rgba8() -> Result<Self, TextureLoadError> {
-    let mut file = fs::File::open(TEXTURE_PATH)?;
+  pub fn read_texture_bytes_as_rgba8<P>(path: P) -> Result<Self, ImageLoadError>
+  where
+    P: AsRef<std::path::Path>,
+  {
+    let mut file = fs::File::open(path)?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
 
@@ -85,13 +88,8 @@ impl TextureData {
     log::debug!("Texture image header:\n    {:?}", header);
     let width = header.pixel_width;
     let height = header.pixel_height;
-    assert_eq!(
-      [width, height],
-      SPRITES_TOTAL_SIZE,
-      "Invalid sprite dimensions"
-    );
 
-    // assert ucompressed
+    // assert uncompressed
     let first_level = reader.levels().next().unwrap();
     assert_eq!(
       first_level.data.len() as u64,

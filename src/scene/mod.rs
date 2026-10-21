@@ -20,6 +20,7 @@ use crate::{
 mod camera;
 mod ferris;
 mod obj_3d;
+mod scene_node;
 
 const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
 
