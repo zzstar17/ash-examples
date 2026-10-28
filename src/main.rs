@@ -27,10 +27,7 @@ use winit::{
 };
 
 use crate::{
-  asset_loader::{
-    texture_loader::{self, LoadedImageData},
-    LoadedModels,
-  },
+  asset_loader::{model_loader::AssetLocationData, LoadedModels},
   keys::Keys,
   last_frames_durations::LastFramesDurations,
   scene::Scene,
@@ -110,7 +107,7 @@ struct WindowResizeHandler {
 // clippy kinda hallucinates here
 #[allow(clippy::large_enum_variant)]
 enum RenderStatus {
-  Initialized(RenderInit),
+  Initialized((RenderInit, AssetLocationData)),
   Started(StartedStatus),
 }
 
@@ -171,6 +168,8 @@ impl RenderAreaDimensions {
 
 struct StartedStatus {
   pub renderer: SyncRenderer,
+  pub scene: Scene,
+
   pub render_dimensions: RenderAreaDimensions,
   pub paused: bool,
   pub occluded: bool,
@@ -186,7 +185,6 @@ struct App {
   mouse_grab: bool,
   mouse_delta: [f64; 2],
   keys: Keys,
-  scene: Scene,
   last_update: Instant,
   last_frames_durations: LastFramesDurations<60>,
   time_since_last_fps_print: Duration,
@@ -238,21 +236,23 @@ impl StartedStatus {
 
 impl RenderStatus {
   pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let loaded_models = LoadedModels::load()?;
-    let texture_data = LoadedImageData::read_texture_bytes_as_rgba8(TEXTURE_PATH)?;
+    let (model_data, asset_locations) = LoadedModels::load()?.into_separate();
 
-    let render = RenderInit::new(event_loop, loaded_models, texture_data)?;
-    Ok(RenderStatus::Initialized(render))
+    let render = RenderInit::new(event_loop, model_data)?;
+    Ok(RenderStatus::Initialized((render, asset_locations)))
   }
 
   pub fn start(self, event_loop: &ActiveEventLoop) -> Result<Self, InitializationError> {
     match self {
-      RenderStatus::Initialized(init) => {
+      RenderStatus::Initialized((init, asset_locations)) => {
         let renderer = init.start(event_loop)?;
+        let scene = Scene::new(asset_locations);
 
         let window_dimensions = renderer.window().inner_size();
         Ok(Self::Started(StartedStatus {
           renderer,
+          scene,
+
           paused: START_PAUSED,
           occluded: false,
           suspended: false,
@@ -264,9 +264,9 @@ impl RenderStatus {
     }
   }
 
-  pub fn unwrap_initialized(&mut self) -> &mut RenderInit {
-    if let Self::Initialized(init) = self {
-      init
+  pub fn unwrap_initialized(&mut self) -> &mut (RenderInit, AssetLocationData) {
+    if let Self::Initialized(val) = self {
+      val
     } else {
       panic!()
     }
@@ -286,7 +286,7 @@ impl RenderStatus {
 }
 
 impl App {
-  pub fn new(mut status: RenderStatus) -> Self {
+  pub fn new(status: RenderStatus) -> Self {
     let window_resize_handler = WindowResizeHandler {
       active: false,
       last_activation_instant: Instant::now(),
@@ -301,16 +301,9 @@ impl App {
 
     let frame_i: usize = 0;
 
-    let render_init = status.unwrap_initialized();
-    let scene = Scene::new(
-      render_init.loaded_models.models,
-      texture_loader::get_texture_offsets(),
-    );
-
     Self {
       status,
       window_resize_handler,
-      scene,
       last_update,
       time_since_last_fps_print,
       frame_i,
@@ -405,11 +398,11 @@ impl ApplicationHandler for App {
           if DEBUG_PRINT_FRAME_INFO {
             log::debug!("Starting frame {}", self.frame_i);
           }
-          self.scene.update(time_passed, &self.keys, delta_mouse);
+          status.scene.update(time_passed, &self.keys, delta_mouse);
 
           if let Err(err) = status.renderer.render_next_frame(
             self.frame_i,
-            &mut self.scene,
+            &mut status.scene,
             self.last_frames_durations.get_min_max_average_fps(),
           ) {
             match err {

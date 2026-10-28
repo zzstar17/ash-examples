@@ -9,8 +9,6 @@ use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuall
 
 use crate::render::gpu_data::GPUData;
 
-use super::texture_write_descriptor_set;
-
 fn create_texture_sampler(
   device: &ash::Device,
   #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
@@ -125,9 +123,9 @@ fn create_sampler_nearest_int(
 }
 
 pub struct DescriptorPool {
-  pub sprites_layout: vk::DescriptorSetLayout,
-  sprites_sampler: vk::Sampler,
-  pub sprites_set: vk::DescriptorSet,
+  pub textures_layout: vk::DescriptorSetLayout,
+  textures_sampler: vk::Sampler,
+  pub textures_sets: Vec<vk::DescriptorSet>,
   pub text_ui_set: vk::DescriptorSet,
 
   pub text_layout: vk::DescriptorSetLayout,
@@ -139,14 +137,6 @@ pub struct DescriptorPool {
 }
 
 impl DescriptorPool {
-  // two for graphics one for text
-  const SET_COUNT: u32 = 3;
-
-  const SIZES: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
-    ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-    descriptor_count: 4,
-  }];
-
   fn graphics_layout_bindings<'a>(
     texture_sampler: *const vk::Sampler,
   ) -> [vk::DescriptorSetLayoutBinding<'a>; 1] {
@@ -189,7 +179,7 @@ impl DescriptorPool {
     gpu_data: &GPUData,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, OutOfMemoryError> {
-    let sprites_sampler = create_texture_sampler(
+    let textures_sampler = create_texture_sampler(
       device,
       #[cfg(feature = "vl")]
       marker,
@@ -200,7 +190,7 @@ impl DescriptorPool {
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &sprites_sampler);
+      destroy!(device => &textures_sampler);
     })?;
     let text_bands_sampler = create_sampler_nearest_int(
       device,
@@ -208,17 +198,17 @@ impl DescriptorPool {
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &text_curves_sampler, &sprites_sampler);
+      destroy!(device => &text_curves_sampler, &textures_sampler);
     })?;
 
-    let sprites_layout = Self::create_graphics_layout(
+    let textures_layout = Self::create_graphics_layout(
       device,
-      sprites_sampler,
+      textures_sampler,
       #[cfg(feature = "vl")]
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+      destroy!(device => &text_bands_sampler, &text_curves_sampler, &textures_sampler);
     })?;
     let text_layout = Self::create_text_layout(
       device,
@@ -228,53 +218,131 @@ impl DescriptorPool {
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+      destroy!(device => &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
     })?;
+
+    // textures, text_ui, text
+    let textures_len = gpu_data.sprite_buffers.textures.len() as u32;
+    let set_count = textures_len + 2;
+
+    // text has 2
+    let sizes: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
+      ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      descriptor_count: textures_len + 1 + 2,
+    }];
 
     let pool = {
       let pool_create_info = vk::DescriptorPoolCreateInfo {
-        s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
-        p_next: ptr::null(),
-        pool_size_count: Self::SIZES.len() as u32,
-        p_pool_sizes: Self::SIZES.as_ptr(),
-        max_sets: Self::SET_COUNT,
+        pool_size_count: sizes.len() as u32,
+        p_pool_sizes: sizes.as_ptr(),
+        max_sets: set_count,
         flags: vk::DescriptorPoolCreateFlags::empty(),
-        _marker: PhantomData,
+        ..Default::default()
       };
       unsafe { device.create_descriptor_pool(&pool_create_info, None) }
     }.on_err(|_err| unsafe {
-      destroy!(device => &text_layout, &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+      destroy!(device => &text_layout, &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
     })?;
 
-    let sets = allocate_sets(device, pool, &[sprites_layout, sprites_layout, text_layout]).on_err(|_err| unsafe {
-      destroy!(device => &pool, &text_layout, &sprites_layout, &text_bands_sampler, &text_curves_sampler, &sprites_sampler);
+    let mut layouts = Vec::with_capacity(set_count as usize);
+    for _i in 0..textures_len {
+      layouts.push(textures_layout);
+    }
+    layouts.push(textures_layout);
+    layouts.push(text_layout);
+
+    let sets = allocate_sets(device, pool, &layouts).on_err(|_err| unsafe {
+      destroy!(device => &pool, &text_layout, &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
     })?;
-    let writes = [
-      texture_write_descriptor_set(sets[0], gpu_data.sprite_view, 0),
-      texture_write_descriptor_set(sets[1], gpu_data.text_ui.resolved_view, 0),
-      texture_write_descriptor_set(sets[2], gpu_data.text_curve_view, 0),
-      texture_write_descriptor_set(sets[2], gpu_data.text_band_view, 1),
-    ];
+    let mut image_infos = Vec::with_capacity(set_count as usize);
+    let mut writes = Vec::with_capacity(set_count as usize);
+    let mut set_iter = sets.into_iter();
+
+    let mut textures_sets = Vec::with_capacity(textures_len as usize);
+    for texture in gpu_data.sprite_buffers.textures.iter() {
+      let set = set_iter.next().unwrap();
+      image_infos.push(vk::DescriptorImageInfo {
+        sampler: vk::Sampler::null(),
+        image_view: texture.view,
+        image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+      });
+      writes.push(vk::WriteDescriptorSet {
+        dst_set: set,
+        dst_binding: 0,
+        dst_array_element: 0,
+        descriptor_count: 1,
+        descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+        p_image_info: ptr::null(),
+        ..Default::default()
+      });
+      textures_sets.push(set);
+    }
+
+    let text_ui_set = set_iter.next().unwrap();
+    image_infos.push(vk::DescriptorImageInfo {
+      sampler: vk::Sampler::null(),
+      image_view: gpu_data.text_ui.resolved_view,
+      image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    });
+    writes.push(vk::WriteDescriptorSet {
+      dst_set: text_ui_set,
+      dst_binding: 0,
+      dst_array_element: 0,
+      descriptor_count: 1,
+      descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      p_image_info: ptr::null(),
+      ..Default::default()
+    });
+
+    let text_set = set_iter.next().unwrap();
+    image_infos.push(vk::DescriptorImageInfo {
+      sampler: vk::Sampler::null(),
+      image_view: gpu_data.text_curve_view,
+      image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    });
+    writes.push(vk::WriteDescriptorSet {
+      dst_set: text_set,
+      dst_binding: 0,
+      dst_array_element: 0,
+      descriptor_count: 1,
+      descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      p_image_info: ptr::null(),
+      ..Default::default()
+    });
+    image_infos.push(vk::DescriptorImageInfo {
+      sampler: vk::Sampler::null(),
+      image_view: gpu_data.text_band_view,
+      image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    });
+    writes.push(vk::WriteDescriptorSet {
+      dst_set: text_set,
+      dst_binding: 1,
+      dst_array_element: 0,
+      descriptor_count: 1,
+      descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      p_image_info: ptr::null(),
+      ..Default::default()
+    });
+
     unsafe {
-      let contextualized = [
-        writes[0].contextualize(),
-        writes[1].contextualize(),
-        writes[2].contextualize(),
-        writes[3].contextualize(),
-      ];
-      device.update_descriptor_sets(&contextualized, &[]);
+      let image_infos_ptr = image_infos.as_ptr();
+      for i in 0..writes.len() {
+        writes[i].p_image_info = image_infos_ptr.add(i);
+      }
+
+      device.update_descriptor_sets(&writes, &[]);
     }
 
     Ok(Self {
-      sprites_sampler,
-      sprites_layout,
-      sprites_set: sets[0],
-      text_ui_set: sets[1],
+      textures_sampler,
+      textures_layout,
+      textures_sets,
+      text_ui_set,
 
       text_layout,
       text_curves_sampler,
       text_bands_sampler,
-      text_set: sets[2],
+      text_set,
       pool,
     })
   }
@@ -320,8 +388,8 @@ impl DeviceManuallyDestroyed for DescriptorPool {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     device.destroy_descriptor_pool(self.pool, None);
 
-    device.destroy_descriptor_set_layout(self.sprites_layout, None);
-    device.destroy_sampler(self.sprites_sampler, None);
+    device.destroy_descriptor_set_layout(self.textures_layout, None);
+    device.destroy_sampler(self.textures_sampler, None);
 
     device.destroy_descriptor_set_layout(self.text_layout, None);
     device.destroy_sampler(self.text_curves_sampler, None);

@@ -36,10 +36,10 @@ impl ScreenshotBuffer {
       device,
       physical_device,
       [vk::MemoryPropertyFlags::HOST_VISIBLE],
-      [&buffer],
+      &[&buffer],
       Self::PRIORITY,
       #[cfg(feature = "log_alloc")]
-      Some(["Screenshot buffer"]),
+      Some(&["Screenshot buffer"]),
       #[cfg(feature = "log_alloc")]
       "SCREENSHOT BUFFER",
     )

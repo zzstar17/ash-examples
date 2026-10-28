@@ -1,14 +1,26 @@
+use std::fmt::Debug;
+
 use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Rotation, Vector2, Vector3, Vector4};
 
 use crate::scene::{quaternion_from_angle, UP};
 
 /// Object information suitable for rendering in 3D. Caches certain matrices
 /// in order to perform less calculations while rendering.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Render3dObj {
   pub rotation: Quaternion<f32>,
   pub scale: Vector3<f32>,
   pub model_matrix: Matrix4<f32>,
+}
+
+impl Debug for Render3dObj {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    f.debug_struct("Render3dObj")
+      .field("position", &self.position())
+      .field("rotation", &self.rotation)
+      .field("scale", &self.scale)
+      .finish()
+  }
 }
 
 // XZ front vector at 0 degree rotation
@@ -84,6 +96,28 @@ impl Render3dObj {
       rotation,
       scale,
       model_matrix: compose_model_matrix(position, rotation, scale),
+    }
+  }
+
+  pub fn from_gltf_transform(transform: gltf::scene::Transform) -> Self {
+    match transform {
+      gltf::scene::Transform::Decomposed {
+        translation,
+        rotation,
+        scale,
+      } => Self::from_full(
+        Point3::from(translation),
+        Quaternion::new(rotation[3], rotation[0], rotation[1], rotation[2]),
+        Vector3::from(scale),
+      ),
+      gltf::scene::Transform::Matrix { matrix } => {
+        let (_translation, rotation, scale) = transform.decomposed();
+        Self {
+          rotation: Quaternion::new(rotation[3], rotation[0], rotation[1], rotation[2]),
+          scale: Vector3::from(scale),
+          model_matrix: Matrix4::from(matrix),
+        }
+      }
     }
   }
 

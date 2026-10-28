@@ -269,13 +269,26 @@ pub const CUBE_INDICES: [u16; 36] = [
 pub struct LoadedModels {
   pub gltf: Gltf,
 
-  pub vertices: Vec<TexturedVertex>,
-  pub indices: Vec<u16>,
   pub meshes: Vec<Mesh>,
-  pub images: Vec<LoadedImageData>,
+  pub model_gpu_data: ModelGpuData,
 
   pub quad_mesh_index: usize,
   pub cube_mesh_index: usize,
+}
+
+pub struct AssetLocationData {
+  pub gltf: Gltf,
+
+  pub meshes: Vec<Mesh>,
+
+  pub quad_mesh_index: usize,
+  pub cube_mesh_index: usize,
+}
+
+pub struct ModelGpuData {
+  pub vertices: Vec<TexturedVertex>,
+  pub indices: Vec<u16>,
+  pub images: Vec<LoadedImageData>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -604,15 +617,31 @@ impl LoadedModels {
 
     Ok(Self {
       gltf,
-      vertices,
-      indices,
+      model_gpu_data: ModelGpuData {
+        vertices,
+        indices,
+        images,
+      },
       meshes,
-      images,
       quad_mesh_index,
       cube_mesh_index,
     })
   }
 
+  pub fn into_separate(self) -> (ModelGpuData, AssetLocationData) {
+    (
+      self.model_gpu_data,
+      AssetLocationData {
+        gltf: self.gltf,
+        meshes: self.meshes,
+        quad_mesh_index: self.quad_mesh_index,
+        cube_mesh_index: self.cube_mesh_index,
+      },
+    )
+  }
+}
+
+impl ModelGpuData {
   pub fn vertices_size(&self) -> u64 {
     (self.vertices.len() * size_of::<TexturedVertex>()) as u64
   }

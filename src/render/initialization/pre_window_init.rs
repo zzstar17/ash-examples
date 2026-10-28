@@ -5,9 +5,8 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::{
   asset_loader::{
-    model_loader::ModelLoadError,
-    texture_loader::{ImageLoadError, LoadedImageData},
-    LoadedModels,
+    model_loader::{ModelGpuData, ModelLoadError},
+    texture_loader::ImageLoadError,
   },
   render::{errors::InitializationError, SyncRenderer},
 };
@@ -24,8 +23,7 @@ pub struct RenderInit {
   #[cfg(feature = "vl")]
   pub debug_utils: ManuallyDrop<vkinitialization::DebugUtils>,
 
-  pub loaded_models: ManuallyDrop<LoadedModels>,
-  pub texture_data: ManuallyDrop<LoadedImageData>,
+  pub model_gpu_data: ManuallyDrop<ModelGpuData>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -52,11 +50,7 @@ impl From<InstanceCreationError> for RenderInitError {
 }
 
 impl RenderInit {
-  pub fn new(
-    event_loop: &EventLoop<()>,
-    models: LoadedModels,
-    texture_data: LoadedImageData,
-  ) -> Result<Self, RenderInitError> {
+  pub fn new(event_loop: &EventLoop<()>, gpu_data: ModelGpuData) -> Result<Self, RenderInitError> {
     let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
     let display_handle = event_loop
@@ -81,8 +75,7 @@ impl RenderInit {
       #[cfg(feature = "vl")]
       debug_utils: ManuallyDrop::new(debug_utils),
 
-      loaded_models: ManuallyDrop::new(models),
-      texture_data: ManuallyDrop::new(texture_data),
+      model_gpu_data: ManuallyDrop::new(gpu_data),
     })
   }
 
@@ -94,8 +87,7 @@ impl RenderInit {
     let instance = unsafe { ManuallyDrop::take(&mut self.instance) };
     #[cfg(feature = "vl")]
     let debug_utils = unsafe { ManuallyDrop::take(&mut self.debug_utils) };
-    let models = unsafe { ManuallyDrop::take(&mut self.loaded_models) };
-    let mut texture_data = unsafe { ManuallyDrop::take(&mut self.texture_data) };
+    let mut models = unsafe { ManuallyDrop::take(&mut self.model_gpu_data) };
     mem::forget(self);
 
     SyncRenderer::new(
@@ -104,8 +96,7 @@ impl RenderInit {
       #[cfg(feature = "vl")]
       debug_utils,
       event_loop,
-      &models,
-      &mut texture_data,
+      &mut models,
     )
   }
 }
@@ -121,8 +112,7 @@ impl Drop for RenderInit {
       ManuallyDrop::drop(&mut self.instance);
       #[cfg(feature = "vl")]
       ManuallyDrop::drop(&mut self.debug_utils);
-      ManuallyDrop::drop(&mut self.loaded_models);
-      ManuallyDrop::drop(&mut self.texture_data);
+      ManuallyDrop::drop(&mut self.model_gpu_data);
     }
   }
 }

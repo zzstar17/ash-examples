@@ -1,9 +1,12 @@
 use std::{f32, time::Duration};
 
 use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector3};
+use gltf::Gltf;
 
 use crate::{
-  asset_loader::{model_loader::ModelOffset, texture_loader::TextureOffsets, Models},
+  asset_loader::{
+    model_loader::AssetLocationData, texture_loader::TextureOffsets, LoadedModels, Mesh,
+  },
   keys::{
     KeyState::{Pressed, Released},
     Keys,
@@ -22,29 +25,31 @@ mod ferris;
 mod obj_3d;
 mod scene_node;
 
+pub use scene_node::SceneNode;
+
 const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
 
 const CAMERA_MOUSE_SENSITIVITY: f64 = 0.006;
 const CAMERA_KEYBOARD_SENSITIVITY: f32 = 2.0;
 
 pub struct Scene {
-  pub models: Models,
-  pub textures: TextureOffsets,
-
+  pub meshes: Vec<Mesh>,
+  pub quad_mesh_index: usize,
+  pub cube_mesh_index: usize,
+  // pub textures: TextureOffsets,
   pub last_update_projection_view: Matrix4<f32>,
 
-  pub ferris: Ferris,
+  // pub ferris: Ferris,
   pub camera: RenderCamera,
+  // pub ferris_obj: Render3dObj,
+  // pub niko_obj: Render3dObj,
+  // pub niko_light_obj: Render3dObj,
+  // pub kakyoin_obj: Render3dObj,
+  // pub ferris_borders: [Render3dObj; 4],
+  // pub crosshair: [Render3dObj; 3],
 
-  pub ferris_obj: Render3dObj,
-  pub niko_obj: Render3dObj,
-  pub niko_light_obj: Render3dObj,
-  pub kakyoin_obj: Render3dObj,
-  pub ferris_borders: [Render3dObj; 4],
-  pub crosshair: [Render3dObj; 3],
-
-  pub niko_text: Render3dObj,
-  pub kakyoin_text: Render3dObj,
+  // pub niko_text: Render3dObj,
+  // pub kakyoin_text: Render3dObj,
 }
 
 // axis should be normalized
@@ -56,7 +61,7 @@ fn quaternion_from_angle(angle: f32, axis_of_rotation: Vector3<f32>) -> Quaterni
 }
 
 impl Scene {
-  pub fn new(models: Models, textures: TextureOffsets) -> Self {
+  pub fn new(asset_locations: AssetLocationData) -> Self {
     let ferris = Ferris::new([0.2, 0.0], [0.2, 0.15]);
 
     let aspect_ratio = RESOLUTION[0] as f32 / RESOLUTION[1] as f32;
@@ -65,6 +70,22 @@ impl Scene {
       0.8,
       aspect_ratio,
     );
+
+    let mut nodes = Vec::new();
+    let scene = asset_locations.gltf.scenes().next().unwrap();
+    let scene_collection = scene.nodes().next().unwrap();
+    let niko_node = scene_collection
+      .children()
+      .find(|node| {
+        if let Some(name) = node.name() {
+          return name == "Niko";
+        }
+        false
+      })
+      .expect("Scene does not contain Niko");
+    let niko = SceneNode::from_gltf(&asset_locations, niko_node, &mut nodes);
+    println!("niko: {:#?}", niko);
+    println!("nodes:\n{:#?}", nodes);
 
     let angle: f32 = 0.0;
 
@@ -130,21 +151,23 @@ impl Scene {
     kakyoin_text.move_y(-1.5);
 
     Self {
-      models,
-      textures,
+      meshes: asset_locations.meshes,
+      quad_mesh_index: asset_locations.quad_mesh_index,
+      cube_mesh_index: asset_locations.cube_mesh_index,
+      // textures,
       last_update_projection_view: Matrix4::from_scale(1.0),
 
-      ferris,
+      // ferris,
       camera,
-      ferris_obj,
-      ferris_borders,
-      niko_obj,
-      niko_light_obj,
-      kakyoin_obj,
-      crosshair,
+      // ferris_obj,
+      // ferris_borders,
+      // niko_obj,
+      // niko_light_obj,
+      // kakyoin_obj,
+      // crosshair,
 
-      niko_text,
-      kakyoin_text,
+      // niko_text,
+      // kakyoin_text,
     }
   }
 
@@ -169,120 +192,120 @@ impl Scene {
     self.update_from_keys(keys, time_since_last_update);
     self.last_update_projection_view = self.camera.projection_view();
 
-    let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
-    self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
-    self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
-    self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
+    // let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
+    // self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
+    // self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
+    // self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
 
-    self.ferris.update(time_since_last_update);
+    // self.ferris.update(time_since_last_update);
 
-    let angle = 0.04 * time_since_last_update.as_secs_f32();
-    // rotate around y axis
-    let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
+    // let angle = 0.04 * time_since_last_update.as_secs_f32();
+    // // rotate around y axis
+    // let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
 
-    self.kakyoin_obj.rotate(rotation);
-    self.niko_obj.rotate(rotation);
-    self
-      .niko_light_obj
-      .set_position(self.niko_obj.position() + self.niko_obj.get_front_vector() * 0.5);
-    self.niko_light_obj.rotate(rotation);
+    // self.kakyoin_obj.rotate(rotation);
+    // self.niko_obj.rotate(rotation);
+    // self
+    //   .niko_light_obj
+    //   .set_position(self.niko_obj.position() + self.niko_obj.get_front_vector() * 0.5);
+    // self.niko_light_obj.rotate(rotation);
 
-    // make text gradually rotate towards the camera
-    let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
-    self
-      .niko_text
-      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
-    self
-      .kakyoin_text
-      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
+    // // make text gradually rotate towards the camera
+    // let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
+    // self
+    //   .niko_text
+    //   .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
+    // self
+    //   .kakyoin_text
+    //   .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
 
-    self
-      .ferris_obj
-      .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
+    // self
+    //   .ferris_obj
+    //   .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
   }
 
-  pub fn get_ferris_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-    let push_constants = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.ferris_obj.model(),
-      tex_offset: self.textures.ferris.offset,
-      tex_size: self.textures.ferris.size,
-    };
+  // pub fn get_ferris_data(&self) -> (GraphicsPushConstants, ModelOffset) {
+  //   let push_constants = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.ferris_obj.model(),
+  //     tex_offset: self.textures.ferris.offset,
+  //     tex_size: self.textures.ferris.size,
+  //   };
 
-    (push_constants, self.models.quad)
-  }
+  //   (push_constants, self.models.quad)
+  // }
 
-  pub fn get_ferris_borders_data(&self) -> [(GraphicsPushConstants, ModelOffset); 4] {
-    let fun = |obj: &Render3dObj| {
-      let push_constants = GraphicsPushConstants {
-        matrix: self.last_update_projection_view * obj.model(),
-        tex_offset: self.textures.black.offset,
-        tex_size: self.textures.black.size,
-      };
+  // pub fn get_ferris_borders_data(&self) -> [(GraphicsPushConstants, ModelOffset); 4] {
+  //   let fun = |obj: &Render3dObj| {
+  //     let push_constants = GraphicsPushConstants {
+  //       matrix: self.last_update_projection_view * obj.model(),
+  //       tex_offset: self.textures.black.offset,
+  //       tex_size: self.textures.black.size,
+  //     };
 
-      (push_constants, self.models.quad)
-    };
+  //     (push_constants, self.models.quad)
+  //   };
 
-    [
-      fun(&self.ferris_borders[0]),
-      fun(&self.ferris_borders[1]),
-      fun(&self.ferris_borders[2]),
-      fun(&self.ferris_borders[3]),
-    ]
-  }
+  //   [
+  //     fun(&self.ferris_borders[0]),
+  //     fun(&self.ferris_borders[1]),
+  //     fun(&self.ferris_borders[2]),
+  //     fun(&self.ferris_borders[3]),
+  //   ]
+  // }
 
-  pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, ModelOffset); 3] {
-    let pc_x = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.crosshair[0].model(),
-      tex_offset: self.textures.red.offset,
-      tex_size: self.textures.red.size,
-    };
-    let pc_y = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.crosshair[1].model(),
-      tex_offset: self.textures.green.offset,
-      tex_size: self.textures.green.size,
-    };
-    let pc_z = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.crosshair[2].model(),
-      tex_offset: self.textures.blue.offset,
-      tex_size: self.textures.blue.size,
-    };
+  // pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, ModelOffset); 3] {
+  //   let pc_x = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.crosshair[0].model(),
+  //     tex_offset: self.textures.red.offset,
+  //     tex_size: self.textures.red.size,
+  //   };
+  //   let pc_y = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.crosshair[1].model(),
+  //     tex_offset: self.textures.green.offset,
+  //     tex_size: self.textures.green.size,
+  //   };
+  //   let pc_z = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.crosshair[2].model(),
+  //     tex_offset: self.textures.blue.offset,
+  //     tex_size: self.textures.blue.size,
+  //   };
 
-    [
-      (pc_x, self.models.cube),
-      (pc_y, self.models.cube),
-      (pc_z, self.models.cube),
-    ]
-  }
+  //   [
+  //     (pc_x, self.models.cube),
+  //     (pc_y, self.models.cube),
+  //     (pc_z, self.models.cube),
+  //   ]
+  // }
 
-  pub fn get_niko_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-    let push_constants = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.niko_obj.model(),
-      tex_offset: self.textures.niko.offset,
-      tex_size: self.textures.niko.size,
-    };
+  // pub fn get_niko_data(&self) -> (GraphicsPushConstants, ModelOffset) {
+  //   let push_constants = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.niko_obj.model(),
+  //     tex_offset: self.textures.niko.offset,
+  //     tex_size: self.textures.niko.size,
+  //   };
 
-    (push_constants, self.models.niko)
-  }
+  //   (push_constants, self.models.niko)
+  // }
 
-  pub fn get_niko_light_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-    let push_constants = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.niko_light_obj.model(),
-      tex_offset: self.textures.niko.offset,
-      tex_size: self.textures.niko.size,
-    };
+  // pub fn get_niko_light_data(&self) -> (GraphicsPushConstants, ModelOffset) {
+  //   let push_constants = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.niko_light_obj.model(),
+  //     tex_offset: self.textures.niko.offset,
+  //     tex_size: self.textures.niko.size,
+  //   };
 
-    (push_constants, self.models.niko_light)
-  }
+  //   (push_constants, self.models.niko_light)
+  // }
 
-  pub fn get_kakyoin(&self) -> (GraphicsPushConstants, ModelOffset) {
-    let push_constants = GraphicsPushConstants {
-      matrix: self.last_update_projection_view * self.kakyoin_obj.model(),
-      tex_offset: self.textures.kakyoin.offset,
-      tex_size: self.textures.kakyoin.size,
-    };
+  // pub fn get_kakyoin(&self) -> (GraphicsPushConstants, ModelOffset) {
+  //   let push_constants = GraphicsPushConstants {
+  //     matrix: self.last_update_projection_view * self.kakyoin_obj.model(),
+  //     tex_offset: self.textures.kakyoin.offset,
+  //     tex_size: self.textures.kakyoin.size,
+  //   };
 
-    (push_constants, self.models.kakyoin)
-  }
+  //   (push_constants, self.models.kakyoin)
+  // }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {
     if keys.l_ctrl == Pressed {

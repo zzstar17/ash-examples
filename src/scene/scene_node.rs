@@ -2,13 +2,19 @@ use cgmath::{Point3, Quaternion, Vector3};
 use gltf::Gltf;
 
 use crate::{
-  asset_loader::{LoadedModels, Mesh},
+  asset_loader::{model_loader::AssetLocationData, LoadedModels, Mesh},
   scene::{ferris::Ferris, obj_3d::Render3dObj},
 };
 
 #[derive(Debug, Clone)]
 pub struct SceneNode {
-  // either has own render position, or inherits it
+  obj: Render3dObj,
+  children: Vec<usize>,
+  mesh: Option<Mesh>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SceneNodeLeaf {
   obj: Render3dObj,
   children: Vec<usize>,
   mesh: Mesh,
@@ -25,7 +31,7 @@ impl SceneNode {
     SceneNode {
       obj,
       children: Vec::new(),
-      mesh,
+      mesh: Some(mesh),
     }
   }
 
@@ -111,7 +117,24 @@ impl SceneNode {
     }
   }
 
-  pub fn from_gltf_skin(loaded_models: &LoadedModels, skin: gltf::Skin, join: &mut Vec<Self>) {
-    // todo
+  pub fn from_gltf(assets: &AssetLocationData, node: gltf::Node, join: &mut Vec<Self>) -> Self {
+    let mut children = Vec::with_capacity(node.children().len());
+    for child in node.children() {
+      let new = Self::from_gltf(assets, child, join);
+      join.push(new);
+      children.push(join.len() - 1);
+    }
+
+    let obj = Render3dObj::from_gltf_transform(node.transform());
+
+    let mesh = node
+      .mesh()
+      .map(|gltf_mesh| assets.meshes[gltf_mesh.index()]);
+
+    Self {
+      obj: obj,
+      children,
+      mesh,
+    }
   }
 }

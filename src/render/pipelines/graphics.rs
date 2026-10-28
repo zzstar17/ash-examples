@@ -239,7 +239,7 @@ impl RenderPipelines {
     let layout_create_info = vk::PipelineLayoutCreateInfo {
       flags: vk::PipelineLayoutCreateFlags::empty(),
       set_layout_count: 1,
-      p_set_layouts: &descriptor_pool.sprites_layout,
+      p_set_layouts: &descriptor_pool.textures_layout,
       push_constant_range_count: 1,
       p_push_constant_ranges: &push_constant_range,
       ..Default::default()

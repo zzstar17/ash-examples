@@ -6,7 +6,7 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{texture_loader::LoadedImageData, LoadedModels},
+  asset_loader::{model_loader::ModelGpuData, texture_loader::LoadedImageData, LoadedModels},
   last_frames_durations::FPSDurations,
   render::create_objs::create_fence,
   scene::Scene,
@@ -41,8 +41,7 @@ impl SyncRenderer {
     #[cfg(feature = "vl")] debug_utils: vkinitialization::DebugUtils,
     event_loop: &ActiveEventLoop,
 
-    loaded_models: &LoadedModels,
-    texture_data: &mut LoadedImageData,
+    model_gpu_data: &mut ModelGpuData,
   ) -> Result<Self, InitializationError> {
     let (renderer, _texture_format) = Renderer::initialize(
       entry,
@@ -50,8 +49,7 @@ impl SyncRenderer {
       #[cfg(feature = "vl")]
       debug_utils,
       event_loop,
-      loaded_models,
-      texture_data,
+      model_gpu_data,
     )?;
 
     let device = &renderer.device;
@@ -75,7 +73,7 @@ impl SyncRenderer {
     let frame_fences = [fence0, fence1];
 
     unsafe {
-      Self::submit_initial_staging_copy(&renderer, fence0, loaded_models, texture_data)?;
+      Self::submit_initial_staging_copy(&renderer, fence0, model_gpu_data)?;
     }
 
     let image_available = fill_destroyable_array_with_expression!(
@@ -106,10 +104,9 @@ impl SyncRenderer {
   unsafe fn submit_initial_staging_copy(
     renderer: &Renderer,
     fence: vk::Fence,
-    loaded_models: &LoadedModels,
-    texture_data: &LoadedImageData,
+    model_gpu_data: &mut ModelGpuData,
   ) -> Result<(), HostMemorySyncError> {
-    renderer.full_record_upload_initial_staging(0, loaded_models, texture_data)?;
+    renderer.full_record_upload_initial_staging(0, model_gpu_data)?;
 
     let command_buffers =
       [vk::CommandBufferSubmitInfo::default().command_buffer(renderer.graphics_pools[0].main)];

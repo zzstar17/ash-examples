@@ -2691,8 +2691,8 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vkallocator"
-version = "0.1.7"
-source = "git+https://github.com/zzstar17/vkallocator#d4eddcf4682337fd02b668f0deb882287fda870b"
+version = "0.2.0"
+source = "git+https://github.com/zzstar17/vkallocator#9b7b95c8872a9af40ee94b715265a4f79593f645"
 dependencies = [
  "ash",
  "log",

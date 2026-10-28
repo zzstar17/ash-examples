@@ -27,7 +27,7 @@ vkinitialization = { version = "0.1.14", git = "https://github.com/zzstar17/vkin
     "transfer_family",
     "surface"
 ] }
-vkallocator = { version = "0.1.7", git = "https://github.com/zzstar17/vkallocator", default-features = false}
+vkallocator = { version = "0.2.0", git = "https://github.com/zzstar17/vkallocator", default-features = false}
 ash-slug= "0.1.5"
 
 harfrust = "0.13.0"

@@ -138,11 +138,11 @@ impl RenderTargets {
           vk::MemoryPropertyFlags::DEVICE_LOCAL,
           vk::MemoryPropertyFlags::empty(),
         ],
-        images_trait,
+        &images_trait,
         Self::PRIORITY,
         false,
         #[cfg(feature = "log_alloc")]
-        Some([
+        Some(&[
           "Color image 0",
           "Color image 1",
           "Depth image 0",
@@ -173,11 +173,11 @@ impl RenderTargets {
           vk::MemoryPropertyFlags::DEVICE_LOCAL,
           vk::MemoryPropertyFlags::empty(),
         ],
-        images_trait,
+        &images_trait,
         Self::PRIORITY,
         false,
         #[cfg(feature = "log_alloc")]
-        Some([
+        Some(&[
           "Resolve image 0",
           "Resolve image 1",
           "Depth image 0",
