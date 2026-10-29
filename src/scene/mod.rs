@@ -1,11 +1,11 @@
 use std::{f32, time::Duration};
 
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Vector3};
-use gltf::Gltf;
+use cgmath::{Matrix4, Point3, Quaternion, Vector3};
 
 use crate::{
   asset_loader::{
-    model_loader::AssetLocationData, texture_loader::TextureOffsets, LoadedModels, Mesh,
+    model_loader::{AssetLocationData, ImageSize},
+    Mesh,
   },
   keys::{
     KeyState::{Pressed, Released},
@@ -34,6 +34,7 @@ const CAMERA_KEYBOARD_SENSITIVITY: f32 = 2.0;
 
 pub struct Scene {
   pub meshes: Vec<Mesh>,
+  pub textures: Vec<ImageSize>,
   pub quad_mesh_index: usize,
   pub cube_mesh_index: usize,
   // pub textures: TextureOffsets,
@@ -41,15 +42,21 @@ pub struct Scene {
 
   // pub ferris: Ferris,
   pub camera: RenderCamera,
+
+  pub child_nodes: Vec<SceneNode>,
+  pub niko: SceneNode,
+  pub niko_lightbulb: SceneNode,
   // pub ferris_obj: Render3dObj,
   // pub niko_obj: Render3dObj,
   // pub niko_light_obj: Render3dObj,
   // pub kakyoin_obj: Render3dObj,
   // pub ferris_borders: [Render3dObj; 4],
-  // pub crosshair: [Render3dObj; 3],
+  pub crosshair: [Render3dObj; 3],
 
-  // pub niko_text: Render3dObj,
+  pub niko_text: Render3dObj,
   // pub kakyoin_text: Render3dObj,
+  pub solid_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
+  pub semi_transparent_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
 }
 
 // axis should be normalized
@@ -62,6 +69,8 @@ fn quaternion_from_angle(angle: f32, axis_of_rotation: Vector3<f32>) -> Quaterni
 
 impl Scene {
   pub fn new(asset_locations: AssetLocationData) -> Self {
+    println!("meshes:\n{:#?}", asset_locations.meshes);
+
     let ferris = Ferris::new([0.2, 0.0], [0.2, 0.15]);
 
     let aspect_ratio = RESOLUTION[0] as f32 / RESOLUTION[1] as f32;
@@ -71,10 +80,10 @@ impl Scene {
       aspect_ratio,
     );
 
-    let mut nodes = Vec::new();
+    let mut child_nodes = Vec::new();
     let scene = asset_locations.gltf.scenes().next().unwrap();
     let scene_collection = scene.nodes().next().unwrap();
-    let niko_node = scene_collection
+    let niko_collection_node = scene_collection
       .children()
       .find(|node| {
         if let Some(name) = node.name() {
@@ -83,9 +92,28 @@ impl Scene {
         false
       })
       .expect("Scene does not contain Niko");
-    let niko = SceneNode::from_gltf(&asset_locations, niko_node, &mut nodes);
-    println!("niko: {:#?}", niko);
-    println!("nodes:\n{:#?}", nodes);
+    let niko_armature = niko_collection_node
+      .children()
+      .find(|node| node.name().unwrap() == "Niko_Armature")
+      .unwrap();
+    let niko_lightbulb = niko_collection_node
+      .children()
+      .find(|node| node.name().unwrap() == "Niko_Lightbulb")
+      .unwrap();
+    let niko = SceneNode::from_gltf(
+      &asset_locations,
+      niko_armature,
+      &Matrix4::from_scale(1.0),
+      &mut child_nodes,
+    );
+    let niko_lightbulb = SceneNode::from_gltf(
+      &asset_locations,
+      niko_lightbulb,
+      &Matrix4::from_scale(1.0),
+      &mut child_nodes,
+    );
+    // println!("niko: {:#?}", niko);
+    // println!("nodes:\n{:#?}", child_nodes);
 
     let angle: f32 = 0.0;
 
@@ -133,25 +161,31 @@ impl Scene {
         Vector3::new(0.05, 0.05, 0.5),
       ),
     ];
-    let niko_obj = Render3dObj::from_full(
-      Point3::new(16.0, 0.0, -4.0),
-      quaternion_from_angle(angle, Vector3::new(0.2, 1.0, 0.0).normalize()),
-      Vector3::new(1.0, 1.0, 1.0),
-    );
-    let niko_light_obj = niko_obj;
+    // let niko_obj = Render3dObj::from_full(
+    //   Point3::new(16.0, 0.0, -4.0),
+    //   quaternion_from_angle(angle, Vector3::new(0.2, 1.0, 0.0).normalize()),
+    //   Vector3::new(1.0, 1.0, 1.0),
+    // );
+    // let niko_light_obj = niko_obj;
     let kakyoin_obj = Render3dObj::from_full(
       Point3::new(-16.0, 0.0, -4.0),
       quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0)),
       Vector3::new(1.0, 1.0, 1.0),
     );
 
-    let mut niko_text = niko_obj;
+    // let mut niko_text = niko.obj;
+    let mut niko_text = Render3dObj::new(Point3 {
+      x: 0.0,
+      y: 0.0,
+      z: 0.0,
+    });
     niko_text.move_y(-1.0);
     let mut kakyoin_text = kakyoin_obj;
     kakyoin_text.move_y(-1.5);
 
     Self {
       meshes: asset_locations.meshes,
+      textures: asset_locations.image_sizes,
       quad_mesh_index: asset_locations.quad_mesh_index,
       cube_mesh_index: asset_locations.cube_mesh_index,
       // textures,
@@ -159,15 +193,21 @@ impl Scene {
 
       // ferris,
       camera,
+
+      child_nodes,
+      niko,
+      niko_lightbulb,
       // ferris_obj,
       // ferris_borders,
       // niko_obj,
       // niko_light_obj,
       // kakyoin_obj,
-      // crosshair,
+      crosshair,
 
-      // niko_text,
+      niko_text,
       // kakyoin_text,
+      solid_draw_meshes: Vec::new(),
+      semi_transparent_draw_meshes: Vec::new(),
     }
   }
 
@@ -192,10 +232,10 @@ impl Scene {
     self.update_from_keys(keys, time_since_last_update);
     self.last_update_projection_view = self.camera.projection_view();
 
-    // let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
-    // self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
-    // self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
-    // self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
+    let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
+    self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
+    self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
+    self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
 
     // self.ferris.update(time_since_last_update);
 
@@ -210,11 +250,11 @@ impl Scene {
     //   .set_position(self.niko_obj.position() + self.niko_obj.get_front_vector() * 0.5);
     // self.niko_light_obj.rotate(rotation);
 
-    // // make text gradually rotate towards the camera
-    // let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
-    // self
-    //   .niko_text
-    //   .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
+    // make text gradually rotate towards the camera
+    let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
+    self
+      .niko_text
+      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
     // self
     //   .kakyoin_text
     //   .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
@@ -222,6 +262,21 @@ impl Scene {
     // self
     //   .ferris_obj
     //   .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
+
+    self.solid_draw_meshes.clear();
+    self.semi_transparent_draw_meshes.clear();
+    self.niko.add_draw_meshes(
+      &self.child_nodes,
+      &self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
+    self.niko_lightbulb.add_draw_meshes(
+      &self.child_nodes,
+      &self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
   }
 
   // pub fn get_ferris_data(&self) -> (GraphicsPushConstants, ModelOffset) {
@@ -253,7 +308,7 @@ impl Scene {
   //   ]
   // }
 
-  // pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, ModelOffset); 3] {
+  // pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, Mesh); 3] {
   //   let pc_x = GraphicsPushConstants {
   //     matrix: self.last_update_projection_view * self.crosshair[0].model(),
   //     tex_offset: self.textures.red.offset,

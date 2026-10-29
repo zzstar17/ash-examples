@@ -264,13 +264,13 @@ impl RenderStatus {
     }
   }
 
-  pub fn unwrap_initialized(&mut self) -> &mut (RenderInit, AssetLocationData) {
-    if let Self::Initialized(val) = self {
-      val
-    } else {
-      panic!()
-    }
-  }
+  // pub fn unwrap_initialized(&mut self) -> &mut (RenderInit, AssetLocationData) {
+  //   if let Self::Initialized(val) = self {
+  //     val
+  //   } else {
+  //     panic!()
+  //   }
+  // }
 
   pub fn unwrap_started(&mut self) -> &mut StartedStatus {
     if let Self::Started(started) = self {

@@ -2,13 +2,6 @@ use std::{fs, io::Read};
 
 use ash::vk;
 
-use crate::{
-  BLACK_TEXTURE_OFFSET, BLUE_TEXTURE_OFFSET, FERRIS_TEXTURE_OFFSET, FERRIS_TEXTURE_SIZE,
-  GREEN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_OFFSET, KAKYOIN_TEXTURE_SIZE, NIKO_TEXTURE_OFFSET,
-  NIKO_TEXTURE_SIZE, RED_TEXTURE_OFFSET, SOLID_COLOR_TEXTURE_SIZE, SPRITES_TOTAL_SIZE,
-  SPRITES_TOTAL_SIZE_F32, TEXTURE_PATH,
-};
-
 pub struct LoadedImageData {
   pub reader: ktx2::Reader<Vec<u8>>,
   pub width: u32,
@@ -23,50 +16,6 @@ pub enum ImageLoadError {
 
   #[error("Failed to parse textures file: {0}")]
   KtxParseError(#[from] ktx2::ParseError),
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TextureOffsets {
-  pub ferris: TextureLoc,
-  pub niko: TextureLoc,
-  pub kakyoin: TextureLoc,
-  pub black: TextureLoc,
-  pub red: TextureLoc,
-  pub green: TextureLoc,
-  pub blue: TextureLoc,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct TextureLoc {
-  // normalized
-  pub offset: [f32; 2],
-  pub size: [f32; 2],
-}
-
-impl TextureLoc {
-  pub const fn from_render_extent(texture_size: [f32; 2], texture_offset: [f32; 2]) -> Self {
-    let size = [
-      texture_size[0] / SPRITES_TOTAL_SIZE_F32[0],
-      texture_size[1] / SPRITES_TOTAL_SIZE_F32[1],
-    ];
-    let offset = [
-      texture_offset[0] / SPRITES_TOTAL_SIZE_F32[0],
-      texture_offset[1] / SPRITES_TOTAL_SIZE_F32[1],
-    ];
-    Self { offset, size }
-  }
-}
-
-pub const fn get_texture_offsets() -> TextureOffsets {
-  TextureOffsets {
-    ferris: TextureLoc::from_render_extent(FERRIS_TEXTURE_SIZE, FERRIS_TEXTURE_OFFSET),
-    niko: TextureLoc::from_render_extent(NIKO_TEXTURE_SIZE, NIKO_TEXTURE_OFFSET),
-    kakyoin: TextureLoc::from_render_extent(KAKYOIN_TEXTURE_SIZE, KAKYOIN_TEXTURE_OFFSET),
-    black: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, BLACK_TEXTURE_OFFSET),
-    red: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, RED_TEXTURE_OFFSET),
-    green: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, GREEN_TEXTURE_OFFSET),
-    blue: TextureLoc::from_render_extent(SOLID_COLOR_TEXTURE_SIZE, BLUE_TEXTURE_OFFSET),
-  }
 }
 
 impl LoadedImageData {

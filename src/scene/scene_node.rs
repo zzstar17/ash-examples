@@ -1,23 +1,29 @@
-use cgmath::{Point3, Quaternion, Vector3};
-use gltf::Gltf;
+use cgmath::{Matrix4, Point3, Quaternion, Vector3};
 
 use crate::{
   asset_loader::{model_loader::AssetLocationData, LoadedModels, Mesh},
+  render::GraphicsPushConstants,
   scene::{ferris::Ferris, obj_3d::Render3dObj},
 };
 
 #[derive(Debug, Clone)]
+pub enum ObjEnum {
+  Obj(Render3dObj),
+  Matrix(Matrix4<f32>),
+}
+
+#[derive(Debug, Clone)]
 pub struct SceneNode {
-  obj: Render3dObj,
-  children: Vec<usize>,
-  mesh: Option<Mesh>,
+  pub obj: ObjEnum,
+  pub children: Vec<usize>,
+  pub mesh: Option<Mesh>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SceneNodeLeaf {
-  obj: Render3dObj,
-  children: Vec<usize>,
-  mesh: Mesh,
+  pub obj: Render3dObj,
+  pub children: Vec<usize>,
+  pub mesh: Mesh,
 }
 
 pub struct LocalNodes {
@@ -29,7 +35,7 @@ pub struct LocalNodes {
 impl SceneNode {
   fn from_obj(obj: Render3dObj, mesh: Mesh) -> Self {
     SceneNode {
-      obj,
+      obj: ObjEnum::Obj(obj),
       children: Vec::new(),
       mesh: Some(mesh),
     }
@@ -117,24 +123,58 @@ impl SceneNode {
     }
   }
 
-  pub fn from_gltf(assets: &AssetLocationData, node: gltf::Node, join: &mut Vec<Self>) -> Self {
+  pub fn from_gltf(
+    assets: &AssetLocationData,
+    node: gltf::Node,
+    parent_m: &Matrix4<f32>,
+    join: &mut Vec<Self>,
+  ) -> Self {
+    let own_m = Matrix4::from(node.transform().matrix());
+
+    let obj = parent_m * own_m;
+
     let mut children = Vec::with_capacity(node.children().len());
     for child in node.children() {
-      let new = Self::from_gltf(assets, child, join);
+      let new = Self::from_gltf(assets, child, &obj, join);
       join.push(new);
       children.push(join.len() - 1);
     }
 
-    let obj = Render3dObj::from_gltf_transform(node.transform());
-
+    // todo: 2 comes from square and cube mesh
     let mesh = node
       .mesh()
-      .map(|gltf_mesh| assets.meshes[gltf_mesh.index()]);
+      .map(|gltf_mesh| assets.meshes[gltf_mesh.index() + 2]);
 
     Self {
-      obj: obj,
+      obj: ObjEnum::Matrix(obj),
       children,
       mesh,
+    }
+  }
+
+  pub fn add_draw_meshes(
+    &self,
+    nodes: &[SceneNode],
+    projection_view: &Matrix4<f32>,
+    solid: &mut Vec<(GraphicsPushConstants, Mesh)>,
+    semi_transparent: &mut Vec<(GraphicsPushConstants, Mesh)>,
+  ) {
+    if let Some(mesh) = self.mesh {
+      if let ObjEnum::Matrix(m) = self.obj {
+        let pc = GraphicsPushConstants {
+          matrix: projection_view * m,
+          tex_offset: [0.0, 0.0],
+          tex_size: [1.0, 1.0],
+        };
+        if mesh.semi_transparent {
+          semi_transparent.push((pc, mesh));
+        } else {
+          solid.push((pc, mesh));
+        }
+      }
+    }
+    for &child in self.children.iter() {
+      nodes[child].add_draw_meshes(nodes, projection_view, solid, semi_transparent);
     }
   }
 }

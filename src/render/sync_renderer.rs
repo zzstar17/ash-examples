@@ -6,11 +6,8 @@ use vkobjects::{fill_destroyable_array_with_expression, utility::OnErr, DeviceMa
 use winit::{event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{model_loader::ModelGpuData, texture_loader::LoadedImageData, LoadedModels},
-  last_frames_durations::FPSDurations,
-  render::create_objs::create_fence,
-  scene::Scene,
-  DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
+  asset_loader::model_loader::ModelGpuData, last_frames_durations::FPSDurations,
+  render::create_objs::create_fence, scene::Scene, DEBUG_PRINT_FRAME_INFO, SCREENSHOT_SAVE_FILE,
 };
 
 use super::{

@@ -1,1 +1,1 @@
-ktx create --format R8G8B8A8_SRGB --generate-mipmap ./assets_dev/sprites.png ./assets/textures.ktx2
+ktx create --format R8G8B8A8_SRGB --generate-mipmap ./assets_dev/models/niko/tex/baked.png ./assets/tex/Niko.ktx2

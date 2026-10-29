@@ -79,8 +79,10 @@ impl GraphicsCommandBufferPool {
     &self,
     device: &ash::Device,
     pipeline: &GraphicsPipeline,
+    gpu_data: &GPUData,
     scene: &Scene,
   ) {
+    let cb = self.main;
     // device.cmd_set_depth_test_enable(cb, true);
     // self.record_draw_indexed(device, pipeline.layout, scene.get_ferris_data());
     // for data in scene.get_ferris_borders_data() {
@@ -90,7 +92,45 @@ impl GraphicsCommandBufferPool {
     // self.record_draw_indexed(device, pipeline.layout, scene.get_kakyoin());
 
     // self.record_draw_indexed(device, pipeline.layout, scene.get_niko_light_data());
+    for (pc, mesh) in scene.solid_draw_meshes.iter() {
+      device.cmd_push_constants(
+        cb,
+        pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(pc),
+      );
+      device.cmd_draw_indexed(
+        cb,
+        mesh.indices_count as u32,
+        1,
+        mesh.indices_offset as u32,
+        mesh.vertices_offset as i32,
+        0,
+      );
+    }
+
+    // todo: this needs to be ordered by camera distance
+    for (pc, mesh) in scene.semi_transparent_draw_meshes.iter() {
+      device.cmd_push_constants(
+        cb,
+        pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(pc),
+      );
+      device.cmd_draw_indexed(
+        cb,
+        mesh.indices_count as u32,
+        1,
+        mesh.indices_offset as u32,
+        mesh.vertices_offset as i32,
+        0,
+      );
+    }
   }
+
+  // unsafe fn record_draw_scene_node(&self)
 
   unsafe fn record_draw_crosshair(
     &self,
@@ -120,27 +160,27 @@ impl GraphicsCommandBufferPool {
     scene: &Scene,
     data: &GPUData,
   ) {
-    // let matrix = (scene.last_update_projection_view * scene.niko_text.model()).transpose();
-    // let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
-    // let text_pc = SlugPushConstants {
-    //   mvp_matrix: arrays,
-    //   viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
-    // };
-    // device.cmd_push_constants(
-    //   self.main,
-    //   pipeline.layout,
-    //   vk::ShaderStageFlags::VERTEX,
-    //   0,
-    //   utility::any_as_u8_slice(&text_pc),
-    // );
-    // device.cmd_draw_indexed(
-    //   self.main,
-    //   data.text.niko_offsets.indices_len,
-    //   1,
-    //   data.text.niko_offsets.indices_offset,
-    //   0,
-    //   0,
-    // );
+    let matrix = (scene.last_update_projection_view * scene.niko_text.model()).transpose();
+    let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
+    let text_pc = SlugPushConstants {
+      mvp_matrix: arrays,
+      viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
+    };
+    device.cmd_push_constants(
+      self.main,
+      pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&text_pc),
+    );
+    device.cmd_draw_indexed(
+      self.main,
+      data.text.niko_offsets.indices_len,
+      1,
+      data.text.niko_offsets.indices_offset,
+      0,
+      0,
+    );
 
     // let matrix = (scene.last_update_projection_view * scene.kakyoin_text.model()).transpose();
     // let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
@@ -673,7 +713,7 @@ impl GraphicsCommandBufferPool {
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
 
-        self.record_draw_scene_world_objects(device, pipeline, scene);
+        self.record_draw_scene_world_objects(device, pipeline, data, scene);
         #[cfg(feature = "vl")]
         marker.cmd_end_debug_utils_label(cb);
       }
@@ -775,7 +815,7 @@ impl GraphicsCommandBufferPool {
             );
             device.cmd_draw_indexed(
               cb,
-              scene.meshes[scene.quad_mesh_index].indices_size as u32,
+              scene.meshes[scene.quad_mesh_index].indices_count as u32,
               1,
               0,
               0,

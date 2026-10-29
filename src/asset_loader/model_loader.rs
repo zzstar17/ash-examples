@@ -54,7 +54,7 @@ pub const QUAD_VERTICES: [TexturedVertex; 4] = [
   },
 ];
 
-pub const QUAD_INDICES: [u16; 6] = [2, 1, 0, 1, 2, 3];
+pub const QUAD_INDICES: [u16; 6] = [0, 1, 2, 3, 2, 1];
 
 pub const CUBE_VERTICES: [TexturedVertex; 24] = [
   // FRONT FACE
@@ -258,18 +258,19 @@ pub const CUBE_VERTICES: [TexturedVertex; 24] = [
 ];
 
 pub const CUBE_INDICES: [u16; 36] = [
-  2, 1, 0, 1, 2, 3, // front
-  6, 5, 4, 5, 6, 7, // left
-  10, 9, 8, 9, 10, 11, // back
-  14, 13, 12, 13, 14, 15, // right
-  18, 17, 16, 17, 18, 19, // right
-  22, 21, 20, 21, 22, 23, // right
+  0, 1, 2, 3, 2, 1, // front
+  4, 5, 6, 7, 6, 5, // left
+  8, 9, 10, 11, 10, 9, // back
+  12, 13, 14, 15, 14, 13, // right
+  16, 17, 18, 19, 18, 17, // right
+  20, 21, 22, 23, 22, 21, // right
 ];
 
 pub struct LoadedModels {
   pub gltf: Gltf,
 
   pub meshes: Vec<Mesh>,
+  pub image_sizes: Vec<ImageSize>,
   pub model_gpu_data: ModelGpuData,
 
   pub quad_mesh_index: usize,
@@ -280,6 +281,7 @@ pub struct AssetLocationData {
   pub gltf: Gltf,
 
   pub meshes: Vec<Mesh>,
+  pub image_sizes: Vec<ImageSize>,
 
   pub quad_mesh_index: usize,
   pub cube_mesh_index: usize,
@@ -294,10 +296,17 @@ pub struct ModelGpuData {
 #[derive(Debug, Clone, Copy)]
 pub struct Mesh {
   pub vertices_offset: usize,
-  pub vertices_size: usize,
+  pub vertices_count: usize,
   pub indices_offset: usize,
-  pub indices_size: usize,
+  pub indices_count: usize,
   pub image_index: Option<usize>,
+  pub semi_transparent: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImageSize {
+  pub width: u32,
+  pub height: u32,
 }
 
 fn print_tree(node: &gltf::Node, depth: i32) {
@@ -414,11 +423,11 @@ fn append_vertices(
       pos: [
         position[0],
         // vertex.position[1],
-        1.0 - position[1],
+        position[1],
         position[2],
       ],
-      normal: [normal[0], 1.0 - normal[1], normal[2]],
-      tex_coords: [texture[0], 1.0 - texture[1]],
+      normal: [normal[0], normal[1], normal[2]],
+      tex_coords: [texture[0], texture[1]],
       ..Default::default()
     });
   }
@@ -501,10 +510,11 @@ impl LoadedModels {
     let quad_mesh_index = meshes.len();
     meshes.push(Mesh {
       vertices_offset: vertices.len(),
-      vertices_size: QUAD_VERTICES.len(),
+      vertices_count: QUAD_VERTICES.len(),
       indices_offset: indices.len(),
-      indices_size: QUAD_INDICES.len(),
+      indices_count: QUAD_INDICES.len(),
       image_index: None,
+      semi_transparent: false,
     });
 
     vertices.extend_from_slice(&CUBE_VERTICES);
@@ -512,10 +522,11 @@ impl LoadedModels {
     let cube_mesh_index = meshes.len();
     meshes.push(Mesh {
       vertices_offset: vertices.len(),
-      vertices_size: CUBE_VERTICES.len(),
+      vertices_count: CUBE_VERTICES.len(),
       indices_offset: indices.len(),
-      indices_size: CUBE_INDICES.len(),
+      indices_count: CUBE_INDICES.len(),
       image_index: None,
+      semi_transparent: false,
     });
 
     for mesh_ref in gltf.meshes() {
@@ -559,8 +570,8 @@ impl LoadedModels {
 
       let vertices_offset = vertices.len();
       let indices_offset = indices.len();
-      let vertices_size = positions.count;
-      let indices_size = indices_slice.count;
+      let vertices_count = positions.count;
+      let indices_count = indices_slice.count;
 
       log::debug!(
         "Adding mesh \"{}\", material \"{}\" (image \"{}\") with {} vertices and {} indices",
@@ -573,16 +584,24 @@ impl LoadedModels {
       append_vertices(&mut vertices, positions, normals, texture_coors);
       append_indices(&mut indices, indices_slice);
 
+      // todo: add a better way of doing this
+      let semi_transparent = match mesh_ref.name() {
+        Some(name) => name.ends_with("Glass"),
+        None => false,
+      };
+
       meshes.push(Mesh {
         vertices_offset,
-        vertices_size,
+        vertices_count,
         indices_offset,
-        indices_size,
+        indices_count,
         image_index: Some(image_index),
+        semi_transparent,
       })
     }
 
     let mut images = Vec::with_capacity(gltf.images().len());
+    let mut image_sizes = Vec::with_capacity(gltf.images().len());
     for image_ref in gltf.images() {
       let image_data = match image_ref.source() {
         ImageSource::View { .. } => {
@@ -612,7 +631,12 @@ impl LoadedModels {
           data
         }
       };
+      let image_size = ImageSize {
+        width: image_data.width,
+        height: image_data.height,
+      };
       images.push(image_data);
+      image_sizes.push(image_size);
     }
 
     Ok(Self {
@@ -623,6 +647,7 @@ impl LoadedModels {
         images,
       },
       meshes,
+      image_sizes,
       quad_mesh_index,
       cube_mesh_index,
     })
@@ -634,6 +659,7 @@ impl LoadedModels {
       AssetLocationData {
         gltf: self.gltf,
         meshes: self.meshes,
+        image_sizes: self.image_sizes,
         quad_mesh_index: self.quad_mesh_index,
         cube_mesh_index: self.cube_mesh_index,
       },

@@ -326,7 +326,7 @@ impl RenderPipelines {
       flags: vk::PipelineRasterizationStateCreateFlags::empty(),
       depth_clamp_enable: vk::FALSE,
       cull_mode: vk::CullModeFlags::BACK,
-      front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+      front_face: vk::FrontFace::CLOCKWISE,
       line_width: 1.0,
       polygon_mode: vk::PolygonMode::FILL,
       rasterizer_discard_enable: vk::FALSE,
