@@ -81,18 +81,24 @@ impl GraphicsCommandBufferPool {
     pipeline: &GraphicsPipeline,
     gpu_data: &GPUData,
     scene: &Scene,
+    descriptor_pool: &DescriptorPool,
   ) {
     let cb = self.main;
-    // device.cmd_set_depth_test_enable(cb, true);
-    // self.record_draw_indexed(device, pipeline.layout, scene.get_ferris_data());
-    // for data in scene.get_ferris_borders_data() {
-    //   self.record_draw_indexed(device, pipeline.layout, data);
-    // }
-    // self.record_draw_indexed(device, pipeline.layout, scene.get_niko_data());
-    // self.record_draw_indexed(device, pipeline.layout, scene.get_kakyoin());
+    let mut last_texture_i = usize::MAX;
 
-    // self.record_draw_indexed(device, pipeline.layout, scene.get_niko_light_data());
     for (pc, mesh) in scene.solid_draw_meshes.iter() {
+      let cur_tex_i = mesh.image_index.unwrap();
+      if cur_tex_i != last_texture_i {
+        device.cmd_bind_descriptor_sets(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          pipeline.layout,
+          0,
+          &[descriptor_pool.textures_sets[cur_tex_i]],
+          &[],
+        );
+        last_texture_i = cur_tex_i;
+      }
       device.cmd_push_constants(
         cb,
         pipeline.layout,
@@ -111,7 +117,19 @@ impl GraphicsCommandBufferPool {
     }
 
     // todo: this needs to be ordered by camera distance
-    for (pc, mesh) in scene.semi_transparent_draw_meshes.iter() {
+    for (pc, mesh) in scene.semi_transparent_draw_meshes.iter().rev() {
+      let cur_tex_i = mesh.image_index.unwrap();
+      if cur_tex_i != last_texture_i {
+        device.cmd_bind_descriptor_sets(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          pipeline.layout,
+          0,
+          &[descriptor_pool.textures_sets[cur_tex_i]],
+          &[],
+        );
+        last_texture_i = cur_tex_i;
+      }
       device.cmd_push_constants(
         cb,
         pipeline.layout,
@@ -182,27 +200,27 @@ impl GraphicsCommandBufferPool {
       0,
     );
 
-    // let matrix = (scene.last_update_projection_view * scene.kakyoin_text.model()).transpose();
-    // let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
-    // let text_pc = SlugPushConstants {
-    //   mvp_matrix: arrays,
-    //   viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
-    // };
-    // device.cmd_push_constants(
-    //   self.main,
-    //   pipeline.layout,
-    //   vk::ShaderStageFlags::VERTEX,
-    //   0,
-    //   utility::any_as_u8_slice(&text_pc),
-    // );
-    // device.cmd_draw_indexed(
-    //   self.main,
-    //   data.text.kakyoin_offsets.indices_len,
-    //   1,
-    //   data.text.kakyoin_offsets.indices_offset,
-    //   data.text.kakyoin_offsets.vertices_offset as i32,
-    //   0,
-    // );
+    let matrix = (scene.last_update_projection_view * scene.kakyoin_text.model()).transpose();
+    let arrays = std::mem::transmute::<cgmath::Matrix4<f32>, [[f32; 4]; 4]>(matrix);
+    let text_pc = SlugPushConstants {
+      mvp_matrix: arrays,
+      viewport_dimensions: [RENDER_SIZE.x, RENDER_SIZE.y],
+    };
+    device.cmd_push_constants(
+      self.main,
+      pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&text_pc),
+    );
+    device.cmd_draw_indexed(
+      self.main,
+      data.text.kakyoin_offsets.indices_len,
+      1,
+      data.text.kakyoin_offsets.indices_offset,
+      data.text.kakyoin_offsets.vertices_offset as i32,
+      0,
+    );
   }
 
   pub unsafe fn record_copy_staging_buffer_to_image(
@@ -508,30 +526,6 @@ impl GraphicsCommandBufferPool {
     marker.cmd_end_debug_utils_label(cb);
   }
 
-  // unsafe fn record_draw_indexed(
-  //   &self,
-  //   device: &ash::Device,
-  //   pipeline_layout: vk::PipelineLayout,
-  //   (push_constants, model_offsets): (GraphicsPushConstants, ModelOffset),
-  // ) {
-  //   let cb = self.main;
-  //   device.cmd_push_constants(
-  //     cb,
-  //     pipeline_layout,
-  //     vk::ShaderStageFlags::VERTEX,
-  //     0,
-  //     utility::any_as_u8_slice(&push_constants),
-  //   );
-  //   device.cmd_draw_indexed(
-  //     cb,
-  //     model_offsets.indices_len as u32,
-  //     1,
-  //     model_offsets.indices_offset as u32,
-  //     model_offsets.vertices_offset as i32,
-  //     0,
-  //   );
-  // }
-
   pub unsafe fn record_main(
     &self,
     frame_i: usize,
@@ -702,18 +696,10 @@ impl GraphicsCommandBufferPool {
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
         device.cmd_set_depth_test_enable(cb, true);
 
-        device.cmd_bind_descriptor_sets(
-          cb,
-          vk::PipelineBindPoint::GRAPHICS,
-          pipeline.layout,
-          0,
-          &[descriptor_pool.textures_sets[0]],
-          &[],
-        );
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
 
-        self.record_draw_scene_world_objects(device, pipeline, data, scene);
+        self.record_draw_scene_world_objects(device, pipeline, data, scene, descriptor_pool);
         #[cfg(feature = "vl")]
         marker.cmd_end_debug_utils_label(cb);
       }

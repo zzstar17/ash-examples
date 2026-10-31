@@ -453,7 +453,7 @@ fn append_indices(indices: &mut Vec<u16>, indices_slice: BufferSlice) {
 
 impl LoadedModels {
   pub fn load() -> Result<Self, ModelLoadError> {
-    let scene_path = Path::new("./assets/models/Niko_xinus22.gltf");
+    let scene_path = Path::new("./assets/models/Scene.gltf");
     let mut scene_dir = scene_path.to_path_buf();
     scene_dir.pop();
 
@@ -586,7 +586,7 @@ impl LoadedModels {
 
       // todo: add a better way of doing this
       let semi_transparent = match mesh_ref.name() {
-        Some(name) => name.ends_with("Glass"),
+        Some(name) => name.starts_with("T."),
         None => false,
       };
 

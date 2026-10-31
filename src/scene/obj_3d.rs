@@ -1,6 +1,8 @@
 use std::fmt::Debug;
 
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, Rotation, Vector2, Vector3, Vector4};
+use cgmath::{
+  InnerSpace, Matrix4, Point3, Quaternion, Rotation, SquareMatrix, Vector2, Vector3, Vector4,
+};
 
 use crate::scene::{quaternion_from_angle, UP};
 
@@ -118,6 +120,26 @@ impl Render3dObj {
           model_matrix: Matrix4::from(matrix),
         }
       }
+    }
+  }
+
+  pub fn from_model_matrix(m: Matrix4<f32>) -> Self {
+    let mut i = cgmath::Matrix3::new(
+      m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2],
+    );
+    let sx = i.x.magnitude();
+    let sy = i.y.magnitude();
+    let sz = i.determinant().signum() * i.z.magnitude();
+    let scale = Vector3::new(sx, sy, sz);
+    i.x *= 1.0 / sx;
+    i.y *= 1.0 / sy;
+    i.z *= 1.0 / sz;
+    let rotation = Quaternion::from(i);
+
+    Self {
+      rotation: Quaternion::new(rotation[3], rotation[0], rotation[1], rotation[2]),
+      scale: Vector3::from(scale),
+      model_matrix: m,
     }
   }
 

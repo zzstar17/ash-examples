@@ -17,9 +17,9 @@ impl Camera {
   const MAX_PITCH: f32 = HALF_PI - 0.1;
   const MIN_PITCH: f32 = -HALF_PI + 0.1;
 
-  pub fn new(speed: f32, yaw: f32, pitch: f32) -> Self {
+  pub fn new(position: Point3<f32>, speed: f32, yaw: f32, pitch: f32) -> Self {
     Self {
-      position: Point3::new(0.0, 0.0, 0.0),
+      position,
       yaw,
       pitch,
       speed,

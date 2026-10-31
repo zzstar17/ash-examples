@@ -1,6 +1,9 @@
-use std::{f32, time::Duration};
+use std::{
+  f32::{self, consts::PI},
+  time::Duration,
+};
 
-use cgmath::{Matrix4, Point3, Quaternion, Vector3};
+use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, SquareMatrix, Vector3};
 
 use crate::{
   asset_loader::{
@@ -22,8 +25,11 @@ use crate::{
 
 mod camera;
 mod ferris;
+mod niko;
 mod obj_3d;
 mod scene_node;
+
+use niko::Niko;
 
 pub use scene_node::SceneNode;
 
@@ -43,18 +49,18 @@ pub struct Scene {
   // pub ferris: Ferris,
   pub camera: RenderCamera,
 
-  pub child_nodes: Vec<SceneNode>,
-  pub niko: SceneNode,
-  pub niko_lightbulb: SceneNode,
+  child_nodes: Vec<SceneNode>,
+  niko: Niko,
   // pub ferris_obj: Render3dObj,
   // pub niko_obj: Render3dObj,
   // pub niko_light_obj: Render3dObj,
-  // pub kakyoin_obj: Render3dObj,
+  pub kakyoin: SceneNode,
+  pub floor: SceneNode,
   // pub ferris_borders: [Render3dObj; 4],
   pub crosshair: [Render3dObj; 3],
 
   pub niko_text: Render3dObj,
-  // pub kakyoin_text: Render3dObj,
+  pub kakyoin_text: Render3dObj,
   pub solid_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
   pub semi_transparent_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
 }
@@ -75,75 +81,72 @@ impl Scene {
 
     let aspect_ratio = RESOLUTION[0] as f32 / RESOLUTION[1] as f32;
     let camera = RenderCamera::new(
-      Camera::new(1.0, f32::consts::PI / -2.0, 0.0),
+      Camera::new(
+        Point3 {
+          x: 0.0,
+          y: -1.0,
+          z: 0.0,
+        },
+        1.0,
+        f32::consts::PI / 2.0,
+        0.0,
+      ),
       0.8,
       aspect_ratio,
     );
 
+    // gltf positions imported from blender are rotated with z being up
+    let world_transform = Render3dObj::from_full(
+      Point3 {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+      },
+      quaternion_from_angle(
+        PI / 2.0,
+        Vector3 {
+          x: 1.0,
+          y: 0.0,
+          z: 0.0,
+        },
+      ),
+      Vector3 {
+        x: 0.1,
+        y: 0.1,
+        z: 0.1,
+      },
+    )
+    .model();
+
     let mut child_nodes = Vec::new();
     let scene = asset_locations.gltf.scenes().next().unwrap();
     let scene_collection = scene.nodes().next().unwrap();
-    let niko_collection_node = scene_collection
-      .children()
-      .find(|node| {
-        if let Some(name) = node.name() {
-          return name == "Niko";
-        }
-        false
-      })
-      .expect("Scene does not contain Niko");
-    let niko_armature = niko_collection_node
-      .children()
-      .find(|node| node.name().unwrap() == "Niko_Armature")
-      .unwrap();
-    let niko_lightbulb = niko_collection_node
-      .children()
-      .find(|node| node.name().unwrap() == "Niko_Lightbulb")
-      .unwrap();
-    let niko = SceneNode::from_gltf(
+
+    let mut niko = Niko::new(&asset_locations, &scene_collection, &mut child_nodes);
+    niko.obj = Render3dObj::from_model_matrix(world_transform * niko.obj.model());
+
+    let mut kakyoin = SceneNode::from_gltf(
       &asset_locations,
-      niko_armature,
-      &Matrix4::from_scale(1.0),
+      scene_collection
+        .children()
+        .find(|node| node.name().unwrap() == "Kakyoin")
+        .unwrap(),
+      true,
       &mut child_nodes,
     );
-    let niko_lightbulb = SceneNode::from_gltf(
+    kakyoin.apply_transform_matrix(&world_transform);
+
+    let mut floor = SceneNode::from_gltf(
       &asset_locations,
-      niko_lightbulb,
-      &Matrix4::from_scale(1.0),
+      scene_collection
+        .children()
+        .find(|node| node.name().unwrap() == "Floor")
+        .unwrap(),
+      true,
       &mut child_nodes,
     );
-    // println!("niko: {:#?}", niko);
-    // println!("nodes:\n{:#?}", child_nodes);
+    floor.apply_transform_matrix(&world_transform);
 
-    let angle: f32 = 0.0;
-
-    let ferris_obj = Render3dObj::from_full(
-      Point3::new(ferris.pos[0], ferris.pos[1], -3.0),
-      Quaternion::new(1.0, 0.0, 0.0, 0.0),
-      Vector3::new(Ferris::WIDTH, Ferris::HEIGHT, 1.0),
-    );
-    let ferris_borders = [
-      Render3dObj::from_full(
-        Point3::new(0.5, 1.0 + 0.066, -2.95),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.59, 0.03, 1.0),
-      ),
-      Render3dObj::from_full(
-        Point3::new(0.5, 0.0 - 0.066, -2.95),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.59, 0.03, 1.0),
-      ),
-      Render3dObj::from_full(
-        Point3::new(0.0 - 0.066, 0.5, -2.95),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.03, 0.59, 1.0),
-      ),
-      Render3dObj::from_full(
-        Point3::new(1.0 + 0.066, 0.5, -2.95),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.03, 0.59, 1.0),
-      ),
-    ];
     let crosshair = [
       Render3dObj::from_full(
         Point3::new(0.5, 0.0, 0.0),
@@ -161,51 +164,48 @@ impl Scene {
         Vector3::new(0.05, 0.05, 0.5),
       ),
     ];
-    // let niko_obj = Render3dObj::from_full(
-    //   Point3::new(16.0, 0.0, -4.0),
-    //   quaternion_from_angle(angle, Vector3::new(0.2, 1.0, 0.0).normalize()),
-    //   Vector3::new(1.0, 1.0, 1.0),
-    // );
-    // let niko_light_obj = niko_obj;
-    let kakyoin_obj = Render3dObj::from_full(
-      Point3::new(-16.0, 0.0, -4.0),
-      quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0)),
-      Vector3::new(1.0, 1.0, 1.0),
-    );
 
     // let mut niko_text = niko.obj;
-    let mut niko_text = Render3dObj::new(Point3 {
-      x: 0.0,
-      y: 0.0,
-      z: 0.0,
-    });
-    niko_text.move_y(-1.0);
-    let mut kakyoin_text = kakyoin_obj;
-    kakyoin_text.move_y(-1.5);
+    let text_size = 0.2;
+    let mut niko_text = Render3dObj::from_full(
+      niko.obj.position(),
+      niko.obj.rotation,
+      Vector3 {
+        x: text_size,
+        y: text_size,
+        z: text_size,
+      },
+    );
+    niko_text.move_y(-1.3);
+    let kakyoin_obj = kakyoin.obj.unwrap_obj();
+    let mut kakyoin_text = Render3dObj::from_full(
+      kakyoin_obj.position(),
+      kakyoin_obj.rotation,
+      Vector3 {
+        x: text_size,
+        y: text_size,
+        z: text_size,
+      },
+    );
+    kakyoin_text.move_y(-1.9);
 
     Self {
       meshes: asset_locations.meshes,
       textures: asset_locations.image_sizes,
       quad_mesh_index: asset_locations.quad_mesh_index,
       cube_mesh_index: asset_locations.cube_mesh_index,
-      // textures,
       last_update_projection_view: Matrix4::from_scale(1.0),
 
-      // ferris,
       camera,
 
       child_nodes,
       niko,
-      niko_lightbulb,
-      // ferris_obj,
-      // ferris_borders,
-      // niko_obj,
-      // niko_light_obj,
-      // kakyoin_obj,
+      kakyoin,
+      floor,
       crosshair,
 
       niko_text,
-      // kakyoin_text,
+      kakyoin_text,
       solid_draw_meshes: Vec::new(),
       semi_transparent_draw_meshes: Vec::new(),
     }
@@ -239,25 +239,21 @@ impl Scene {
 
     // self.ferris.update(time_since_last_update);
 
-    // let angle = 0.04 * time_since_last_update.as_secs_f32();
-    // // rotate around y axis
-    // let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
+    let angle = 0.04 * time_since_last_update.as_secs_f32();
+    // rotate around y axis
+    let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
 
-    // self.kakyoin_obj.rotate(rotation);
-    // self.niko_obj.rotate(rotation);
-    // self
-    //   .niko_light_obj
-    //   .set_position(self.niko_obj.position() + self.niko_obj.get_front_vector() * 0.5);
-    // self.niko_light_obj.rotate(rotation);
+    self.kakyoin.obj.unwrap_obj_mut().rotate(rotation);
+    self.niko.obj.rotate(rotation);
 
     // make text gradually rotate towards the camera
     let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
     self
       .niko_text
       .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
-    // self
-    //   .kakyoin_text
-    //   .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
+    self
+      .kakyoin_text
+      .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
 
     // self
     //   .ferris_obj
@@ -271,9 +267,15 @@ impl Scene {
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
-    self.niko_lightbulb.add_draw_meshes(
+    self.kakyoin.add_draw_meshes(
       &self.child_nodes,
-      &self.last_update_projection_view,
+      self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
+    self.floor.add_draw_meshes(
+      &self.child_nodes,
+      self.last_update_projection_view,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
@@ -330,36 +332,6 @@ impl Scene {
   //     (pc_y, self.models.cube),
   //     (pc_z, self.models.cube),
   //   ]
-  // }
-
-  // pub fn get_niko_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-  //   let push_constants = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.niko_obj.model(),
-  //     tex_offset: self.textures.niko.offset,
-  //     tex_size: self.textures.niko.size,
-  //   };
-
-  //   (push_constants, self.models.niko)
-  // }
-
-  // pub fn get_niko_light_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-  //   let push_constants = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.niko_light_obj.model(),
-  //     tex_offset: self.textures.niko.offset,
-  //     tex_size: self.textures.niko.size,
-  //   };
-
-  //   (push_constants, self.models.niko_light)
-  // }
-
-  // pub fn get_kakyoin(&self) -> (GraphicsPushConstants, ModelOffset) {
-  //   let push_constants = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.kakyoin_obj.model(),
-  //     tex_offset: self.textures.kakyoin.offset,
-  //     tex_size: self.textures.kakyoin.size,
-  //   };
-
-  //   (push_constants, self.models.kakyoin)
   // }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {
