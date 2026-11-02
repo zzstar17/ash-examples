@@ -1,12 +1,18 @@
 mod allocations;
+mod skybox;
 pub mod sprite_buffers;
 pub mod text_buffers;
 pub mod text_manager;
 
+pub use skybox::Skybox;
+
 use std::{ops::BitOr, ptr};
 
 use crate::{
-  asset_loader::{model_loader::ModelGpuData, texture_loader::LoadedImageData},
+  asset_loader::{
+    texture_loader::{LoadedImageData, LoadedSkybox},
+    LoadedData,
+  },
   render::{
     command_pools::graphics::GraphicsCommandBufferPool,
     create_objs::{create_color_image_view, create_image, create_image_sampled},
@@ -86,10 +92,22 @@ pub struct TextUI {
   pub size: vk::Extent2D,
 }
 
+struct Buffers {
+  pub sprite_buffers: SpriteBuffers,
+  pub skybox: Skybox,
+  pub text_manager: TextManager,
+  pub text_ui_images: TextUIImages,
+
+  pub text_line_size: f32,
+  pub text_extent: vk::Extent2D,
+  pub text_staging_size_required: u64,
+}
+
 pub struct GPUData {
   pub staging: MappedHostBuffer<u8>,
 
   pub sprite_buffers: SpriteBuffers,
+  pub skybox: Skybox,
 
   pub text: TextManager,
   pub text_curve_view: vk::ImageView,
@@ -212,32 +230,39 @@ impl TextUIImages {
   }
 }
 
-impl GPUData {
+impl Buffers {
   pub fn new(
     device: &Device,
-    physical_device: &PhysicalDevice,
     texture_format: vk::Format,
     render_format: vk::Format,
-    models: &mut ModelGpuData,
+    loaded_data: &mut LoadedData,
     sample_count: usize,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<Self, GPUDataAllocationError> {
-    let mut sprite_buffers = SpriteBuffers::new(
+    let sprite_buffers = SpriteBuffers::new(
       device,
-      models,
+      &loaded_data.model,
       texture_format,
-      // texture_data.reader.header().level_count.max(1),
       #[cfg(feature = "vl")]
       marker,
     )?;
 
-    let (mut text_manager, (line_size, text_window_rect), staging_size_required) =
+    let skybox = Skybox::new(
+      device,
+      &loaded_data.skybox,
+      texture_format,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_| unsafe { destroy!(device => &sprite_buffers) })?;
+
+    let (text_manager, (text_line_size, text_window_rect), text_staging_size_required) =
       TextManager::new(
         device,
         #[cfg(feature = "vl")]
         marker,
       )
-      .on_err(|_| unsafe { destroy!(device => &sprite_buffers) })?;
+      .on_err(|_| unsafe { destroy!(device => &skybox, &sprite_buffers) })?;
     let text_extent = text_window_rect.into_vk_extent();
 
     let text_ui_images = TextUIImages::new(
@@ -248,11 +273,52 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
     )
-    .on_err(|_| unsafe { destroy!(device => &text_manager, &sprite_buffers) })?;
+    .on_err(|_| unsafe { destroy!(device => &text_manager, &skybox, &sprite_buffers) })?;
 
-    let textures_size: u64 = sprite_buffers.textures.iter().map(|t| t.total_size).sum();
-    let staging_size =
-      (textures_size + models.vertices_size() + models.indices_size()).max(staging_size_required);
+    Ok(Self {
+      sprite_buffers,
+      skybox,
+      text_manager: text_manager,
+      text_ui_images,
+
+      text_line_size,
+      text_extent,
+      text_staging_size_required,
+    })
+  }
+}
+
+impl GPUData {
+  pub fn new(
+    device: &Device,
+    physical_device: &PhysicalDevice,
+    texture_format: vk::Format,
+    render_format: vk::Format,
+    loaded_data: &mut LoadedData,
+    sample_count: usize,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<Self, GPUDataAllocationError> {
+    let mut buffers = Buffers::new(
+      device,
+      texture_format,
+      render_format,
+      loaded_data,
+      sample_count,
+      #[cfg(feature = "vl")]
+      marker,
+    )?;
+
+    let textures_size: u64 = buffers
+      .sprite_buffers
+      .textures
+      .iter()
+      .map(|t| t.total_size)
+      .sum();
+    let staging_size = (textures_size
+      + loaded_data.model.vertices_size()
+      + loaded_data.model.indices_size()
+      + buffers.skybox.total_size as u64)
+      .max(buffers.text_staging_size_required);
 
     let staging_alloc = allocations::allocate_staging_memory(
       device,
@@ -261,78 +327,65 @@ impl GPUData {
       #[cfg(feature = "vl")]
       marker,
     )
-    .on_err(|_| unsafe { destroy!(device => &text_ui_images, &text_manager, &sprite_buffers) })?;
-    let device_alloc = allocations::allocate_device(
-      device,
-      physical_device,
-      &sprite_buffers,
-      &text_manager.buffers,
-      text_ui_images,
-    )
-    .on_err(|_| unsafe {
-      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc)
-    })?;
+    .on_err(|_| unsafe { destroy!(device => &buffers) })?;
+    let device_alloc = allocations::allocate_device(device, physical_device, &buffers)
+      .on_err(|_| unsafe { destroy!(device => &buffers, &staging_alloc) })?;
     let device_alloc_ref: &[DetailedMemory] = &device_alloc;
     let host_device_alloc =
-      allocations::allocate_host_device(device, physical_device, &mut text_manager.buffers).on_err(|_| unsafe {
-      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref)
-    })?;
+      allocations::allocate_host_device(device, physical_device, &mut buffers.text_manager.buffers)
+        .on_err(|_| unsafe { destroy!(device => &buffers, &staging_alloc, device_alloc_ref) })?;
     let host_device_alloc_ref: &[DetailedMemory] = &host_device_alloc;
 
-    let mut texture_err = None;
-    for texture in sprite_buffers.textures.iter_mut() {
-      let view_res = create_color_image_view(
+    buffers
+      .sprite_buffers
+      .create_texture_views(
         device,
-        texture.image,
-        texture_format,
-        texture.mip_levels,
         #[cfg(feature = "vl")]
         marker,
+      )
+      .on_err(|_| unsafe {
+        destroy!(device => &buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref);
+      })?;
+    buffers
+      .skybox
+      .create_view(
+        device,
         #[cfg(feature = "vl")]
-        c"Texture view",
-      );
-      match view_res {
-        Err(err) => {
-          texture_err = Some(err);
-        }
-        Ok(view) => {
-          texture.view = view;
-        }
-      }
-    }
-    if let Some(err) = texture_err {
-      unsafe {
-        destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref);
-      }
-      return Err(err.into());
-    }
+        marker,
+      )
+      .on_err(|_| unsafe {
+        destroy!(device => &buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref);
+      })?;
 
     let views: ImageViews = ImageViews::new(
       device,
       render_format,
-      &text_manager.buffers,
-      text_ui_images,
-      #[cfg(feature = "vl")] marker,
-    ).on_err(|_| unsafe {
-      destroy!(device => &text_ui_images, &text_manager, &sprite_buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref)
+      &buffers.text_manager.buffers,
+      buffers.text_ui_images,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_| unsafe {
+      destroy!(device => &buffers, &staging_alloc, device_alloc_ref, host_device_alloc_ref)
     })?;
 
     let text_ui = TextUI {
-      render: text_ui_images.render,
+      render: buffers.text_ui_images.render,
       render_view: views.text_ui_render,
-      resolved: text_ui_images.resolved,
+      resolved: buffers.text_ui_images.resolved,
       resolved_view: views.text_ui_resolved,
 
-      line_size,
-      size: text_extent,
+      line_size: buffers.text_line_size,
+      size: buffers.text_extent,
     };
 
     Ok(Self {
       staging: staging_alloc,
 
-      sprite_buffers,
+      sprite_buffers: buffers.sprite_buffers,
+      skybox: buffers.skybox,
 
-      text: text_manager,
+      text: buffers.text_manager,
       text_band_view: views.text_band,
       text_curve_view: views.text_curve,
       text_ui,
@@ -345,11 +398,12 @@ impl GPUData {
   pub fn write_and_record_initial_staging_data(
     &self,
     device: &Device,
-    models: &mut ModelGpuData,
+    loaded_data: &mut LoadedData,
     pool: &GraphicsCommandBufferPool,
   ) -> Result<(), HostMemorySyncError> {
-    let vertices_size = models.vertices_size();
-    let indices_size = models.indices_size();
+    let vertices_size = loaded_data.model.vertices_size();
+    let indices_size = loaded_data.model.indices_size();
+    let skybox_size = loaded_data.skybox.data().len() as u64;
     let textures_size: u64 = self
       .sprite_buffers
       .textures
@@ -358,9 +412,10 @@ impl GPUData {
       .sum();
 
     let vertices_offset = 0;
-    let indices_offset = vertices_size;
-    let textures_offset = indices_size + indices_offset;
-    let initial_copy_size = textures_offset + textures_size;
+    let indices_offset = vertices_size + vertices_offset;
+    let skybox_offset = indices_size + indices_offset;
+    let textures_offset = skybox_size + skybox_offset;
+    let initial_copy_size = textures_size + textures_offset;
 
     assert!(initial_copy_size <= self.staging.buffer_size);
 
@@ -373,19 +428,36 @@ impl GPUData {
     };
     unsafe {
       ptr::copy_nonoverlapping(
-        models.vertices.as_ptr() as *const u8,
+        loaded_data.model.vertices.as_ptr() as *const u8,
         staging_ptr.add(vertices_offset as usize).as_ptr(),
         vertices_size as usize,
       );
       ptr::copy_nonoverlapping(
-        models.indices.as_ptr() as *const u8,
+        loaded_data.model.indices.as_ptr() as *const u8,
         staging_ptr.add(indices_offset as usize).as_ptr(),
         indices_size as usize,
       );
 
       let mut level_copy_buffer = Vec::new();
+
+      // convert data if format is not RGBA
+      let converted_data = if LoadedSkybox::TEXTURE_FORMAT != self.skybox.format {
+        level_copy_buffer.clear();
+        level_copy_buffer.extend_from_slice(loaded_data.skybox.data());
+        format_conversions::convert_rgba_data_to_format(&mut level_copy_buffer, self.skybox.format);
+        &level_copy_buffer
+      } else {
+        loaded_data.skybox.data()
+      };
+      ptr::copy_nonoverlapping(
+        converted_data.as_ptr(),
+        staging_ptr.add(skybox_offset as usize).as_ptr(),
+        converted_data.len(),
+      );
+
       let mut cur_texture_offset = textures_offset;
-      for (image, texture) in models
+      for (image, texture) in loaded_data
+        .model
         .images
         .iter()
         .zip_eq(self.sprite_buffers.textures.iter())
@@ -450,8 +522,24 @@ impl GPUData {
         );
       }
 
+      pool.record_copy_staging_buffer_to_image(
+        device,
+        self.staging.buffer,
+        skybox_offset,
+        self.skybox.image,
+        self.skybox.extent,
+        6,
+        vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+        // fence flushes all memory
+        vk::PipelineStageFlags2::NONE,
+        vk::AccessFlags2::NONE,
+        vk::PipelineStageFlags2::NONE,
+        vk::AccessFlags2::NONE,
+      );
+
       let mut cur_texture_offset = textures_offset;
-      for (image, texture) in models
+      for (image, texture) in loaded_data
+        .model
         .images
         .iter()
         .zip_eq(self.sprite_buffers.textures.iter())
@@ -506,6 +594,15 @@ impl DeviceManuallyDestroyed for TextUIImages {
   }
 }
 
+impl DeviceManuallyDestroyed for Buffers {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    self.sprite_buffers.destroy_self(device);
+    self.skybox.destroy_self(device);
+    self.text_manager.destroy_self(device);
+    self.text_ui_images.destroy_self(device);
+  }
+}
+
 impl DeviceManuallyDestroyed for GPUData {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.text_curve_view.destroy_self(device);
@@ -513,6 +610,7 @@ impl DeviceManuallyDestroyed for GPUData {
 
     self.text_ui.destroy_self(device);
     self.sprite_buffers.destroy_self(device);
+    self.skybox.destroy_self(device);
     self.text.destroy_self(device);
 
     self.staging.buffer.destroy_self(device);

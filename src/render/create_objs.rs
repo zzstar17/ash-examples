@@ -79,8 +79,6 @@ pub fn create_image(
 ) -> Result<vk::Image, OutOfMemoryError> {
   // 1 color layer 2d image
   let create_info = vk::ImageCreateInfo {
-    s_type: vk::StructureType::IMAGE_CREATE_INFO,
-    p_next: ptr::null(),
     flags: vk::ImageCreateFlags::empty(),
     image_type: vk::ImageType::TYPE_2D,
     format,
@@ -98,7 +96,46 @@ pub fn create_image(
     queue_family_index_count: 0,
     p_queue_family_indices: ptr::null(), // ignored if sharing mode is exclusive
     initial_layout: vk::ImageLayout::UNDEFINED,
-    _marker: PhantomData,
+    ..Default::default()
+  };
+  unsafe {
+    let image = device.create_image(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE, image.as_raw(), name)?;
+    Ok(image)
+  }
+}
+
+pub fn create_image_cubemap(
+  device: &ash::Device,
+  format: vk::Format,
+  width: u32,
+  height: u32,
+  mip_levels: u32,
+  usage: vk::ImageUsageFlags,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
+) -> Result<vk::Image, OutOfMemoryError> {
+  // 1 color layer 2d image
+  let create_info = vk::ImageCreateInfo {
+    flags: vk::ImageCreateFlags::CUBE_COMPATIBLE,
+    image_type: vk::ImageType::TYPE_2D,
+    format,
+    extent: vk::Extent3D {
+      width,
+      height,
+      depth: 1,
+    },
+    mip_levels,
+    array_layers: 6,
+    samples: vk::SampleCountFlags::TYPE_1,
+    tiling: vk::ImageTiling::OPTIMAL,
+    usage,
+    sharing_mode: vk::SharingMode::EXCLUSIVE,
+    queue_family_index_count: 0,
+    p_queue_family_indices: ptr::null(), // ignored if sharing mode is exclusive
+    initial_layout: vk::ImageLayout::UNDEFINED,
+    ..Default::default()
   };
   unsafe {
     let image = device.create_image(&create_info, None)?;
@@ -174,6 +211,43 @@ pub fn create_color_image_view(
       level_count: mip_levels,
       base_array_layer: 0,
       layer_count: 1,
+    },
+    ..Default::default()
+  };
+
+  unsafe {
+    let view = device.create_image_view(&create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::IMAGE_VIEW, view.as_raw(), name)?;
+    Ok(view)
+  }
+}
+
+pub fn create_color_cubemap_view(
+  device: &ash::Device,
+  image: vk::Image,
+  format: vk::Format,
+  mip_levels: u32,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  #[cfg(feature = "vl")] name: &CStr,
+) -> Result<vk::ImageView, OutOfMemoryError> {
+  let create_info = vk::ImageViewCreateInfo {
+    flags: vk::ImageViewCreateFlags::empty(),
+    image,
+    view_type: vk::ImageViewType::CUBE,
+    format,
+    components: vk::ComponentMapping {
+      r: vk::ComponentSwizzle::IDENTITY,
+      g: vk::ComponentSwizzle::IDENTITY,
+      b: vk::ComponentSwizzle::IDENTITY,
+      a: vk::ComponentSwizzle::IDENTITY,
+    },
+    subresource_range: vk::ImageSubresourceRange {
+      aspect_mask: vk::ImageAspectFlags::COLOR,
+      base_mip_level: 0,
+      level_count: mip_levels,
+      base_array_layer: 0,
+      layer_count: 6,
     },
     ..Default::default()
   };

@@ -12,7 +12,7 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{model_loader::ModelGpuData, ShaderLoader},
+  asset_loader::{model_loader::ModelGpuData, LoadedData, ShaderLoader},
   last_frames_durations::FPSDurations,
   render::{
     command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
@@ -70,7 +70,7 @@ impl Renderer {
     #[cfg(feature = "vl")] debug_utils: vkinitialization::DebugUtils,
 
     event_loop: &ActiveEventLoop,
-    model_gpu_data: &mut ModelGpuData,
+    loaded_data: &mut LoadedData,
   ) -> Result<(Self, vk::Format), InitializationError> {
     // having an error during window creation triggers pre_window drop
     let window_attributes = Window::default_attributes()
@@ -205,7 +205,7 @@ impl Renderer {
       &physical_device,
       texture_format,
       render_format,
-      model_gpu_data,
+      loaded_data,
       sample_count,
       #[cfg(feature = "vl")]
       &debug_utils_marker,
@@ -333,13 +333,13 @@ impl Renderer {
   pub unsafe fn full_record_upload_initial_staging(
     &self,
     frame_i: usize,
-    models: &mut ModelGpuData,
+    loaded_data: &mut LoadedData,
   ) -> Result<(), HostMemorySyncError> {
     let pool = &self.graphics_pools[frame_i];
     pool.begin_recording(&self.device)?;
     self
       .data
-      .write_and_record_initial_staging_data(&self.device, models, pool)?;
+      .write_and_record_initial_staging_data(&self.device, loaded_data, pool)?;
     pool.end_recording(&self.device)?;
     Ok(())
   }

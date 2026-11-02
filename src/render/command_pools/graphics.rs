@@ -230,6 +230,7 @@ impl GraphicsCommandBufferPool {
     staging_offset: u64,
     dst: vk::Image,
     image_extent: vk::Extent2D,
+    layer_count: u32,
     final_layout: vk::ImageLayout,
     img_src_stage_mask: vk::PipelineStageFlags2,
     img_src_access_mask: vk::AccessFlags2,
@@ -246,7 +247,13 @@ impl GraphicsCommandBufferPool {
       src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
       dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
       image: dst,
-      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      subresource_range: vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count,
+      },
       ..Default::default()
     };
     device.cmd_pipeline_barrier2(
@@ -258,7 +265,12 @@ impl GraphicsCommandBufferPool {
       buffer_offset: staging_offset,
       buffer_row_length: 0,   // 0 because buffer is tightly packed
       buffer_image_height: 0, // 0 because buffer is tightly packed
-      image_subresource: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS,
+      image_subresource: vk::ImageSubresourceLayers {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        mip_level: 0,
+        base_array_layer: 0,
+        layer_count,
+      },
       image_offset: vk::Offset3D { x: 0, y: 0, z: 0 },
       image_extent: vk::Extent3D {
         width: image_extent.width,
@@ -284,7 +296,13 @@ impl GraphicsCommandBufferPool {
       src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
       dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
       image: dst,
-      subresource_range: ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
+      subresource_range: vk::ImageSubresourceRange {
+        aspect_mask: vk::ImageAspectFlags::COLOR,
+        base_mip_level: 0,
+        level_count: 1,
+        base_array_layer: 0,
+        layer_count,
+      },
       ..Default::default()
     };
     device.cmd_pipeline_barrier2(

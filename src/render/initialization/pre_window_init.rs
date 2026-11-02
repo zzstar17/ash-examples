@@ -4,10 +4,7 @@ use vkobjects::ManuallyDestroyed;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 
 use crate::{
-  asset_loader::{
-    model_loader::{ModelGpuData, ModelLoadError},
-    texture_loader::ImageLoadError,
-  },
+  asset_loader::{model_loader::ModelLoadError, texture_loader::ImageLoadError, LoadedData},
   render::{errors::InitializationError, SyncRenderer},
 };
 use std::mem;
@@ -23,7 +20,7 @@ pub struct RenderInit {
   #[cfg(feature = "vl")]
   pub debug_utils: ManuallyDrop<vkinitialization::DebugUtils>,
 
-  pub model_gpu_data: ManuallyDrop<ModelGpuData>,
+  pub loaded_data: ManuallyDrop<LoadedData>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +47,7 @@ impl From<InstanceCreationError> for RenderInitError {
 }
 
 impl RenderInit {
-  pub fn new(event_loop: &EventLoop<()>, gpu_data: ModelGpuData) -> Result<Self, RenderInitError> {
+  pub fn new(event_loop: &EventLoop<()>, loaded_data: LoadedData) -> Result<Self, RenderInitError> {
     let entry: ash::Entry = unsafe { vkinitialization::get_entry() };
 
     let display_handle = event_loop
@@ -75,7 +72,7 @@ impl RenderInit {
       #[cfg(feature = "vl")]
       debug_utils: ManuallyDrop::new(debug_utils),
 
-      model_gpu_data: ManuallyDrop::new(gpu_data),
+      loaded_data: ManuallyDrop::new(loaded_data),
     })
   }
 
@@ -87,7 +84,7 @@ impl RenderInit {
     let instance = unsafe { ManuallyDrop::take(&mut self.instance) };
     #[cfg(feature = "vl")]
     let debug_utils = unsafe { ManuallyDrop::take(&mut self.debug_utils) };
-    let mut models = unsafe { ManuallyDrop::take(&mut self.model_gpu_data) };
+    let mut data = unsafe { ManuallyDrop::take(&mut self.loaded_data) };
     mem::forget(self);
 
     SyncRenderer::new(
@@ -96,7 +93,7 @@ impl RenderInit {
       #[cfg(feature = "vl")]
       debug_utils,
       event_loop,
-      &mut models,
+      &mut data,
     )
   }
 }
@@ -112,7 +109,7 @@ impl Drop for RenderInit {
       ManuallyDrop::drop(&mut self.instance);
       #[cfg(feature = "vl")]
       ManuallyDrop::drop(&mut self.debug_utils);
-      ManuallyDrop::drop(&mut self.model_gpu_data);
+      ManuallyDrop::drop(&mut self.loaded_data);
     }
   }
 }

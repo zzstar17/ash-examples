@@ -13,6 +13,7 @@ use render::{
 };
 use std::{
   ffi::CStr,
+  path::Path,
   time::{Duration, Instant},
 };
 #[cfg(feature = "force_x11")]
@@ -27,7 +28,9 @@ use winit::{
 };
 
 use crate::{
-  asset_loader::{model_loader::AssetLocationData, LoadedModels},
+  asset_loader::{
+    model_loader::AssetLocationData, texture_loader::LoadedSkybox, LoadedData, LoadedModels,
+  },
   keys::Keys,
   last_frames_durations::LastFramesDurations,
   scene::Scene,
@@ -56,6 +59,9 @@ const TEXT_FONT: [&str; 7] = [
 ];
 
 const SCREENSHOT_SAVE_FILE: &str = "last_screenshot.png";
+
+const SCENE_PATH: &str = "./assets/models/Scene.gltf";
+const SKYBOX_PATH: &str = "./assets/skybox.ktx2";
 
 // const BACKGROUND_COLOR: vk::ClearColorValue = vk::ClearColorValue {
 //   float32: [0.1, 0.1, 0.1, 1.0],
@@ -236,9 +242,17 @@ impl StartedStatus {
 
 impl RenderStatus {
   pub fn new(event_loop: &EventLoop<()>) -> Result<Self, RenderInitError> {
-    let (model_data, asset_locations) = LoadedModels::load()?.into_separate();
+    let (model_data, asset_locations) =
+      LoadedModels::load_scene(Path::new(SCENE_PATH))?.into_separate();
+    let skybox = LoadedSkybox::read_cubemap_bytes_as_rgba8(SKYBOX_PATH)?;
 
-    let render = RenderInit::new(event_loop, model_data)?;
+    let render = RenderInit::new(
+      event_loop,
+      LoadedData {
+        model: model_data,
+        skybox,
+      },
+    )?;
     Ok(RenderStatus::Initialized((render, asset_locations)))
   }
 

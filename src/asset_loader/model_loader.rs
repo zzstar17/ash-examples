@@ -420,12 +420,7 @@ fn append_vertices(
     .zip_eq(texture_coors_iter)
   {
     vertices.push(TexturedVertex {
-      pos: [
-        position[0],
-        // vertex.position[1],
-        position[1],
-        position[2],
-      ],
+      pos: [position[0], position[1], position[2]],
       normal: [normal[0], normal[1], normal[2]],
       tex_coords: [texture[0], texture[1]],
       ..Default::default()
@@ -452,8 +447,7 @@ fn append_indices(indices: &mut Vec<u16>, indices_slice: BufferSlice) {
 }
 
 impl LoadedModels {
-  pub fn load() -> Result<Self, ModelLoadError> {
-    let scene_path = Path::new("./assets/models/Scene.gltf");
+  pub fn load_scene(scene_path: &Path) -> Result<Self, ModelLoadError> {
     let mut scene_dir = scene_path.to_path_buf();
     scene_dir.pop();
 

@@ -2,12 +2,12 @@ use std::ops::BitOr;
 
 use ash::vk::{self, Handle};
 use vkinitialization::device::Device;
-use vkobjects::{destroy, utility::OnErr, DeviceManuallyDestroyed};
+use vkobjects::{destroy, errors::OutOfMemoryError, utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::{
   asset_loader::model_loader::ModelGpuData,
   render::{
-    create_objs::{create_buffer, create_image},
+    create_objs::{create_buffer, create_color_image_view, create_image},
     gpu_data::{GPUDataAllocationError, TEXTURE_USAGES},
   },
 };
@@ -93,6 +93,27 @@ impl SpriteBuffers {
       indices,
     })
   }
+
+  pub fn create_texture_views(
+    &mut self,
+    device: &Device,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+  ) -> Result<(), OutOfMemoryError> {
+    for texture in self.textures.iter_mut() {
+      let view = create_color_image_view(
+        device,
+        texture.image,
+        texture.format,
+        texture.mip_levels,
+        #[cfg(feature = "vl")]
+        marker,
+        #[cfg(feature = "vl")]
+        c"Texture view",
+      )?;
+      texture.view = view;
+    }
+    Ok(())
+  }
 }
 
 impl DeviceManuallyDestroyed for SpriteBuffers {
@@ -105,9 +126,9 @@ impl DeviceManuallyDestroyed for SpriteBuffers {
 
 impl DeviceManuallyDestroyed for Texture {
   unsafe fn destroy_self(&self, device: &ash::Device) {
-    self.view.destroy_self(device);
-    if !self.image.is_null() {
-      self.image.destroy_self(device);
+    if !self.view.is_null() {
+      self.view.destroy_self(device);
     }
+    self.image.destroy_self(device);
   }
 }

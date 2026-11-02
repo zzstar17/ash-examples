@@ -7,9 +7,7 @@ use vkobjects::{utility::OnErr, DeviceManuallyDestroyed};
 
 use crate::render::{
   create_objs::create_buffer,
-  gpu_data::{
-    sprite_buffers::SpriteBuffers, text_buffers::TextBuffers, GPUDataAllocationError, TextUIImages,
-  },
+  gpu_data::{text_buffers::TextBuffers, GPUDataAllocationError},
 };
 
 pub fn allocate_staging_memory(
@@ -52,21 +50,20 @@ pub fn allocate_staging_memory(
 pub fn allocate_device(
   device: &Device,
   physical_device: &PhysicalDevice,
-  sprite_buffers: &SpriteBuffers,
-  text_buffers: &TextBuffers,
-  text_ui_images: TextUIImages,
+  buffers: &super::Buffers,
 ) -> Result<Vec<DetailedMemory>, GPUDataAllocationError> {
   let mut objs: Vec<&dyn MemoryBound> = Vec::new();
   #[cfg(feature = "log_alloc")]
   let mut obj_labels = Vec::new();
 
   objs.extend_from_slice(&[
-    &sprite_buffers.vertices,
-    &sprite_buffers.indices,
-    &text_buffers.curve_texture,
-    &text_buffers.band_texture,
-    &text_buffers.device.vertices,
-    &text_buffers.device.indices,
+    &buffers.sprite_buffers.vertices,
+    &buffers.sprite_buffers.indices,
+    &buffers.text_manager.buffers.curve_texture,
+    &buffers.text_manager.buffers.band_texture,
+    &buffers.text_manager.buffers.device.vertices,
+    &buffers.text_manager.buffers.device.indices,
+    &buffers.skybox.image,
   ]);
   #[cfg(feature = "log_alloc")]
   obj_labels.extend_from_slice(&[
@@ -76,22 +73,23 @@ pub fn allocate_device(
     "Text band texture",
     "Text device vertices",
     "Text device indices",
+    "Skybox",
   ]);
 
-  if let Some(text_ui_render) = text_ui_images.render.as_ref() {
+  if let Some(text_ui_render) = buffers.text_ui_images.render.as_ref() {
     objs.push(text_ui_render);
-    objs.push(&text_ui_images.resolved);
+    objs.push(&buffers.text_ui_images.resolved);
     #[cfg(feature = "log_alloc")]
     obj_labels.push("Text UI (multisampled)");
     #[cfg(feature = "log_alloc")]
     obj_labels.push("Text UI (resolved)");
   } else {
-    objs.push(&text_ui_images.resolved);
+    objs.push(&buffers.text_ui_images.resolved);
     #[cfg(feature = "log_alloc")]
     obj_labels.push("Text UI (resolved single sample)");
   }
 
-  for (_i, texture) in sprite_buffers.textures.iter().enumerate() {
+  for (_i, texture) in buffers.sprite_buffers.textures.iter().enumerate() {
     objs.push(&texture.image);
     #[cfg(feature = "log_alloc")]
     obj_labels.push("Texture");
