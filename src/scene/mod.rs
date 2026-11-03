@@ -3,7 +3,7 @@ use std::{
   time::Duration,
 };
 
-use cgmath::{InnerSpace, Matrix4, Point3, Quaternion, SquareMatrix, Vector3};
+use cgmath::{Matrix4, Point3, Quaternion, Vector3};
 
 use crate::{
   asset_loader::{
@@ -57,7 +57,7 @@ pub struct Scene {
   pub kakyoin: SceneNode,
   pub floor: SceneNode,
   // pub ferris_borders: [Render3dObj; 4],
-  pub crosshair: [Render3dObj; 3],
+  pub crosshair: [(Render3dObj, [f32; 4]); 3],
   test_cube: SceneNode,
 
   pub niko_text: Render3dObj,
@@ -165,21 +165,30 @@ impl Scene {
       mesh,
     );
 
-    let crosshair = [
-      Render3dObj::from_full(
-        Point3::new(0.5, 0.0, 0.0),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.5, 0.05, 0.05),
+    let crosshair: [(Render3dObj, [f32; 4]); 3] = [
+      (
+        Render3dObj::from_full(
+          Point3::new(0.5, 0.0, 0.0),
+          Quaternion::new(1.0, 0.0, 0.0, 0.0),
+          Vector3::new(0.5, 0.05, 0.05),
+        ),
+        [1.0, 0.0, 0.0, 1.0],
       ),
-      Render3dObj::from_full(
-        Point3::new(0.0, 0.5, 0.0),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.05, 0.5, 0.05),
+      (
+        Render3dObj::from_full(
+          Point3::new(0.0, 0.5, 0.0),
+          Quaternion::new(1.0, 0.0, 0.0, 0.0),
+          Vector3::new(0.05, 0.5, 0.05),
+        ),
+        [0.0, 1.0, 0.0, 1.0],
       ),
-      Render3dObj::from_full(
-        Point3::new(0.0, 0.0, 0.5),
-        Quaternion::new(1.0, 0.0, 0.0, 0.0),
-        Vector3::new(0.05, 0.05, 0.5),
+      (
+        Render3dObj::from_full(
+          Point3::new(0.0, 0.0, 0.5),
+          Quaternion::new(1.0, 0.0, 0.0, 0.0),
+          Vector3::new(0.05, 0.05, 0.5),
+        ),
+        [0.0, 0.0, 1.0, 1.0],
       ),
     ];
 
@@ -252,9 +261,15 @@ impl Scene {
     self.last_update_projection_view = self.camera.projection_view();
 
     let crosshair_position = self.camera.position() + self.camera.front() * 50.0;
-    self.crosshair[0].set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
-    self.crosshair[1].set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
-    self.crosshair[2].set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
+    self.crosshair[0]
+      .0
+      .set_position(crosshair_position + Vector3::new(0.5, 0.0, 0.0));
+    self.crosshair[1]
+      .0
+      .set_position(crosshair_position + Vector3::new(0.0, 0.5, 0.0));
+    self.crosshair[2]
+      .0
+      .set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
 
     // self.ferris.update(time_since_last_update);
 
@@ -280,18 +295,18 @@ impl Scene {
 
     self.solid_draw_meshes.clear();
     self.semi_transparent_draw_meshes.clear();
-    self.niko.add_draw_meshes(
-      &self.child_nodes,
-      &self.last_update_projection_view,
-      &mut self.solid_draw_meshes,
-      &mut self.semi_transparent_draw_meshes,
-    );
-    self.kakyoin.add_draw_meshes(
-      &self.child_nodes,
-      self.last_update_projection_view,
-      &mut self.solid_draw_meshes,
-      &mut self.semi_transparent_draw_meshes,
-    );
+    // self.niko.add_draw_meshes(
+    //   &self.child_nodes,
+    //   &self.last_update_projection_view,
+    //   &mut self.solid_draw_meshes,
+    //   &mut self.semi_transparent_draw_meshes,
+    // );
+    // self.kakyoin.add_draw_meshes(
+    //   &self.child_nodes,
+    //   self.last_update_projection_view,
+    //   &mut self.solid_draw_meshes,
+    //   &mut self.semi_transparent_draw_meshes,
+    // );
     self.test_cube.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,

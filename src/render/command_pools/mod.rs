@@ -24,14 +24,6 @@ const ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE: vk::ImageSubresourceRange =
     layer_count: 1,
   };
 
-const ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS: vk::ImageSubresourceLayers =
-  vk::ImageSubresourceLayers {
-    aspect_mask: vk::ImageAspectFlags::COLOR,
-    mip_level: 0,
-    base_array_layer: 0,
-    layer_count: 1,
-  };
-
 fn create_command_pool(
   device: &ash::Device,
   flags: vk::CommandPoolCreateFlags,

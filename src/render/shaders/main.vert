@@ -2,8 +2,6 @@
 
 layout(push_constant) uniform PushConstantData {
   mat4 matrix;
-  vec2 tex_offset;
-  vec2 tex_size;
 } pc;
 
 // vertex
@@ -16,5 +14,5 @@ layout(location = 0) out vec2 out_tex_coords;
 void main() {
   gl_Position = pc.matrix * vec4(vertex_pos, 1.0);
   
-  out_tex_coords = tex_coords * pc.tex_size + pc.tex_offset;
+  out_tex_coords = tex_coords;
 }

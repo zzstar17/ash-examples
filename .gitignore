@@ -8,5 +8,6 @@
 
 imgui.ini
 
+/assets/shaders/
 /assets/tex/
 /assets/skybox.ktx2

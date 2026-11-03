@@ -16,7 +16,6 @@ pub struct Skybox {
   pub view: vk::ImageView,
   pub extent: vk::Extent2D,
   pub format: vk::Format,
-  pub layer_size: u64,
   pub total_size: u64,
 }
 
@@ -54,7 +53,6 @@ impl Skybox {
         height: data.height,
       },
       format: texture_format,
-      layer_size: data_len / 6,
       total_size: data_len,
     })
   }

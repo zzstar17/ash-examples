@@ -12,7 +12,7 @@ use vkobjects::{
 use winit::{dpi::PhysicalSize, event_loop::ActiveEventLoop, window::Window};
 
 use crate::{
-  asset_loader::{model_loader::ModelGpuData, LoadedData, ShaderLoader},
+  asset_loader::{LoadedData, ShaderLoader},
   last_frames_durations::FPSDurations,
   render::{
     command_pools::graphics::GraphicsCommandBufferPool, gpu_data::GPUDataAllocationError,
@@ -373,7 +373,7 @@ impl Renderer {
         &self.device,
         &self.descriptor_pool,
         &self.data,
-        &self.render_pipelines.text,
+        &self.render_pipelines,
         #[cfg(feature = "vl")]
         &self.debug_utils_marker,
       );
@@ -385,9 +385,7 @@ impl Renderer {
       &self.render_targets,
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
-      &self.render_pipelines.graphics,
-      &self.render_pipelines.skybox,
-      &self.render_pipelines.text,
+      &self.render_pipelines,
       &self.descriptor_pool,
       &self.data,
       scene,

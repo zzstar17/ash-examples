@@ -192,8 +192,6 @@ impl SceneNode {
     if let Some(mesh) = self.mesh {
       let pc = GraphicsPushConstants {
         matrix: transformed,
-        tex_offset: [0.0, 0.0],
-        tex_size: [1.0, 1.0],
       };
       if mesh.semi_transparent {
         semi_transparent.push((pc, mesh));

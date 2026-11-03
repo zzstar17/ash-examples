@@ -2,7 +2,7 @@ use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk::{self, ClearDepthStencilValue};
 use ash_slug::{SlugPushConstants, SlugVertex};
-use cgmath::{Matrix, Matrix4, Vector4};
+use cgmath::{Matrix, Matrix4, MetricSpace, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
@@ -13,7 +13,7 @@ use crate::{
     },
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
-    pipelines::{GraphicsPipeline, GraphicsPushConstants, SkyboxPipeline, TextPipeline},
+    pipelines::{ColorPushConstants, GraphicsPushConstants, Pipeline, RenderPipelines},
     render_targets::RenderTargets,
     RENDER_EXTENT, RENDER_SIZE,
   },
@@ -77,7 +77,7 @@ impl GraphicsCommandBufferPool {
   unsafe fn record_draw_scene_world_solid_objects(
     &self,
     device: &ash::Device,
-    pipeline: &GraphicsPipeline,
+    pipeline: &Pipeline,
     scene: &Scene,
     descriptor_pool: &DescriptorPool,
   ) {
@@ -118,7 +118,7 @@ impl GraphicsCommandBufferPool {
   unsafe fn record_draw_scene_world_transparent_objects(
     &self,
     device: &ash::Device,
-    pipeline: &GraphicsPipeline,
+    pipeline: &Pipeline,
     scene: &Scene,
     descriptor_pool: &DescriptorPool,
   ) {
@@ -160,7 +160,7 @@ impl GraphicsCommandBufferPool {
   unsafe fn record_draw_skybox(
     &self,
     device: &ash::Device,
-    skybox_pipeline: &SkyboxPipeline,
+    skybox_pipeline: &Pipeline,
     scene: &Scene,
     descriptor_pool: &DescriptorPool,
   ) {
@@ -202,28 +202,48 @@ impl GraphicsCommandBufferPool {
   unsafe fn record_draw_crosshair(
     &self,
     device: &ash::Device,
-    pipeline: &GraphicsPipeline,
+    color_pipeline: &Pipeline,
     scene: &Scene,
   ) {
-    // let cam = scene.camera.position();
-    // let pos_x = cam.distance2(scene.crosshair[0].position());
-    // let pos_y = cam.distance2(scene.crosshair[1].position());
-    // let pos_z = cam.distance2(scene.crosshair[2].position());
+    let cb = self.main;
 
-    // // draw first ones farther away
-    // let mut positions = [(pos_x, 0), (pos_y, 1), (pos_z, 2)];
-    // positions.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let cam = scene.camera.position();
+    let pos_x = cam.distance2(scene.crosshair[0].0.position());
+    let pos_y = cam.distance2(scene.crosshair[1].0.position());
+    let pos_z = cam.distance2(scene.crosshair[2].0.position());
 
-    // let data = scene.get_crosshair_data();
-    // for (_, i) in positions {
-    //   self.record_draw_indexed(device, pipeline.layout, data[i]);
-    // }
+    // draw first ones farther away
+    let mut positions = [(pos_x, 0), (pos_y, 1), (pos_z, 2)];
+    positions.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (_, i) in positions {
+      let pc = ColorPushConstants {
+        matrix: scene.last_update_projection_view * scene.crosshair[i].0.model(),
+        color: scene.crosshair[i].1,
+      };
+
+      device.cmd_push_constants(
+        cb,
+        color_pipeline.layout,
+        vk::ShaderStageFlags::VERTEX,
+        0,
+        utility::any_as_u8_slice(&pc),
+      );
+      let cube_mesh = scene.meshes[scene.cube_mesh_index];
+      device.cmd_draw_indexed(
+        cb,
+        cube_mesh.indices_count as u32,
+        1,
+        cube_mesh.indices_offset as u32,
+        cube_mesh.vertices_offset as i32,
+        0,
+      );
+    }
   }
 
   pub unsafe fn record_draw_world_text(
     &self,
     device: &ash::Device,
-    pipeline: &TextPipeline,
+    pipeline: &Pipeline,
     scene: &Scene,
     data: &GPUData,
   ) {
@@ -462,10 +482,11 @@ impl GraphicsCommandBufferPool {
     device: &ash::Device,
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
-    text_pipeline: &TextPipeline,
+    pipelines: &RenderPipelines,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) {
     let cb = self.main;
+    let text_pipeline = &pipelines.text;
 
     #[cfg(feature = "vl")]
     marker.cmd_begin_debug_utils_label(cb, c"Update Text UI", [0.0, 0.0, 1.0, 1.0]);
@@ -603,9 +624,7 @@ impl GraphicsCommandBufferPool {
     swapchain_image: vk::Image,
     swapchain_extent: vk::Extent2D,
 
-    pipeline: &GraphicsPipeline,
-    skybox_pipeline: &SkyboxPipeline,
-    text_pipeline: &TextPipeline,
+    pipelines: &RenderPipelines,
 
     descriptor_pool: &DescriptorPool,
     data: &GPUData,
@@ -763,21 +782,30 @@ impl GraphicsCommandBufferPool {
       {
         #[cfg(feature = "vl")]
         marker.cmd_begin_debug_utils_label(cb, c"Main draw world objects", [0.0, 0.8, 0.0, 1.0]);
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.main.current);
         device.cmd_set_depth_test_enable(cb, true);
 
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
 
-        self.record_draw_scene_world_solid_objects(device, pipeline, scene, descriptor_pool);
+        self.record_draw_scene_world_solid_objects(device, &pipelines.main, scene, descriptor_pool);
 
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, skybox_pipeline.current);
-        self.record_draw_skybox(device, skybox_pipeline, scene, descriptor_pool);
+        device.cmd_bind_pipeline(
+          cb,
+          vk::PipelineBindPoint::GRAPHICS,
+          pipelines.skybox.current,
+        );
+        self.record_draw_skybox(device, &pipelines.skybox, scene, descriptor_pool);
 
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.main.current);
         device.cmd_set_depth_test_enable(cb, true);
 
-        self.record_draw_scene_world_transparent_objects(device, pipeline, scene, descriptor_pool);
+        self.record_draw_scene_world_transparent_objects(
+          device,
+          &pipelines.main,
+          scene,
+          descriptor_pool,
+        );
 
         #[cfg(feature = "vl")]
         marker.cmd_end_debug_utils_label(cb);
@@ -787,13 +815,13 @@ impl GraphicsCommandBufferPool {
       {
         #[cfg(feature = "vl")]
         marker.cmd_begin_debug_utils_label(cb, c"Main draw world text", [0.0, 0.8, 0.0, 1.0]);
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.text.current);
         device.cmd_set_depth_test_enable(cb, true);
 
         device.cmd_bind_descriptor_sets(
           cb,
           vk::PipelineBindPoint::GRAPHICS,
-          text_pipeline.layout,
+          pipelines.text.layout,
           0,
           &[descriptor_pool.text_set],
           &[],
@@ -811,7 +839,7 @@ impl GraphicsCommandBufferPool {
           vk::IndexType::UINT32,
         );
 
-        self.record_draw_world_text(device, text_pipeline, scene, data);
+        self.record_draw_world_text(device, &pipelines.text, scene, data);
         #[cfg(feature = "vl")]
         marker.cmd_end_debug_utils_label(cb);
       }
@@ -820,20 +848,14 @@ impl GraphicsCommandBufferPool {
       {
         #[cfg(feature = "vl")]
         marker.cmd_begin_debug_utils_label(cb, c"Main draw UI", [0.0, 0.8, 0.0, 1.0]);
-        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
-        device.cmd_set_depth_test_enable(cb, false);
 
-        // device.cmd_bind_descriptor_sets(
-        //   cb,
-        //   vk::PipelineBindPoint::GRAPHICS,
-        //   pipeline.layout,
-        //   0,
-        //   &[descriptor_pool.textures_sets[0]],
-        //   &[],
-        // );
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.color.current);
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
-        // self.record_draw_crosshair(device, pipeline, scene);
+        self.record_draw_crosshair(device, &pipelines.color, scene);
+
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.main.current);
+        device.cmd_set_depth_test_enable(cb, false);
 
         // text ui (prerendered sprite image, still uses graphics)
         if draw_text {
@@ -857,23 +879,19 @@ impl GraphicsCommandBufferPool {
               w: Vector4::new(offset_x, offset_y, 0.0, 1.0),
             };
 
-            let pc = GraphicsPushConstants {
-              matrix,
-              tex_offset: [0.0, 0.0],
-              tex_size: [1.0, 1.0],
-            };
+            let pc = GraphicsPushConstants { matrix };
 
             device.cmd_bind_descriptor_sets(
               cb,
               vk::PipelineBindPoint::GRAPHICS,
-              pipeline.layout,
+              pipelines.main.layout,
               0,
               &[descriptor_pool.text_ui_set],
               &[],
             );
             device.cmd_push_constants(
               cb,
-              pipeline.layout,
+              pipelines.main.layout,
               vk::ShaderStageFlags::VERTEX,
               0,
               utility::any_as_u8_slice(&pc),
@@ -896,13 +914,13 @@ impl GraphicsCommandBufferPool {
               c"Main draw device buffer text UI",
               [0.0, 0.8, 0.0, 1.0],
             );
-            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, text_pipeline.current);
+            device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.text.current);
             device.cmd_set_depth_test_enable(cb, false);
 
             device.cmd_bind_descriptor_sets(
               cb,
               vk::PipelineBindPoint::GRAPHICS,
-              text_pipeline.layout,
+              pipelines.text.layout,
               0,
               &[descriptor_pool.text_set],
               &[],
@@ -929,7 +947,7 @@ impl GraphicsCommandBufferPool {
             );
             device.cmd_push_constants(
               cb,
-              text_pipeline.layout,
+              pipelines.text.layout,
               vk::ShaderStageFlags::VERTEX,
               0,
               utility::any_as_u8_slice(&text_pc),
