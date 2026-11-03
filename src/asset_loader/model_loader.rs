@@ -270,7 +270,6 @@ pub struct LoadedModels {
   pub gltf: Gltf,
 
   pub meshes: Vec<Mesh>,
-  pub image_sizes: Vec<ImageSize>,
   pub model_gpu_data: ModelGpuData,
 
   pub quad_mesh_index: usize,
@@ -281,7 +280,6 @@ pub struct AssetLocationData {
   pub gltf: Gltf,
 
   pub meshes: Vec<Mesh>,
-  pub image_sizes: Vec<ImageSize>,
 
   pub quad_mesh_index: usize,
   pub cube_mesh_index: usize,
@@ -296,17 +294,12 @@ pub struct ModelGpuData {
 #[derive(Debug, Clone, Copy)]
 pub struct Mesh {
   pub vertices_offset: usize,
+  #[allow(dead_code)]
   pub vertices_count: usize,
   pub indices_offset: usize,
   pub indices_count: usize,
   pub image_index: Option<usize>,
   pub semi_transparent: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct ImageSize {
-  pub width: u32,
-  pub height: u32,
 }
 
 fn print_tree(node: &gltf::Node, depth: i32) {
@@ -337,6 +330,7 @@ pub enum ModelLoadError {
 
 struct BufferSlice<'a> {
   pub bytes: &'a [u8],
+  #[allow(dead_code)]
   pub offset: usize,
   pub count: usize,
   pub data_type: DataType,
@@ -451,7 +445,7 @@ impl LoadedModels {
     let mut scene_dir = scene_path.to_path_buf();
     scene_dir.pop();
 
-    let file = std::fs::File::open(&scene_path)?;
+    let file = std::fs::File::open(scene_path)?;
     let reader = std::io::BufReader::new(file);
     let gltf = gltf::Gltf::from_reader(reader)?;
 
@@ -595,7 +589,6 @@ impl LoadedModels {
     }
 
     let mut images = Vec::with_capacity(gltf.images().len());
-    let mut image_sizes = Vec::with_capacity(gltf.images().len());
     for image_ref in gltf.images() {
       let image_data = match image_ref.source() {
         ImageSource::View { .. } => {
@@ -625,12 +618,7 @@ impl LoadedModels {
           data
         }
       };
-      let image_size = ImageSize {
-        width: image_data.width,
-        height: image_data.height,
-      };
       images.push(image_data);
-      image_sizes.push(image_size);
     }
 
     Ok(Self {
@@ -641,7 +629,6 @@ impl LoadedModels {
         images,
       },
       meshes,
-      image_sizes,
       quad_mesh_index,
       cube_mesh_index,
     })
@@ -653,7 +640,6 @@ impl LoadedModels {
       AssetLocationData {
         gltf: self.gltf,
         meshes: self.meshes,
-        image_sizes: self.image_sizes,
         quad_mesh_index: self.quad_mesh_index,
         cube_mesh_index: self.cube_mesh_index,
       },

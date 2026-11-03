@@ -35,8 +35,8 @@ impl Niko {
       .children()
       .find(|node| node.name().unwrap() == "Niko_Lightbulb")
       .unwrap();
-    let niko_body = SceneNode::from_gltf(&asset_locations, niko_armature, true, child_nodes);
-    let niko_lightbulb = SceneNode::from_gltf(&asset_locations, niko_lightbulb, true, child_nodes);
+    let niko_body = SceneNode::from_gltf(asset_locations, niko_armature, true, child_nodes);
+    let niko_lightbulb = SceneNode::from_gltf(asset_locations, niko_lightbulb, true, child_nodes);
     Self {
       body: niko_body,
       lightbulb: niko_lightbulb,
@@ -54,9 +54,9 @@ impl Niko {
     let transform = projection_view * self.obj.model();
     self
       .body
-      .add_draw_meshes(&child_nodes, transform, solid, semi_transparent);
+      .add_draw_meshes(child_nodes, transform, solid, semi_transparent);
     self
       .lightbulb
-      .add_draw_meshes(&child_nodes, transform, solid, semi_transparent);
+      .add_draw_meshes(child_nodes, transform, solid, semi_transparent);
   }
 }

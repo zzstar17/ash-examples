@@ -89,7 +89,7 @@ pub fn allocate_device(
     obj_labels.push("Text UI (resolved single sample)");
   }
 
-  for (_i, texture) in buffers.sprite_buffers.textures.iter().enumerate() {
+  for texture in buffers.sprite_buffers.textures.iter() {
     objs.push(&texture.image);
     #[cfg(feature = "log_alloc")]
     obj_labels.push("Texture");

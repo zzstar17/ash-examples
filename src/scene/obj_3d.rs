@@ -86,7 +86,7 @@ impl Render3dObj {
 
     Self {
       rotation,
-      scale: scale,
+      scale,
       model_matrix: compose_model_matrix(position, rotation, scale),
     }
   }
@@ -138,7 +138,7 @@ impl Render3dObj {
 
     Self {
       rotation: Quaternion::new(rotation[3], rotation[0], rotation[1], rotation[2]),
-      scale: Vector3::from(scale),
+      scale,
       model_matrix: m,
     }
   }

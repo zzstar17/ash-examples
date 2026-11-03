@@ -278,7 +278,7 @@ impl Buffers {
     Ok(Self {
       sprite_buffers,
       skybox,
-      text_manager: text_manager,
+      text_manager,
       text_ui_images,
 
       text_line_size,
@@ -317,7 +317,7 @@ impl GPUData {
     let staging_size = (textures_size
       + loaded_data.model.vertices_size()
       + loaded_data.model.indices_size()
-      + buffers.skybox.total_size as u64)
+      + buffers.skybox.total_size)
       .max(buffers.text_staging_size_required);
 
     let staging_alloc = allocations::allocate_staging_memory(

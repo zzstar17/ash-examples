@@ -6,10 +6,7 @@ use std::{
 use cgmath::{Matrix4, Point3, Quaternion, Vector3};
 
 use crate::{
-  asset_loader::{
-    model_loader::{AssetLocationData, ImageSize},
-    Mesh,
-  },
+  asset_loader::{model_loader::AssetLocationData, Mesh},
   keys::{
     KeyState::{Pressed, Released},
     Keys,
@@ -17,14 +14,12 @@ use crate::{
   render::GraphicsPushConstants,
   scene::{
     camera::{Camera, RenderCamera},
-    ferris::Ferris,
     obj_3d::Render3dObj,
   },
   RESOLUTION,
 };
 
 mod camera;
-mod ferris;
 mod niko;
 mod obj_3d;
 mod scene_node;
@@ -40,23 +35,16 @@ const CAMERA_KEYBOARD_SENSITIVITY: f32 = 2.0;
 
 pub struct Scene {
   pub meshes: Vec<Mesh>,
-  pub textures: Vec<ImageSize>,
   pub quad_mesh_index: usize,
   pub cube_mesh_index: usize,
-  // pub textures: TextureOffsets,
   pub last_update_projection_view: Matrix4<f32>,
 
-  // pub ferris: Ferris,
   pub camera: RenderCamera,
 
   child_nodes: Vec<SceneNode>,
   niko: Niko,
-  // pub ferris_obj: Render3dObj,
-  // pub niko_obj: Render3dObj,
-  // pub niko_light_obj: Render3dObj,
-  pub kakyoin: SceneNode,
+  kakyoin: SceneNode,
   pub floor: SceneNode,
-  // pub ferris_borders: [Render3dObj; 4],
   pub crosshair: [(Render3dObj, [f32; 4]); 3],
   test_cube: SceneNode,
 
@@ -76,8 +64,6 @@ fn quaternion_from_angle(angle: f32, axis_of_rotation: Vector3<f32>) -> Quaterni
 
 impl Scene {
   pub fn new(asset_locations: AssetLocationData) -> Self {
-    let ferris = Ferris::new([0.2, 0.0], [0.2, 0.15]);
-
     let aspect_ratio = RESOLUTION[0] as f32 / RESOLUTION[1] as f32;
     let camera = RenderCamera::new(
       Camera::new(
@@ -218,7 +204,6 @@ impl Scene {
 
     Self {
       meshes: asset_locations.meshes,
-      textures: asset_locations.image_sizes,
       quad_mesh_index: asset_locations.quad_mesh_index,
       cube_mesh_index: asset_locations.cube_mesh_index,
       last_update_projection_view: Matrix4::from_scale(1.0),
@@ -295,18 +280,18 @@ impl Scene {
 
     self.solid_draw_meshes.clear();
     self.semi_transparent_draw_meshes.clear();
-    // self.niko.add_draw_meshes(
-    //   &self.child_nodes,
-    //   &self.last_update_projection_view,
-    //   &mut self.solid_draw_meshes,
-    //   &mut self.semi_transparent_draw_meshes,
-    // );
-    // self.kakyoin.add_draw_meshes(
-    //   &self.child_nodes,
-    //   self.last_update_projection_view,
-    //   &mut self.solid_draw_meshes,
-    //   &mut self.semi_transparent_draw_meshes,
-    // );
+    self.niko.add_draw_meshes(
+      &self.child_nodes,
+      &self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
+    self.kakyoin.add_draw_meshes(
+      &self.child_nodes,
+      self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
     self.test_cube.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,

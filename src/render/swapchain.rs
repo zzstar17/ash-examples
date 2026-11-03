@@ -318,6 +318,7 @@ impl Swapchains {
     self.current.extent
   }
 
+  #[allow(dead_code)]
   pub fn get_image_views(&self) -> &[vk::ImageView] {
     &self.current.image_views
   }

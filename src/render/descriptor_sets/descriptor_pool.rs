@@ -405,8 +405,8 @@ impl DescriptorPool {
 
     unsafe {
       let image_infos_ptr = image_infos.as_ptr();
-      for i in 0..writes.len() {
-        writes[i].p_image_info = image_infos_ptr.add(i);
+      for (i, write) in writes.iter_mut().enumerate() {
+        write.p_image_info = image_infos_ptr.add(i);
       }
 
       device.update_descriptor_sets(&writes, &[]);

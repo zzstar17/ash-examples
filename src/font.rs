@@ -107,6 +107,6 @@ pub fn load_font() -> Result<FontBytes, FontError> {
 
   Ok(FontBytes {
     bytes: font_bytes,
-    font_index: font_index,
+    font_index,
   })
 }
