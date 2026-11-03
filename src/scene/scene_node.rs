@@ -49,7 +49,7 @@ pub struct LocalNodes {
 }
 
 impl SceneNode {
-  fn from_obj(obj: Render3dObj, mesh: Mesh) -> Self {
+  pub fn from_obj(obj: Render3dObj, mesh: Mesh) -> Self {
     SceneNode {
       obj: ObjEnum::Obj(obj),
       children: Vec::new(),

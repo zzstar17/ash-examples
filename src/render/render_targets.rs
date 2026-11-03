@@ -57,7 +57,7 @@ impl RenderTargets {
           RENDER_EXTENT.width,
           RENDER_EXTENT.height,
           sample_count,
-          vk::ImageUsageFlags::COLOR_ATTACHMENT,
+          vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT),
           #[cfg(feature = "vl")]
           marker,
           #[cfg(feature = "vl")]
@@ -82,7 +82,9 @@ impl RenderTargets {
         RENDER_EXTENT.width,
         RENDER_EXTENT.height,
         sample_count,
-        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
+        // transient - only used in render pass
+        vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT
+          .bitor(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT),
         #[cfg(feature = "vl")]
         marker,
         #[cfg(feature = "vl")]

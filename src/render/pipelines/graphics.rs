@@ -18,7 +18,7 @@ use crate::{
     descriptor_sets::DescriptorPool,
     render_targets::DEPTH_FORMAT,
     sample_count_to_flags,
-    shaders::{self, Shader, TextShader},
+    shaders::{self, Shader, SkyboxShader, TextShader},
     TexturedVertex,
   },
   vertex_input_state_create_info,
@@ -49,6 +49,7 @@ impl Default for GraphicsPushConstants {
 
 pub struct RenderPipelines {
   pub graphics: GraphicsPipeline,
+  pub skybox: SkyboxPipeline,
   pub text: TextPipeline,
 }
 
@@ -57,6 +58,14 @@ pub struct GraphicsPipeline {
   pub current: vk::Pipeline,
 
   pub shader: Shader,
+  pub old: Option<vk::Pipeline>,
+}
+
+pub struct SkyboxPipeline {
+  pub layout: vk::PipelineLayout,
+  pub current: vk::Pipeline,
+
+  pub shader: SkyboxShader,
   pub old: Option<vk::Pipeline>,
 }
 
@@ -87,6 +96,14 @@ impl RenderPipelines {
       #[cfg(feature = "vl")]
       c"Graphics layout",
     )?;
+    let skybox_layout = Self::create_skybox_layout(
+      device,
+      descriptor_pool,
+      #[cfg(feature = "vl")]
+      marker,
+      #[cfg(feature = "vl")]
+      c"Skybox layout",
+    )?;
     let text_layout = Self::create_text_layout(
       device,
       descriptor_pool,
@@ -98,6 +115,7 @@ impl RenderPipelines {
     .on_err(|_err| unsafe {
       device.destroy_pipeline_layout(graphics_layout, None);
     })?;
+    let layouts = [graphics_layout, skybox_layout, text_layout];
 
     let graphics_shader = shaders::Shader::load(
       device,
@@ -107,10 +125,19 @@ impl RenderPipelines {
     )
     .map_err(PipelineCreationError::ShaderFailed)
     .on_err(|_err| unsafe {
-      device.destroy_pipeline_layout(graphics_layout, None);
-      device.destroy_pipeline_layout(text_layout, None);
+      layouts.destroy_self(device);
     })?;
-
+    let skybox_shader = shaders::SkyboxShader::load(
+      device,
+      shader_loader,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .map_err(PipelineCreationError::ShaderFailed)
+    .on_err(|_err| unsafe {
+      layouts.destroy_self(device);
+      graphics_shader.destroy_self(device);
+    })?;
     let text_shader = shaders::TextShader::load(
       device,
       shader_loader,
@@ -119,18 +146,21 @@ impl RenderPipelines {
     )
     .map_err(PipelineCreationError::ShaderFailed)
     .on_err(|_err| unsafe {
-      device.destroy_pipeline_layout(graphics_layout, None);
-      device.destroy_pipeline_layout(text_layout, None);
+      layouts.destroy_self(device);
       graphics_shader.destroy_self(device);
+      skybox_shader.destroy_self(device);
     })?;
 
-    let [initial_graphics, initial_text] = Self::create_with_base(
+    let [initial_graphics, initial_skybox, initial_text] = Self::create_with_base(
       device,
       graphics_layout,
+      skybox_layout,
       text_layout,
       &graphics_shader,
+      &skybox_shader,
       &text_shader,
       cache,
+      vk::Pipeline::null(),
       vk::Pipeline::null(),
       vk::Pipeline::null(),
       render_format,
@@ -138,12 +168,24 @@ impl RenderPipelines {
       sample_count,
       #[cfg(feature = "vl")]
       marker,
-    )?;
+    )
+    .on_err(|_err| unsafe {
+      layouts.destroy_self(device);
+      graphics_shader.destroy_self(device);
+      skybox_shader.destroy_self(device);
+      text_shader.destroy_self(device);
+    })?;
 
     let graphics = GraphicsPipeline {
       layout: graphics_layout,
       current: initial_graphics,
       shader: graphics_shader,
+      old: None,
+    };
+    let skybox = SkyboxPipeline {
+      layout: skybox_layout,
+      current: initial_skybox,
+      shader: skybox_shader,
       old: None,
     };
     let text = TextPipeline {
@@ -153,7 +195,11 @@ impl RenderPipelines {
       old: None,
     };
 
-    Ok(Self { graphics, text })
+    Ok(Self {
+      graphics,
+      skybox,
+      text,
+    })
   }
 
   // create a new pipeline and mark the other as old
@@ -167,16 +213,20 @@ impl RenderPipelines {
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
   ) -> Result<(), PipelineCreationError> {
     assert!(self.graphics.old.is_none());
+    assert!(self.skybox.old.is_none());
     assert!(self.text.old.is_none());
 
     let mut new = Self::create_with_base(
       device,
       self.graphics.layout,
+      self.skybox.layout,
       self.text.layout,
       &self.graphics.shader,
+      &self.skybox.shader,
       &self.text.shader,
       cache,
       self.graphics.current,
+      self.skybox.current,
       self.text.current,
       render_format,
       extent,
@@ -189,12 +239,17 @@ impl RenderPipelines {
       mem::swap(&mut self.graphics.current, &mut new[0]);
       new[0]
     };
-    let old_text = {
-      mem::swap(&mut self.text.current, &mut new[1]);
+    let old_skybox = {
+      mem::swap(&mut self.skybox.current, &mut new[1]);
       new[1]
+    };
+    let old_text = {
+      mem::swap(&mut self.text.current, &mut new[2]);
+      new[2]
     };
 
     self.graphics.old = Some(old_graphics);
+    self.skybox.old = Some(old_skybox);
     self.text.old = Some(old_text);
     Ok(())
   }
@@ -203,11 +258,17 @@ impl RenderPipelines {
   pub fn revert_recreate(&mut self, device: &ash::Device) {
     unsafe {
       self.graphics.current.destroy_self(device);
+      self.skybox.current.destroy_self(device);
       self.text.current.destroy_self(device);
     }
     let mut temp = None;
     mem::swap(&mut self.graphics.old, &mut temp);
     self.graphics.current = temp.unwrap();
+
+    let mut temp = None;
+    mem::swap(&mut self.skybox.old, &mut temp);
+    self.skybox.current = temp.unwrap();
+
     let mut temp = None;
     mem::swap(&mut self.text.old, &mut temp);
     self.text.current = temp.unwrap();
@@ -217,10 +278,13 @@ impl RenderPipelines {
   pub unsafe fn destroy_old(&mut self, device: &ash::Device, cur_total_frame: usize) {
     if let Some(graphics_old) = self.graphics.old {
       log::debug!("[Frame {}] Destroying old pipelines", cur_total_frame);
+      let skybox_old = self.skybox.old.unwrap();
       let text_old = self.text.old.unwrap();
       device.destroy_pipeline(graphics_old, None);
+      device.destroy_pipeline(skybox_old, None);
       device.destroy_pipeline(text_old, None);
       self.graphics.old = None;
+      self.skybox.old = None;
       self.text.old = None;
     }
   }
@@ -240,6 +304,33 @@ impl RenderPipelines {
       flags: vk::PipelineLayoutCreateFlags::empty(),
       set_layout_count: 1,
       p_set_layouts: &descriptor_pool.textures_layout,
+      push_constant_range_count: 1,
+      p_push_constant_ranges: &push_constant_range,
+      ..Default::default()
+    };
+    unsafe {
+      let layout = device.create_pipeline_layout(&layout_create_info, None)?;
+      #[cfg(feature = "vl")]
+      marker.set_obj_name(vk::ObjectType::PIPELINE_LAYOUT, layout.as_raw(), name)?;
+      Ok(layout)
+    }
+  }
+
+  fn create_skybox_layout(
+    device: &ash::Device,
+    descriptor_pool: &DescriptorPool,
+    #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+    #[cfg(feature = "vl")] name: &CStr,
+  ) -> Result<vk::PipelineLayout, OutOfMemoryError> {
+    let push_constant_range = vk::PushConstantRange {
+      stage_flags: vk::ShaderStageFlags::VERTEX,
+      offset: 0,
+      size: size_of::<Matrix4<f32>>() as u32,
+    };
+    let layout_create_info = vk::PipelineLayoutCreateInfo {
+      flags: vk::PipelineLayoutCreateFlags::empty(),
+      set_layout_count: 1,
+      p_set_layouts: &descriptor_pool.skybox_layout,
       push_constant_range_count: 1,
       p_push_constant_ranges: &push_constant_range,
       ..Default::default()
@@ -281,22 +372,32 @@ impl RenderPipelines {
   fn create_with_base(
     device: &ash::Device,
     graphics_layout: vk::PipelineLayout,
+    skybox_layout: vk::PipelineLayout,
     text_layout: vk::PipelineLayout,
+
     graphics_shader: &Shader,
+    skybox_shader: &SkyboxShader,
     text_shader: &TextShader,
+
     cache: vk::PipelineCache,
+
     graphics_base: vk::Pipeline,
+    skybox_base: vk::Pipeline,
     text_base: vk::Pipeline,
+
     render_format: vk::Format,
     extent: vk::Extent2D,
     sample_count: usize,
     #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
-  ) -> Result<[vk::Pipeline; 2], PipelineCreationError> {
+  ) -> Result<[vk::Pipeline; 3], PipelineCreationError> {
     let graphics_shader_stages = graphics_shader.get_pipeline_shader_creation_info();
+    let skybox_shader_stages = skybox_shader.get_pipeline_shader_creation_info();
     let text_shader_stages = text_shader.get_pipeline_shader_creation_info();
 
     let graphics_vertex_input_state = vertex_input_state_create_info!(TexturedVertex);
     let graphics_vertex_input_state = graphics_vertex_input_state.get();
+    let skybox_vertex_input_state = vertex_input_state_create_info!(TexturedVertex);
+    let skybox_vertex_input_state = skybox_vertex_input_state.get();
     let text_vertex_input_state = vertex_input_state_create_info!(SlugVertex);
     let text_vertex_input_state = text_vertex_input_state.get();
 
@@ -336,6 +437,11 @@ impl RenderPipelines {
       depth_bias_slope_factor: 0.0,
       ..Default::default()
     };
+    let skybox_rasterization_state_ci = vk::PipelineRasterizationStateCreateInfo {
+      cull_mode: vk::CullModeFlags::BACK,
+      front_face: vk::FrontFace::COUNTER_CLOCKWISE,
+      ..graphics_rasterization_state_ci
+    };
     let text_rasterization_state_ci = vk::PipelineRasterizationStateCreateInfo {
       cull_mode: vk::CullModeFlags::BACK,
       front_face: vk::FrontFace::COUNTER_CLOCKWISE,
@@ -356,12 +462,18 @@ impl RenderPipelines {
       flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
       depth_test_enable: vk::TRUE,
       depth_write_enable: vk::TRUE,
-      depth_compare_op: vk::CompareOp::LESS,
+      depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
       depth_bounds_test_enable: vk::FALSE,
       min_depth_bounds: 0.0,
       max_depth_bounds: 1.0,
       stencil_test_enable: vk::FALSE,
       ..Default::default()
+    };
+    let skybox_depth_stencil_state_ci = vk::PipelineDepthStencilStateCreateInfo {
+      depth_test_enable: vk::TRUE,
+      depth_write_enable: vk::TRUE,
+      depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
+      ..depth_stencil_state_ci
     };
 
     let attachment_state = vk::PipelineColorBlendAttachmentState {
@@ -410,9 +522,13 @@ impl RenderPipelines {
     };
 
     let mut graphics_flags = vk::PipelineCreateFlags::ALLOW_DERIVATIVES;
+    let mut skybox_flags = vk::PipelineCreateFlags::ALLOW_DERIVATIVES;
     let mut text_flags = vk::PipelineCreateFlags::ALLOW_DERIVATIVES;
     if !graphics_base.is_null() {
       graphics_flags = graphics_flags.bitor(vk::PipelineCreateFlags::DERIVATIVE);
+    }
+    if !skybox_base.is_null() {
+      skybox_flags = skybox_flags.bitor(vk::PipelineCreateFlags::DERIVATIVE);
     }
     if !text_base.is_null() {
       text_flags = text_flags.bitor(vk::PipelineCreateFlags::DERIVATIVE);
@@ -438,6 +554,19 @@ impl RenderPipelines {
       base_pipeline_index: -1, // -1 for null
       ..Default::default()
     };
+    let skybox_create_info = vk::GraphicsPipelineCreateInfo {
+      flags: skybox_flags,
+      stage_count: skybox_shader_stages.len() as u32,
+      p_stages: skybox_shader_stages.as_ptr(),
+      p_vertex_input_state: skybox_vertex_input_state,
+      p_rasterization_state: &skybox_rasterization_state_ci,
+      p_depth_stencil_state: &skybox_depth_stencil_state_ci,
+      p_dynamic_state: ptr::null(),
+      layout: skybox_layout,
+      base_pipeline_handle: skybox_base,
+      base_pipeline_index: -1, // -1 for null
+      ..graphics_create_info
+    };
     let text_create_info = vk::GraphicsPipelineCreateInfo {
       flags: text_flags,
       stage_count: text_shader_stages.len() as u32,
@@ -449,7 +578,7 @@ impl RenderPipelines {
       base_pipeline_index: -1, // -1 for null
       ..graphics_create_info
     };
-    let create_infos = [graphics_create_info, text_create_info];
+    let create_infos = [graphics_create_info, skybox_create_info, text_create_info];
 
     let pipelines = unsafe {
       device
@@ -464,7 +593,8 @@ impl RenderPipelines {
         })
     }?;
     let graphics = pipelines[0];
-    let text = pipelines[1];
+    let skybox = pipelines[1];
+    let text = pipelines[2];
 
     #[cfg(feature = "vl")]
     unsafe {
@@ -473,10 +603,15 @@ impl RenderPipelines {
         graphics.as_raw(),
         c"Graphics Pipeline",
       )?;
+      marker.set_obj_name(
+        vk::ObjectType::PIPELINE,
+        skybox.as_raw(),
+        c"Skybox Pipeline",
+      )?;
       marker.set_obj_name(vk::ObjectType::PIPELINE, text.as_raw(), c"Text Pipeline")?;
     }
 
-    Ok([graphics, text])
+    Ok([graphics, skybox, text])
   }
 }
 
@@ -495,11 +630,25 @@ const fn triangle_input_assembly_state<'a>() -> vk::PipelineInputAssemblyStateCr
 impl DeviceManuallyDestroyed for RenderPipelines {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     self.graphics.destroy_self(device);
+    self.skybox.destroy_self(device);
     self.text.destroy_self(device);
   }
 }
 
 impl DeviceManuallyDestroyed for GraphicsPipeline {
+  unsafe fn destroy_self(&self, device: &ash::Device) {
+    if let Some(old) = self.old {
+      device.destroy_pipeline(old, None);
+    }
+    device.destroy_pipeline(self.current, None);
+    device.destroy_pipeline_layout(self.layout, None);
+
+    // can be unloaded any time
+    self.shader.destroy_self(device);
+  }
+}
+
+impl DeviceManuallyDestroyed for SkyboxPipeline {
   unsafe fn destroy_self(&self, device: &ash::Device) {
     if let Some(old) = self.old {
       device.destroy_pipeline(old, None);

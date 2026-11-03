@@ -499,8 +499,6 @@ impl LoadedModels {
     let mut indices = Vec::with_capacity(QUAD_INDICES.len() + CUBE_INDICES.len());
     let mut meshes = Vec::with_capacity(gltf.meshes().len() + 2);
 
-    vertices.extend_from_slice(&QUAD_VERTICES);
-    indices.extend_from_slice(&QUAD_INDICES);
     let quad_mesh_index = meshes.len();
     meshes.push(Mesh {
       vertices_offset: vertices.len(),
@@ -510,9 +508,9 @@ impl LoadedModels {
       image_index: None,
       semi_transparent: false,
     });
+    vertices.extend_from_slice(&QUAD_VERTICES);
+    indices.extend_from_slice(&QUAD_INDICES);
 
-    vertices.extend_from_slice(&CUBE_VERTICES);
-    indices.extend_from_slice(&CUBE_INDICES);
     let cube_mesh_index = meshes.len();
     meshes.push(Mesh {
       vertices_offset: vertices.len(),
@@ -522,6 +520,8 @@ impl LoadedModels {
       image_index: None,
       semi_transparent: false,
     });
+    vertices.extend_from_slice(&CUBE_VERTICES);
+    indices.extend_from_slice(&CUBE_INDICES);
 
     for mesh_ref in gltf.meshes() {
       let primitive = mesh_ref.primitives().next().unwrap();

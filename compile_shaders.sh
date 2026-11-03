@@ -11,6 +11,12 @@ glslc -O $DIR/src/render/shaders/shader.frag --target-env=$VK_ENV -o $OUT_DIR/fr
 glslc -O $DIR/src/render/shaders/shader.vert --target-env=$VK_ENV -o $OUT_DIR/vert_debug.spv -g
 glslc -O $DIR/src/render/shaders/shader.frag --target-env=$VK_ENV -o $OUT_DIR/frag_debug.spv -g
 
+glslc -O $DIR/src/render/shaders/skybox.vert --target-env=$VK_ENV -o $OUT_DIR/skybox_vert.spv
+glslc -O $DIR/src/render/shaders/skybox.frag --target-env=$VK_ENV -o $OUT_DIR/skybox_frag.spv
+
+glslc -O $DIR/src/render/shaders/skybox.vert --target-env=$VK_ENV -o $OUT_DIR/skybox_vert_debug.spv -g
+glslc -O $DIR/src/render/shaders/skybox.frag --target-env=$VK_ENV -o $OUT_DIR/skybox_frag_debug.spv -g
+
 dxc -spirv -T ps_6_0 -E main $DIR/src/render/shaders/slug_pixel_shader.hlsl -Fo $OUT_DIR/slug_pixel.spv
 dxc -spirv -T vs_6_0 -E main $DIR/src/render/shaders/slug_vertex_shader.hlsl -Fo $OUT_DIR/slug_vertex.spv
 

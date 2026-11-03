@@ -46,6 +46,39 @@ fn create_texture_sampler(
   }
 }
 
+fn create_skybox_sampler(
+  device: &ash::Device,
+  #[cfg(feature = "vl")] marker: &vkinitialization::DebugUtilsMarker,
+) -> Result<vk::Sampler, OutOfMemoryError> {
+  let sampler_create_info = vk::SamplerCreateInfo {
+    s_type: vk::StructureType::SAMPLER_CREATE_INFO,
+    p_next: ptr::null(),
+    flags: vk::SamplerCreateFlags::empty(),
+    mag_filter: vk::Filter::NEAREST,
+    min_filter: vk::Filter::NEAREST,
+    address_mode_u: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+    address_mode_v: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+    address_mode_w: vk::SamplerAddressMode::CLAMP_TO_EDGE,
+    anisotropy_enable: vk::FALSE,
+    max_anisotropy: 0.0,
+    border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+    unnormalized_coordinates: vk::FALSE,
+    compare_enable: vk::FALSE,
+    compare_op: vk::CompareOp::NEVER,
+    mipmap_mode: vk::SamplerMipmapMode::NEAREST,
+    mip_lod_bias: 0.0,
+    min_lod: 0.0,
+    max_lod: 0.0,
+    _marker: PhantomData,
+  };
+  unsafe {
+    let sampler = device.create_sampler(&sampler_create_info, None)?;
+    #[cfg(feature = "vl")]
+    marker.set_obj_name(vk::ObjectType::SAMPLER, sampler.as_raw(), c"Skybox Sampler")?;
+    Ok(sampler)
+  }
+}
+
 // lookup nearest float
 fn create_sampler_nearest_float(
   device: &ash::Device,
@@ -62,14 +95,14 @@ fn create_sampler_nearest_float(
     address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
     anisotropy_enable: vk::FALSE,
     max_anisotropy: 0.0,
-    border_color: vk::BorderColor::FLOAT_OPAQUE_BLACK,
+    border_color: vk::BorderColor::FLOAT_TRANSPARENT_BLACK,
     unnormalized_coordinates: vk::TRUE,
     compare_enable: vk::FALSE,
     compare_op: vk::CompareOp::NEVER,
     mipmap_mode: vk::SamplerMipmapMode::NEAREST,
     mip_lod_bias: 0.0,
-    max_lod: 0.0,
     min_lod: 0.0,
+    max_lod: 0.0,
     _marker: PhantomData,
   };
   unsafe {
@@ -100,14 +133,14 @@ fn create_sampler_nearest_int(
     address_mode_w: vk::SamplerAddressMode::CLAMP_TO_BORDER,
     anisotropy_enable: vk::FALSE,
     max_anisotropy: 0.0,
-    border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+    border_color: vk::BorderColor::INT_TRANSPARENT_BLACK,
     unnormalized_coordinates: vk::TRUE,
     compare_enable: vk::FALSE,
     compare_op: vk::CompareOp::NEVER,
     mipmap_mode: vk::SamplerMipmapMode::NEAREST,
     mip_lod_bias: 0.0,
-    max_lod: 0.0,
     min_lod: 0.0,
+    max_lod: 0.0,
     _marker: PhantomData,
   };
   unsafe {
@@ -127,6 +160,10 @@ pub struct DescriptorPool {
   textures_sampler: vk::Sampler,
   pub textures_sets: Vec<vk::DescriptorSet>,
   pub text_ui_set: vk::DescriptorSet,
+
+  pub skybox_layout: vk::DescriptorSetLayout,
+  skybox_sampler: vk::Sampler,
+  pub skybox_set: vk::DescriptorSet,
 
   pub text_layout: vk::DescriptorSetLayout,
   pub text_curves_sampler: vk::Sampler,
@@ -184,7 +221,7 @@ impl DescriptorPool {
       #[cfg(feature = "vl")]
       marker,
     )?;
-    let text_curves_sampler = create_sampler_nearest_float(
+    let skybox_sampler = create_skybox_sampler(
       device,
       #[cfg(feature = "vl")]
       marker,
@@ -192,14 +229,28 @@ impl DescriptorPool {
     .on_err(|_err| unsafe {
       destroy!(device => &textures_sampler);
     })?;
+    let text_curves_sampler = create_sampler_nearest_float(
+      device,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &skybox_sampler, &textures_sampler);
+    })?;
     let text_bands_sampler = create_sampler_nearest_int(
       device,
       #[cfg(feature = "vl")]
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &text_curves_sampler, &textures_sampler);
+      destroy!(device => &text_curves_sampler, &skybox_sampler, &textures_sampler);
     })?;
+    let samplers = [
+      textures_sampler,
+      skybox_sampler,
+      text_curves_sampler,
+      text_bands_sampler,
+    ];
 
     let textures_layout = Self::create_graphics_layout(
       device,
@@ -208,7 +259,16 @@ impl DescriptorPool {
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &text_bands_sampler, &text_curves_sampler, &textures_sampler);
+      destroy!(device => &samplers);
+    })?;
+    let skybox_layout = Self::create_graphics_layout(
+      device,
+      skybox_sampler,
+      #[cfg(feature = "vl")]
+      marker,
+    )
+    .on_err(|_err| unsafe {
+      destroy!(device => &textures_layout, &samplers);
     })?;
     let text_layout = Self::create_text_layout(
       device,
@@ -218,17 +278,18 @@ impl DescriptorPool {
       marker,
     )
     .on_err(|_err| unsafe {
-      destroy!(device => &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
+      destroy!(device => &skybox_layout, &textures_layout, &samplers);
     })?;
+    let layouts_set = [textures_layout, skybox_layout, text_layout];
 
-    // textures, text_ui, text
+    // textures, skybox, text_ui, text
     let textures_len = gpu_data.sprite_buffers.textures.len() as u32;
-    let set_count = textures_len + 2;
+    let set_count = textures_len + 3;
 
     // text has 2
     let sizes: [vk::DescriptorPoolSize; 1] = [vk::DescriptorPoolSize {
       ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
-      descriptor_count: textures_len + 1 + 2,
+      descriptor_count: textures_len + 1 + 1 + 2,
     }];
 
     let pool = {
@@ -240,19 +301,21 @@ impl DescriptorPool {
         ..Default::default()
       };
       unsafe { device.create_descriptor_pool(&pool_create_info, None) }
-    }.on_err(|_err| unsafe {
-      destroy!(device => &text_layout, &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
+    }
+    .on_err(|_err| unsafe {
+      destroy!(device => &layouts_set, &samplers);
     })?;
 
     let mut layouts = Vec::with_capacity(set_count as usize);
     for _i in 0..textures_len {
       layouts.push(textures_layout);
     }
-    layouts.push(textures_layout);
-    layouts.push(text_layout);
+    layouts.push(skybox_layout);
+    layouts.push(textures_layout); // text ui
+    layouts.push(text_layout); // text
 
     let sets = allocate_sets(device, pool, &layouts).on_err(|_err| unsafe {
-      destroy!(device => &pool, &text_layout, &textures_layout, &text_bands_sampler, &text_curves_sampler, &textures_sampler);
+      destroy!(device => &pool, &layouts_set, &samplers);
     })?;
     let mut image_infos = Vec::with_capacity(set_count as usize);
     let mut writes = Vec::with_capacity(set_count as usize);
@@ -277,6 +340,22 @@ impl DescriptorPool {
       });
       textures_sets.push(set);
     }
+
+    let skybox_set = set_iter.next().unwrap();
+    image_infos.push(vk::DescriptorImageInfo {
+      sampler: vk::Sampler::null(),
+      image_view: gpu_data.skybox.view,
+      image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+    });
+    writes.push(vk::WriteDescriptorSet {
+      dst_set: skybox_set,
+      dst_binding: 0,
+      dst_array_element: 0,
+      descriptor_count: 1,
+      descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+      p_image_info: ptr::null(),
+      ..Default::default()
+    });
 
     let text_ui_set = set_iter.next().unwrap();
     image_infos.push(vk::DescriptorImageInfo {
@@ -337,6 +416,11 @@ impl DescriptorPool {
       textures_sampler,
       textures_layout,
       textures_sets,
+
+      skybox_layout,
+      skybox_sampler,
+      skybox_set,
+
       text_ui_set,
 
       text_layout,
@@ -390,6 +474,9 @@ impl DeviceManuallyDestroyed for DescriptorPool {
 
     device.destroy_descriptor_set_layout(self.textures_layout, None);
     device.destroy_sampler(self.textures_sampler, None);
+
+    device.destroy_descriptor_set_layout(self.skybox_layout, None);
+    device.destroy_sampler(self.skybox_sampler, None);
 
     device.destroy_descriptor_set_layout(self.text_layout, None);
     device.destroy_sampler(self.text_curves_sampler, None);

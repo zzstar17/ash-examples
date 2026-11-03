@@ -201,7 +201,7 @@ impl TextUIImages {
         text_extent.width,
         text_extent.height,
         sample_count,
-        vk::ImageUsageFlags::COLOR_ATTACHMENT,
+        vk::ImageUsageFlags::COLOR_ATTACHMENT.bitor(vk::ImageUsageFlags::TRANSIENT_ATTACHMENT),
         #[cfg(feature = "vl")]
         marker,
         #[cfg(feature = "vl")]

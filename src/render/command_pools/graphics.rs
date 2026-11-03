@@ -2,19 +2,18 @@ use std::{cmp::Ordering, marker::PhantomData, ops::BitOr, ptr};
 
 use ash::vk::{self, ClearDepthStencilValue};
 use ash_slug::{SlugPushConstants, SlugVertex};
-use cgmath::{Matrix, Matrix4, MetricSpace, Vector4};
+use cgmath::{Matrix, Matrix4, Vector4};
 use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
   render::{
     command_pools::{
-      ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_LAYERS, ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE,
-      ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
+      ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE, ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
     },
     descriptor_sets::DescriptorPool,
     gpu_data::GPUData,
-    pipelines::{GraphicsPipeline, GraphicsPushConstants, TextPipeline},
+    pipelines::{GraphicsPipeline, GraphicsPushConstants, SkyboxPipeline, TextPipeline},
     render_targets::RenderTargets,
     RENDER_EXTENT, RENDER_SIZE,
   },
@@ -75,11 +74,10 @@ impl GraphicsCommandBufferPool {
     Ok(())
   }
 
-  unsafe fn record_draw_scene_world_objects(
+  unsafe fn record_draw_scene_world_solid_objects(
     &self,
     device: &ash::Device,
     pipeline: &GraphicsPipeline,
-    gpu_data: &GPUData,
     scene: &Scene,
     descriptor_pool: &DescriptorPool,
   ) {
@@ -115,6 +113,17 @@ impl GraphicsCommandBufferPool {
         0,
       );
     }
+  }
+
+  unsafe fn record_draw_scene_world_transparent_objects(
+    &self,
+    device: &ash::Device,
+    pipeline: &GraphicsPipeline,
+    scene: &Scene,
+    descriptor_pool: &DescriptorPool,
+  ) {
+    let cb = self.main;
+    let mut last_texture_i = usize::MAX;
 
     // todo: this needs to be ordered by camera distance
     for (pc, mesh) in scene.semi_transparent_draw_meshes.iter().rev() {
@@ -148,7 +157,47 @@ impl GraphicsCommandBufferPool {
     }
   }
 
-  // unsafe fn record_draw_scene_node(&self)
+  unsafe fn record_draw_skybox(
+    &self,
+    device: &ash::Device,
+    skybox_pipeline: &SkyboxPipeline,
+    scene: &Scene,
+    descriptor_pool: &DescriptorPool,
+  ) {
+    let cb = self.main;
+    device.cmd_bind_descriptor_sets(
+      cb,
+      vk::PipelineBindPoint::GRAPHICS,
+      skybox_pipeline.layout,
+      0,
+      &[descriptor_pool.skybox_set],
+      &[],
+    );
+    let mut view = scene.camera.view_matrix();
+    view.w = Vector4 {
+      x: 0.0,
+      y: 0.0,
+      z: 0.0,
+      w: 0.0,
+    };
+    let pc = scene.camera.projection_matrix() * view;
+    device.cmd_push_constants(
+      cb,
+      skybox_pipeline.layout,
+      vk::ShaderStageFlags::VERTEX,
+      0,
+      utility::any_as_u8_slice(&pc),
+    );
+    let cube_mesh = scene.meshes[scene.cube_mesh_index];
+    device.cmd_draw_indexed(
+      cb,
+      cube_mesh.indices_count as u32,
+      1,
+      cube_mesh.indices_offset as u32,
+      cube_mesh.vertices_offset as i32,
+      0,
+    );
+  }
 
   unsafe fn record_draw_crosshair(
     &self,
@@ -469,6 +518,7 @@ impl GraphicsCommandBufferPool {
     if let Some(render) = data.text_ui.render_view {
       color_attachment.resolve_mode = vk::ResolveModeFlags::AVERAGE;
       color_attachment.image_view = render;
+      color_attachment.store_op = vk::AttachmentStoreOp::DONT_CARE;
     };
     let color_attachments = [color_attachment];
     let rendering_info = vk::RenderingInfo {
@@ -554,6 +604,7 @@ impl GraphicsCommandBufferPool {
     swapchain_extent: vk::Extent2D,
 
     pipeline: &GraphicsPipeline,
+    skybox_pipeline: &SkyboxPipeline,
     text_pipeline: &TextPipeline,
 
     descriptor_pool: &DescriptorPool,
@@ -669,7 +720,7 @@ impl GraphicsCommandBufferPool {
         resolve_mode: vk::ResolveModeFlags::NONE,
         resolve_image_view: render_targets.resolve_views[frame_i],
         resolve_image_layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
-        load_op: vk::AttachmentLoadOp::CLEAR,
+        load_op: vk::AttachmentLoadOp::CLEAR, // for some reason faster than don't care
         store_op: vk::AttachmentStoreOp::STORE,
         clear_value: color_clear_value,
         ..Default::default()
@@ -678,6 +729,7 @@ impl GraphicsCommandBufferPool {
         let view = views[frame_i];
         color_attachment.resolve_mode = vk::ResolveModeFlags::AVERAGE;
         color_attachment.image_view = view;
+        color_attachment.store_op = vk::AttachmentStoreOp::DONT_CARE;
       }
       let color_attachments = [color_attachment];
       let depth_attachment = vk::RenderingAttachmentInfo {
@@ -717,7 +769,16 @@ impl GraphicsCommandBufferPool {
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
 
-        self.record_draw_scene_world_objects(device, pipeline, data, scene, descriptor_pool);
+        self.record_draw_scene_world_solid_objects(device, pipeline, scene, descriptor_pool);
+
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, skybox_pipeline.current);
+        self.record_draw_skybox(device, skybox_pipeline, scene, descriptor_pool);
+
+        device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipeline.current);
+        device.cmd_set_depth_test_enable(cb, true);
+
+        self.record_draw_scene_world_transparent_objects(device, pipeline, scene, descriptor_pool);
+
         #[cfg(feature = "vl")]
         marker.cmd_end_debug_utils_label(cb);
       }

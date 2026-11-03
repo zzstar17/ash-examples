@@ -132,7 +132,7 @@ impl Renderer {
       DeviceFeatures {
         synchronization2: true,
         dynamic_rendering: true,
-        shader_demote_to_helper_invocation: true,
+        // shader_demote_to_helper_invocation: true,
         ..Default::default()
       },
       DeviceFeatures {
@@ -386,6 +386,7 @@ impl Renderer {
       self.swapchains.get_images()[image_i],
       self.swapchains.get_extent(),
       &self.render_pipelines.graphics,
+      &self.render_pipelines.skybox,
       &self.render_pipelines.text,
       &self.descriptor_pool,
       &self.data,

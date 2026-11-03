@@ -58,6 +58,7 @@ pub struct Scene {
   pub floor: SceneNode,
   // pub ferris_borders: [Render3dObj; 4],
   pub crosshair: [Render3dObj; 3],
+  test_cube: SceneNode,
 
   pub niko_text: Render3dObj,
   pub kakyoin_text: Render3dObj,
@@ -75,8 +76,6 @@ fn quaternion_from_angle(angle: f32, axis_of_rotation: Vector3<f32>) -> Quaterni
 
 impl Scene {
   pub fn new(asset_locations: AssetLocationData) -> Self {
-    println!("meshes:\n{:#?}", asset_locations.meshes);
-
     let ferris = Ferris::new([0.2, 0.0], [0.2, 0.15]);
 
     let aspect_ratio = RESOLUTION[0] as f32 / RESOLUTION[1] as f32;
@@ -147,6 +146,25 @@ impl Scene {
     );
     floor.apply_transform_matrix(&world_transform);
 
+    let mut mesh = asset_locations.meshes[asset_locations.cube_mesh_index];
+    mesh.image_index = floor.mesh.unwrap().image_index;
+    let test_cube = SceneNode::from_obj(
+      Render3dObj::from_full(
+        Point3 {
+          x: 0.0,
+          y: -0.5,
+          z: -5.0,
+        },
+        Quaternion::new(1.0, 0.0, 0.0, 0.0),
+        Vector3 {
+          x: 0.5,
+          y: 0.5,
+          z: 0.5,
+        },
+      ),
+      mesh,
+    );
+
     let crosshair = [
       Render3dObj::from_full(
         Point3::new(0.5, 0.0, 0.0),
@@ -202,6 +220,7 @@ impl Scene {
       niko,
       kakyoin,
       floor,
+      test_cube,
       crosshair,
 
       niko_text,
@@ -268,6 +287,12 @@ impl Scene {
       &mut self.semi_transparent_draw_meshes,
     );
     self.kakyoin.add_draw_meshes(
+      &self.child_nodes,
+      self.last_update_projection_view,
+      &mut self.solid_draw_meshes,
+      &mut self.semi_transparent_draw_meshes,
+    );
+    self.test_cube.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,
       &mut self.solid_draw_meshes,
