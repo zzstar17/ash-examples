@@ -73,9 +73,18 @@ fn compose_model_matrix(
   )
 }
 
+fn position_scale_matrix(position: Point3<f32>, scale: Vector3<f32>) -> Matrix4<f32> {
+  Matrix4::from_cols(
+    Vector4::new(scale.x, 0.0, 0.0, 0.0),
+    Vector4::new(0.0, scale.y, 0.0, 0.0),
+    Vector4::new(0.0, 0.0, scale.z, 0.0),
+    Vector4::new(position.x, position.y, position.z, 1.0),
+  )
+}
+
 #[allow(dead_code)]
 impl Render3dObj {
-  pub fn new(position: Point3<f32>) -> Self {
+  pub fn from_position(position: Point3<f32>) -> Self {
     let rotation = Quaternion {
       v: Vector3::new(0.0, 0.0, 0.0),
       s: 1.0,
@@ -87,7 +96,20 @@ impl Render3dObj {
     Self {
       rotation,
       scale,
-      model_matrix: compose_model_matrix(position, rotation, scale),
+      model_matrix: position_scale_matrix(position, scale),
+    }
+  }
+
+  pub fn from_position_scale(position: Point3<f32>, scale: Vector3<f32>) -> Self {
+    let rotation = Quaternion {
+      v: Vector3::new(0.0, 0.0, 0.0),
+      s: 1.0,
+    };
+
+    Self {
+      rotation,
+      scale,
+      model_matrix: position_scale_matrix(position, scale),
     }
   }
 
@@ -143,8 +165,8 @@ impl Render3dObj {
     }
   }
 
-  pub fn model(&self) -> Matrix4<f32> {
-    self.model_matrix
+  pub fn model(&self) -> &Matrix4<f32> {
+    &self.model_matrix
   }
 
   pub fn position(&self) -> Point3<f32> {
@@ -155,8 +177,22 @@ impl Render3dObj {
     }
   }
 
+  pub fn move_(&mut self, relative: Vector3<f32>) {
+    self.model_matrix.w.x += relative.x;
+    self.model_matrix.w.y += relative.y;
+    self.model_matrix.w.z += relative.z;
+  }
+
+  pub fn move_x(&mut self, relative: f32) {
+    self.model_matrix.w.x += relative;
+  }
+
   pub fn move_y(&mut self, relative: f32) {
     self.model_matrix.w.y += relative;
+  }
+
+  pub fn move_z(&mut self, relative: f32) {
+    self.model_matrix.w.z += relative;
   }
 
   pub fn set_position(&mut self, new_position: Point3<f32>) {

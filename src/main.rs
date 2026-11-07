@@ -507,6 +507,11 @@ impl ApplicationHandler for App {
                 status.set_paused(event_loop, !status.paused);
               }
             }
+            KeyCode::KeyB => {
+              if !repeating {
+                status.scene.key_b_event(pressed);
+              }
+            }
             KeyCode::F2 => {
               if pressed && !repeating {
                 status.renderer.screenshot();

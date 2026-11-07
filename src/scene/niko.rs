@@ -1,21 +1,24 @@
 use cgmath::Matrix4;
+use itertools::Itertools;
 
 use crate::{
   asset_loader::{model_loader::AssetLocationData, Mesh},
   render::GraphicsPushConstants,
-  scene::{obj_3d::Render3dObj, SceneNode},
+  scene::{scene_node::ObjEnum, SceneNode},
 };
 
+#[derive(Debug)]
 pub struct Niko {
-  body: SceneNode,
-  lightbulb: SceneNode,
-  pub obj: Render3dObj,
+  body: usize,
+  lightbulb: usize,
+  pub node: SceneNode,
 }
 
 impl Niko {
   pub fn new(
     asset_locations: &AssetLocationData,
     scene_collection: &gltf::Node,
+    transform: &Matrix4<f32>,
     child_nodes: &mut Vec<SceneNode>,
   ) -> Self {
     let niko_collection_node = scene_collection
@@ -27,20 +30,29 @@ impl Niko {
         false
       })
       .expect("Scene does not contain Niko");
-    let niko_armature = niko_collection_node
+    let (niko_armature_i, _) = niko_collection_node
       .children()
-      .find(|node| node.name().unwrap() == "Niko_Armature")
+      .find_position(|node| node.name().unwrap() == "Niko_Armature")
       .unwrap();
-    let niko_lightbulb = niko_collection_node
+    let (niko_lightbulb_i, _) = niko_collection_node
       .children()
-      .find(|node| node.name().unwrap() == "Niko_Lightbulb")
+      .find_position(|node| node.name().unwrap() == "Niko_Lightbulb")
       .unwrap();
-    let niko_body = SceneNode::from_gltf(asset_locations, niko_armature, true, child_nodes);
-    let niko_lightbulb = SceneNode::from_gltf(asset_locations, niko_lightbulb, true, child_nodes);
+
+    let niko = SceneNode::from_gltf(
+      asset_locations,
+      niko_collection_node,
+      None,
+      Some(ObjEnum::Matrix(*transform)),
+      true,
+      child_nodes,
+    );
+    let niko_body = niko.unwrap_parent().children[niko_armature_i];
+    let niko_lightbulb = niko.unwrap_parent().children[niko_lightbulb_i];
     Self {
       body: niko_body,
       lightbulb: niko_lightbulb,
-      obj: Render3dObj::from_gltf_transform(niko_collection_node.transform()),
+      node: niko,
     }
   }
 
@@ -51,12 +63,8 @@ impl Niko {
     solid: &mut Vec<(GraphicsPushConstants, Mesh)>,
     semi_transparent: &mut Vec<(GraphicsPushConstants, Mesh)>,
   ) {
-    let transform = projection_view * self.obj.model();
     self
-      .body
-      .add_draw_meshes(child_nodes, transform, solid, semi_transparent);
-    self
-      .lightbulb
-      .add_draw_meshes(child_nodes, transform, solid, semi_transparent);
+      .node
+      .add_draw_meshes(child_nodes, *projection_view, solid, semi_transparent);
   }
 }

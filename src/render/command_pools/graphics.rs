@@ -7,6 +7,7 @@ use vkinitialization::device::QueueFamilies;
 use vkobjects::{errors::OutOfMemoryError, utility, DeviceManuallyDestroyed};
 
 use crate::{
+  asset_loader::Mesh,
   render::{
     command_pools::{
       ONE_LAYER_COLOR_IMAGE_SUBRESOURCE_RANGE, ONE_LAYER_DEPTH_IMAGE_SUBRESOURCE_RANGE,
@@ -17,16 +18,18 @@ use crate::{
     render_targets::RenderTargets,
     RENDER_EXTENT, RENDER_SIZE,
   },
-  scene::Scene,
+  scene::{Scene, SceneNode},
   BACKGROUND_COLOR, OUT_OF_BOUNDS_AREA_COLOR,
 };
 
 use super::dependency_info;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct GraphicsCommandBufferPool {
   pool: vk::CommandPool,
   pub main: vk::CommandBuffer,
+
+  draw_buffer: Vec<Matrix4<f32>>,
 }
 
 impl GraphicsCommandBufferPool {
@@ -58,7 +61,11 @@ impl GraphicsCommandBufferPool {
       &command_buffer_names,
     )?[0];
 
-    Ok(Self { pool, main })
+    Ok(Self {
+      pool,
+      main,
+      draw_buffer: Vec::new(),
+    })
   }
 
   pub unsafe fn reset(&self, device: &ash::Device) -> Result<(), OutOfMemoryError> {
@@ -212,6 +219,8 @@ impl GraphicsCommandBufferPool {
     let pos_y = cam.distance2(scene.crosshair[1].0.position());
     let pos_z = cam.distance2(scene.crosshair[2].0.position());
 
+    let cube_mesh = scene.meshes[scene.cube_mesh_index];
+
     // draw first ones farther away
     let mut positions = [(pos_x, 0), (pos_y, 1), (pos_z, 2)];
     positions.sort_by(|a, b| b.0.total_cmp(&a.0));
@@ -228,7 +237,6 @@ impl GraphicsCommandBufferPool {
         0,
         utility::any_as_u8_slice(&pc),
       );
-      let cube_mesh = scene.meshes[scene.cube_mesh_index];
       device.cmd_draw_indexed(
         cb,
         cube_mesh.indices_count as u32,
@@ -238,6 +246,120 @@ impl GraphicsCommandBufferPool {
         0,
       );
     }
+  }
+
+  unsafe fn draw_scene_node_lines(
+    &mut self,
+    device: &ash::Device,
+    color_pipeline: &Pipeline,
+    cube_mesh: &Mesh,
+    node: &SceneNode,
+    nodes: &[SceneNode],
+    projection_view: &Matrix4<f32>,
+  ) {
+    let cb = self.main;
+    match node {
+      SceneNode::Leaf(leaf) => {
+        self.draw_buffer.clear();
+        leaf
+          .world_bb
+          .generate_box_visualization(0.004 / 2.0, &mut self.draw_buffer);
+        for m in self.draw_buffer.iter() {
+          let pc = ColorPushConstants {
+            matrix: *projection_view * *m,
+            color: [0.0, 0.0, 0.0, 1.0],
+          };
+          device.cmd_push_constants(
+            cb,
+            color_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&pc),
+          );
+          device.cmd_draw_indexed(
+            cb,
+            cube_mesh.indices_count as u32,
+            1,
+            cube_mesh.indices_offset as u32,
+            cube_mesh.vertices_offset as i32,
+            0,
+          );
+        }
+      }
+      SceneNode::Parent(par) => {
+        self.draw_buffer.clear();
+        par
+          .world_bb
+          .generate_box_visualization(0.003 / 2.0, &mut self.draw_buffer);
+        for m in self.draw_buffer.iter() {
+          let pc = ColorPushConstants {
+            matrix: *projection_view * *m,
+            color: [0.5, 0.5, 0.5, 1.0],
+          };
+          device.cmd_push_constants(
+            cb,
+            color_pipeline.layout,
+            vk::ShaderStageFlags::VERTEX,
+            0,
+            utility::any_as_u8_slice(&pc),
+          );
+          device.cmd_draw_indexed(
+            cb,
+            cube_mesh.indices_count as u32,
+            1,
+            cube_mesh.indices_offset as u32,
+            cube_mesh.vertices_offset as i32,
+            0,
+          );
+        }
+
+        for &child in par.children.iter() {
+          self.draw_scene_node_lines(
+            device,
+            color_pipeline,
+            cube_mesh,
+            &nodes[child],
+            nodes,
+            projection_view,
+          );
+        }
+      }
+    }
+  }
+
+  unsafe fn record_draw_lines(
+    &mut self,
+    device: &ash::Device,
+    color_pipeline: &Pipeline,
+    scene: &Scene,
+  ) {
+    let cube_mesh = scene.meshes[scene.cube_mesh_index];
+
+    // todo: drawing a lot of similar objects without instancing, so quite unoptimized
+    self.draw_scene_node_lines(
+      device,
+      color_pipeline,
+      &cube_mesh,
+      &scene.test_cube,
+      &scene.child_nodes,
+      &scene.last_update_projection_view,
+    );
+    self.draw_scene_node_lines(
+      device,
+      color_pipeline,
+      &cube_mesh,
+      &scene.kakyoin,
+      &scene.child_nodes,
+      &scene.last_update_projection_view,
+    );
+    self.draw_scene_node_lines(
+      device,
+      color_pipeline,
+      &cube_mesh,
+      &scene.niko.node,
+      &scene.child_nodes,
+      &scene.last_update_projection_view,
+    );
   }
 
   pub unsafe fn record_draw_world_text(
@@ -616,7 +738,7 @@ impl GraphicsCommandBufferPool {
   }
 
   pub unsafe fn record_main(
-    &self,
+    &mut self,
     frame_i: usize,
     device: &ash::Device,
     render_targets: &RenderTargets,
@@ -853,6 +975,10 @@ impl GraphicsCommandBufferPool {
         device.cmd_bind_vertex_buffers(cb, 0, &[data.sprite_buffers.vertices], &[0]);
         device.cmd_bind_index_buffer(cb, data.sprite_buffers.indices, 0, vk::IndexType::UINT16);
         self.record_draw_crosshair(device, &pipelines.color, scene);
+
+        if scene.drawing_bbs {
+          self.record_draw_lines(device, &pipelines.color, scene);
+        }
 
         device.cmd_bind_pipeline(cb, vk::PipelineBindPoint::GRAPHICS, pipelines.main.current);
         device.cmd_set_depth_test_enable(cb, false);

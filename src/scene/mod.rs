@@ -14,11 +14,12 @@ use crate::{
   render::GraphicsPushConstants,
   scene::{
     camera::{Camera, RenderCamera},
-    obj_3d::Render3dObj,
+    scene_node::ObjEnum,
   },
   RESOLUTION,
 };
 
+mod aabb;
 mod camera;
 mod niko;
 mod obj_3d;
@@ -26,6 +27,8 @@ mod scene_node;
 
 use niko::Niko;
 
+pub use aabb::BoundingBox;
+pub use obj_3d::Render3dObj;
 pub use scene_node::SceneNode;
 
 const UP: Vector3<f32> = Vector3::new(0.0, 1.0, 0.0);
@@ -41,17 +44,19 @@ pub struct Scene {
 
   pub camera: RenderCamera,
 
-  child_nodes: Vec<SceneNode>,
-  niko: Niko,
-  kakyoin: SceneNode,
+  pub child_nodes: Vec<SceneNode>,
+  pub niko: Niko,
+  pub kakyoin: SceneNode,
   pub floor: SceneNode,
   pub crosshair: [(Render3dObj, [f32; 4]); 3],
-  test_cube: SceneNode,
+  pub test_cube: SceneNode,
 
   pub niko_text: Render3dObj,
   pub kakyoin_text: Render3dObj,
+
   pub solid_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
   pub semi_transparent_draw_meshes: Vec<(GraphicsPushConstants, Mesh)>,
+  pub drawing_bbs: bool,
 }
 
 // axis should be normalized
@@ -70,7 +75,7 @@ impl Scene {
         Point3 {
           x: 0.0,
           y: -1.0,
-          z: 0.0,
+          z: -1.0,
         },
         1.0,
         f32::consts::PI / 2.0,
@@ -81,7 +86,7 @@ impl Scene {
     );
 
     // gltf positions imported from blender are rotated with z being up
-    let world_transform = Render3dObj::from_full(
+    let gltf_transform = *Render3dObj::from_full(
       Point3 {
         x: 0.0,
         y: 0.0,
@@ -102,38 +107,45 @@ impl Scene {
       },
     )
     .model();
+    let gltf_transform_obj = ObjEnum::Matrix(gltf_transform);
 
     let mut child_nodes = Vec::new();
     let scene = asset_locations.gltf.scenes().next().unwrap();
     let scene_collection = scene.nodes().next().unwrap();
 
-    let mut niko = Niko::new(&asset_locations, &scene_collection, &mut child_nodes);
-    niko.obj = Render3dObj::from_model_matrix(world_transform * niko.obj.model());
+    let niko = Niko::new(
+      &asset_locations,
+      &scene_collection,
+      &gltf_transform,
+      &mut child_nodes,
+    );
 
-    let mut kakyoin = SceneNode::from_gltf(
+    let kakyoin = SceneNode::from_gltf(
       &asset_locations,
       scene_collection
         .children()
         .find(|node| node.name().unwrap() == "Kakyoin")
         .unwrap(),
+      None,
+      Some(gltf_transform_obj),
       true,
       &mut child_nodes,
     );
-    kakyoin.apply_transform_matrix(&world_transform);
 
-    let mut floor = SceneNode::from_gltf(
+    let floor = SceneNode::from_gltf(
       &asset_locations,
       scene_collection
         .children()
         .find(|node| node.name().unwrap() == "Floor")
         .unwrap(),
+      None,
+      Some(gltf_transform_obj),
       true,
       &mut child_nodes,
     );
-    floor.apply_transform_matrix(&world_transform);
 
     let mut mesh = asset_locations.meshes[asset_locations.cube_mesh_index];
-    mesh.image_index = floor.mesh.unwrap().image_index;
+    mesh.image_index = floor.unwrap_leaf().mesh.image_index;
     let test_cube = SceneNode::from_obj(
       Render3dObj::from_full(
         Point3 {
@@ -181,8 +193,8 @@ impl Scene {
     // let mut niko_text = niko.obj;
     let text_size = 0.2;
     let mut niko_text = Render3dObj::from_full(
-      niko.obj.position(),
-      niko.obj.rotation,
+      niko.node.obj().unwrap_obj().position(),
+      niko.node.obj().unwrap_obj().rotation,
       Vector3 {
         x: text_size,
         y: text_size,
@@ -190,7 +202,7 @@ impl Scene {
       },
     );
     niko_text.move_y(-1.3);
-    let kakyoin_obj = kakyoin.obj.unwrap_obj();
+    let kakyoin_obj = kakyoin.obj().unwrap_obj();
     let mut kakyoin_text = Render3dObj::from_full(
       kakyoin_obj.position(),
       kakyoin_obj.rotation,
@@ -221,6 +233,7 @@ impl Scene {
       kakyoin_text,
       solid_draw_meshes: Vec::new(),
       semi_transparent_draw_meshes: Vec::new(),
+      drawing_bbs: false,
     }
   }
 
@@ -256,14 +269,13 @@ impl Scene {
       .0
       .set_position(crosshair_position + Vector3::new(0.0, 0.0, 0.5));
 
-    // self.ferris.update(time_since_last_update);
-
     let angle = 0.04 * time_since_last_update.as_secs_f32();
     // rotate around y axis
     let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
 
-    self.kakyoin.obj.unwrap_obj_mut().rotate(rotation);
-    self.niko.obj.rotate(rotation);
+    // todo: reimplement rotations
+    // self.kakyoin.obj_mut().unwrap_obj_mut().rotate(rotation);
+    // self.niko.obj.rotate(rotation);
 
     // make text gradually rotate towards the camera
     let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
@@ -273,10 +285,6 @@ impl Scene {
     self
       .kakyoin_text
       .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
-
-    // self
-    //   .ferris_obj
-    //   .set_position(Point3::new(self.ferris.pos[0], self.ferris.pos[1], -3.0));
 
     self.solid_draw_meshes.clear();
     self.semi_transparent_draw_meshes.clear();
@@ -306,58 +314,11 @@ impl Scene {
     );
   }
 
-  // pub fn get_ferris_data(&self) -> (GraphicsPushConstants, ModelOffset) {
-  //   let push_constants = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.ferris_obj.model(),
-  //     tex_offset: self.textures.ferris.offset,
-  //     tex_size: self.textures.ferris.size,
-  //   };
-
-  //   (push_constants, self.models.quad)
-  // }
-
-  // pub fn get_ferris_borders_data(&self) -> [(GraphicsPushConstants, ModelOffset); 4] {
-  //   let fun = |obj: &Render3dObj| {
-  //     let push_constants = GraphicsPushConstants {
-  //       matrix: self.last_update_projection_view * obj.model(),
-  //       tex_offset: self.textures.black.offset,
-  //       tex_size: self.textures.black.size,
-  //     };
-
-  //     (push_constants, self.models.quad)
-  //   };
-
-  //   [
-  //     fun(&self.ferris_borders[0]),
-  //     fun(&self.ferris_borders[1]),
-  //     fun(&self.ferris_borders[2]),
-  //     fun(&self.ferris_borders[3]),
-  //   ]
-  // }
-
-  // pub fn get_crosshair_data(&self) -> [(GraphicsPushConstants, Mesh); 3] {
-  //   let pc_x = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.crosshair[0].model(),
-  //     tex_offset: self.textures.red.offset,
-  //     tex_size: self.textures.red.size,
-  //   };
-  //   let pc_y = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.crosshair[1].model(),
-  //     tex_offset: self.textures.green.offset,
-  //     tex_size: self.textures.green.size,
-  //   };
-  //   let pc_z = GraphicsPushConstants {
-  //     matrix: self.last_update_projection_view * self.crosshair[2].model(),
-  //     tex_offset: self.textures.blue.offset,
-  //     tex_size: self.textures.blue.size,
-  //   };
-
-  //   [
-  //     (pc_x, self.models.cube),
-  //     (pc_y, self.models.cube),
-  //     (pc_z, self.models.cube),
-  //   ]
-  // }
+  pub fn key_b_event(&mut self, pressed: bool) {
+    if pressed {
+      self.drawing_bbs = !self.drawing_bbs;
+    }
+  }
 
   fn update_from_keys(&mut self, keys: &Keys, time_since_last_update: Duration) {
     if keys.l_ctrl == Pressed {

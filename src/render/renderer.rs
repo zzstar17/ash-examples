@@ -358,7 +358,7 @@ impl Renderer {
   }
 
   pub unsafe fn record_graphics(
-    &self,
+    &mut self,
     frame_i: usize,
     image_i: usize,
     scene: &Scene,
@@ -366,7 +366,7 @@ impl Renderer {
     update_text_ui: bool,
     draw_text: bool,
   ) {
-    let pool = &self.graphics_pools[frame_i];
+    let pool = &mut self.graphics_pools[frame_i];
 
     if update_text_ui {
       pool.record_update_text_ui(

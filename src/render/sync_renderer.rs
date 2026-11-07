@@ -240,9 +240,8 @@ impl SyncRenderer {
 
     // actual rendering
     unsafe {
-      let pool = self.renderer.graphics_pools[cur_frame_i];
-      pool.reset(&self.renderer.device)?;
-      pool.begin_recording(&self.renderer.device)?;
+      self.renderer.graphics_pools[cur_frame_i].reset(&self.renderer.device)?;
+      self.renderer.graphics_pools[cur_frame_i].begin_recording(&self.renderer.device)?;
 
       if cur_total_frame == 0 || cur_total_frame == 10000 {
         self.renderer.record_upload_device_text_data(cur_frame_i)?;
@@ -263,7 +262,7 @@ impl SyncRenderer {
         true,
       );
 
-      pool.end_recording(&self.renderer.device)?;
+      self.renderer.graphics_pools[cur_frame_i].end_recording(&self.renderer.device)?;
     }
 
     let command_buffers = [vk::CommandBufferSubmitInfo::default()

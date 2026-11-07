@@ -17,6 +17,7 @@ use relative_path::RelativePath;
 use crate::{
   asset_loader::texture_loader::{ImageLoadError, LoadedImageData},
   render::TexturedVertex,
+  scene::BoundingBox,
 };
 
 pub const QUAD_VERTICES: [TexturedVertex; 4] = [
@@ -300,6 +301,8 @@ pub struct Mesh {
   pub indices_count: usize,
   pub image_index: Option<usize>,
   pub semi_transparent: bool,
+
+  pub local_bb: BoundingBox,
 }
 
 fn print_tree(node: &gltf::Node, depth: i32) {
@@ -501,6 +504,10 @@ impl LoadedModels {
       indices_count: QUAD_INDICES.len(),
       image_index: None,
       semi_transparent: false,
+      local_bb: BoundingBox::from_gltf(gltf::mesh::BoundingBox {
+        min: [-1.0, -1.0, 0.0],
+        max: [1.0, 1.0, 0.0],
+      }),
     });
     vertices.extend_from_slice(&QUAD_VERTICES);
     indices.extend_from_slice(&QUAD_INDICES);
@@ -513,11 +520,16 @@ impl LoadedModels {
       indices_count: CUBE_INDICES.len(),
       image_index: None,
       semi_transparent: false,
+      local_bb: BoundingBox::from_gltf(gltf::mesh::BoundingBox {
+        min: [-1.0, -1.0, -1.0],
+        max: [1.0, 1.0, 1.0],
+      }),
     });
     vertices.extend_from_slice(&CUBE_VERTICES);
     indices.extend_from_slice(&CUBE_INDICES);
 
     for mesh_ref in gltf.meshes() {
+      assert_eq!(mesh_ref.primitives().len(), 1);
       let primitive = mesh_ref.primitives().next().unwrap();
       let mut positions = None;
       let mut normals = None;
@@ -585,6 +597,7 @@ impl LoadedModels {
         indices_count,
         image_index: Some(image_index),
         semi_transparent,
+        local_bb: BoundingBox::from_gltf(primitive.bounding_box()),
       })
     }
 
