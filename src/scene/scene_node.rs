@@ -57,6 +57,16 @@ pub struct SceneNodeLeaf {
   pub mesh: Mesh,
 }
 
+impl Default for SceneNode {
+  fn default() -> Self {
+    Self::Leaf(SceneNodeLeaf {
+      obj: None,
+      world_bb: BoundingBox::default(),
+      mesh: Mesh::default(),
+    })
+  }
+}
+
 impl SceneNode {
   pub fn unwrap_leaf(&self) -> &SceneNodeLeaf {
     match self {
@@ -75,16 +85,22 @@ impl SceneNode {
   pub fn obj(&self) -> &ObjEnum {
     match self {
       Self::Parent(p) => &p.obj,
-      Self::Leaf(l) => l.obj.as_ref().unwrap(),
+      Self::Leaf(l) => l
+        .obj
+        .as_ref()
+        .expect("Unwrapped obj on leaf that inherits from parent"),
     }
   }
 
-  // pub fn obj_mut(&mut self) -> &mut ObjEnum {
-  //   match self {
-  //     Self::Parent(p) => &mut p.obj,
-  //     Self::Leaf(l) => l.obj.as_mut().unwrap(),
-  //   }
-  // }
+  pub fn obj_mut(&mut self) -> &mut ObjEnum {
+    match self {
+      Self::Parent(p) => &mut p.obj,
+      Self::Leaf(l) => l
+        .obj
+        .as_mut()
+        .expect("Unwrapped obj on leaf that inherits from parent"),
+    }
+  }
 
   pub fn world_bb(&self) -> BoundingBox {
     match self {
@@ -214,17 +230,80 @@ impl SceneNode {
     }
   }
 
-  // pub fn apply_transform_matrix(&mut self, m: &Matrix4<f32>) {
-  //   let obj = match self {
-  //     Self::Parent(p) => &mut p.obj,
-  //     Self::Leaf(l) => l.obj.as_mut().unwrap(),
-  //   };
+  // general but expensive
+  fn recalculate_bounding_boxes_inner(
+    &mut self,
+    nodes: &mut [SceneNode],
+    world_transform: &Matrix4<f32>,
+    parent_obj: &ObjEnum,
+  ) {
+    match self {
+      Self::Leaf(leaf) => {
+        let obj = match leaf.obj.as_ref() {
+          Some(leaf_obj) => leaf_obj,
+          None => parent_obj,
+        };
+        let new_world_transform = world_transform * obj.matrix();
+        leaf.world_bb = leaf.mesh.local_bb.apply_matrix4(&new_world_transform);
+      }
+      Self::Parent(par) => {
+        let obj = &par.obj;
+        let new_world_transform = world_transform * obj.matrix();
+        let mut children = par.children.iter();
 
-  //   match obj {
-  //     ObjEnum::Matrix(own) => *own = m * *own,
-  //     ObjEnum::Obj(obj) => *obj = Render3dObj::from_model_matrix(m * obj.model()),
-  //   }
-  // }
+        let first_child_i = *children.next().unwrap();
+        // bypass rust's double mutable borrow
+        let mut first_child = std::mem::take(&mut nodes[first_child_i]);
+
+        first_child.recalculate_bounding_boxes_inner(nodes, &new_world_transform, obj);
+        let mut world_bb = first_child.world_bb();
+        nodes[first_child_i] = first_child;
+
+        for &child_i in children {
+          let mut child = std::mem::take(&mut nodes[child_i]);
+          child.recalculate_bounding_boxes_inner(nodes, &new_world_transform, obj);
+          world_bb = world_bb.merge_with(&child.world_bb());
+          nodes[child_i] = child;
+        }
+        par.world_bb = world_bb;
+      }
+    }
+  }
+
+  pub fn recalculate_bounding_boxes(&mut self, nodes: &mut [SceneNode]) {
+    match self {
+      Self::Leaf(leaf) => {
+        let obj = match leaf.obj.as_ref() {
+          Some(leaf_obj) => leaf_obj,
+          None => panic!(
+            "Tried to recalculate bounding boxes on leaf that inherits parameters from parent"
+          ),
+        };
+        leaf.world_bb = leaf.mesh.local_bb.apply_matrix4(obj.matrix());
+      }
+      Self::Parent(par) => {
+        let obj = &par.obj;
+        let new_world_transform = obj.matrix();
+
+        let mut children = par.children.iter();
+        let first_child_i = *children.next().unwrap();
+        // bypass rust's double mutable borrow
+        let mut first_child = std::mem::take(&mut nodes[first_child_i]);
+
+        first_child.recalculate_bounding_boxes_inner(nodes, new_world_transform, obj);
+        let mut world_bb = first_child.world_bb();
+        nodes[first_child_i] = first_child;
+
+        for &child_i in children {
+          let mut child = std::mem::take(&mut nodes[child_i]);
+          child.recalculate_bounding_boxes_inner(nodes, new_world_transform, obj);
+          world_bb = world_bb.merge_with(&child.world_bb());
+          nodes[child_i] = child;
+        }
+        par.world_bb = world_bb;
+      }
+    }
+  }
 
   pub fn add_draw_meshes(
     &self,

@@ -292,7 +292,7 @@ pub struct ModelGpuData {
   pub images: Vec<LoadedImageData>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Mesh {
   pub vertices_offset: usize,
   #[allow(dead_code)]

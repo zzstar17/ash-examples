@@ -9,8 +9,8 @@ use crate::{
 
 #[derive(Debug)]
 pub struct Niko {
-  body: usize,
-  lightbulb: usize,
+  _body: usize,
+  _lightbulb: usize,
   pub node: SceneNode,
 }
 
@@ -50,8 +50,8 @@ impl Niko {
     let niko_body = niko.unwrap_parent().children[niko_armature_i];
     let niko_lightbulb = niko.unwrap_parent().children[niko_lightbulb_i];
     Self {
-      body: niko_body,
-      lightbulb: niko_lightbulb,
+      _body: niko_body,
+      _lightbulb: niko_lightbulb,
       node: niko,
     }
   }
