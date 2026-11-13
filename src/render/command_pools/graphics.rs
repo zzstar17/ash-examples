@@ -360,6 +360,14 @@ impl GraphicsCommandBufferPool {
       &scene.child_nodes,
       &scene.last_update_projection_view,
     );
+    self.draw_scene_node_lines(
+      device,
+      color_pipeline,
+      &cube_mesh,
+      &scene.floor,
+      &scene.child_nodes,
+      &scene.last_update_projection_view,
+    );
   }
 
   pub unsafe fn record_draw_world_text(

@@ -3,7 +3,7 @@ use cgmath::Matrix4;
 use crate::{
   asset_loader::{model_loader::AssetLocationData, Mesh},
   render::GraphicsPushConstants,
-  scene::{obj_3d::Render3dObj, BoundingBox},
+  scene::{frustum::Frustum, obj_3d::Render3dObj, BoundingBox},
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -309,11 +309,16 @@ impl SceneNode {
     &self,
     nodes: &[SceneNode],
     parent_transform: Matrix4<f32>,
+    camera_frustum: &Frustum,
     solid: &mut Vec<(GraphicsPushConstants, Mesh)>,
     semi_transparent: &mut Vec<(GraphicsPushConstants, Mesh)>,
   ) {
     match self {
       Self::Leaf(leaf) => {
+        if !leaf.world_bb.is_on_frustum(camera_frustum) {
+          return;
+        }
+
         let transformed;
         if let Some(obj) = leaf.obj.as_ref() {
           let model = match obj {
@@ -335,6 +340,10 @@ impl SceneNode {
         }
       }
       Self::Parent(par) => {
+        if !par.world_bb.is_on_frustum(camera_frustum) {
+          return;
+        }
+
         let model = match par.obj {
           ObjEnum::Matrix(m) => m,
           ObjEnum::Obj(obj) => *obj.model(),
@@ -342,7 +351,7 @@ impl SceneNode {
         let transformed = parent_transform * model;
 
         for &child in par.children.iter() {
-          nodes[child].add_draw_meshes(nodes, transformed, solid, semi_transparent);
+          nodes[child].add_draw_meshes(nodes, transformed, camera_frustum, solid, semi_transparent);
         }
       }
     }

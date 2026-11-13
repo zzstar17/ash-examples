@@ -271,29 +271,35 @@ impl Scene {
       .kakyoin_text
       .linearly_vertically_rotate_to_point(self.camera.position(), rotate_amount);
 
+    let camera_frustum = self.camera.create_frustum();
+
     self.solid_draw_meshes.clear();
     self.semi_transparent_draw_meshes.clear();
     self.niko.add_draw_meshes(
       &self.child_nodes,
       &self.last_update_projection_view,
+      &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
     self.kakyoin.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,
+      &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
     self.test_cube.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,
+      &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
     self.floor.add_draw_meshes(
       &self.child_nodes,
       self.last_update_projection_view,
+      &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );

@@ -1,6 +1,9 @@
 use cgmath::{EuclideanSpace, Matrix4, Point2, Point3, Vector2, Vector3};
 
-use crate::scene::Render3dObj;
+use crate::scene::{
+  frustum::{Frustum, Plane},
+  Render3dObj,
+};
 
 #[derive(Debug, Clone, Copy)]
 pub struct BoundingBox {
@@ -82,6 +85,22 @@ impl BoundingBox {
     let halfwidth = (max - min) / 2.0;
     let center = Point3::from_vec(min + halfwidth);
     Self { center, halfwidth }
+  }
+
+  pub fn is_on_or_forward_plane(&self, plane: Plane) -> bool {
+    let r = self.halfwidth.x * plane.normal.x.abs()
+      + self.halfwidth.y * plane.normal.y.abs()
+      + self.halfwidth.z * plane.normal.z.abs();
+    -r <= plane.get_signed_distance_to_plane(self.center)
+  }
+
+  pub fn is_on_frustum(&self, frustum: &Frustum) -> bool {
+    self.is_on_or_forward_plane(frustum.left_face)
+      && self.is_on_or_forward_plane(frustum.right_face)
+      && self.is_on_or_forward_plane(frustum.top_face)
+      && self.is_on_or_forward_plane(frustum.bottom_face)
+      && self.is_on_or_forward_plane(frustum.near_face)
+      && self.is_on_or_forward_plane(frustum.far_face)
   }
 
   pub fn generate_box_visualization(&self, line_width: f32, buffer: &mut Vec<Matrix4<f32>>) {

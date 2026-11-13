@@ -311,6 +311,9 @@ fn print_tree(node: &gltf::Node, depth: i32) {
   }
   print!(" -");
   print!(" Node {}", node.index());
+  if let Some(mesh) = node.mesh() {
+    print!(" {:?}", mesh.primitives().next().unwrap().bounding_box());
+  }
   print!(" ({})", node.name().unwrap_or("<Unnamed>"));
   println!();
 

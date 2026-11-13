@@ -49,6 +49,7 @@ pub struct TextManager {
   gpu_idle_offset: vk::Offset2D,
   camera_pos_offset: vk::Offset2D,
   camera_front_offset: vk::Offset2D,
+  objects_visible_offset: vk::Offset2D,
 }
 
 impl TextManager {
@@ -129,6 +130,21 @@ impl TextManager {
       &mut device_vertices,
       &mut device_indices,
     );
+    let TextBuildResult {
+      rect: rect_objects_visible,
+      end_offset: objects_visible_offset,
+      ..
+    } = slug.build_text(
+      "Objects visible: ",
+      Self::FONT_SIZE,
+      vk::Offset2D {
+        x: 0,
+        y: -line_dist * 4,
+      },
+      false,
+      &mut device_vertices,
+      &mut device_indices,
+    );
     // simulate longest line
     let SimulateTextBuildResult {
       rect: rect_longest, ..
@@ -142,7 +158,8 @@ impl TextManager {
       .or(rect_gpu_idle)
       .or(rect_longest)
       .or(rect_camera_pos)
-      .or(rect_camera_front);
+      .or(rect_camera_front)
+      .or(rect_objects_visible);
 
     // todo: fix full slug size calculations
     full_size.max[0] += 10.0;
@@ -252,6 +269,7 @@ impl TextManager {
         gpu_idle_offset,
         camera_pos_offset,
         camera_front_offset,
+        objects_visible_offset,
       },
       (line_size, full_size),
       device_staging_required,
@@ -500,6 +518,18 @@ impl TextManager {
       camera_front_text,
       Self::FONT_SIZE,
       self.camera_front_offset,
+      false,
+      &mut self.host_vertices,
+      &mut self.host_indices,
+    );
+    let objects_visible_text = &format!(
+      "{}",
+      scene.solid_draw_meshes.len() + scene.semi_transparent_draw_meshes.len()
+    );
+    self.slug.build_text(
+      objects_visible_text,
+      Self::FONT_SIZE,
+      self.objects_visible_offset,
       false,
       &mut self.host_vertices,
       &mut self.host_indices,

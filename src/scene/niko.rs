@@ -4,7 +4,7 @@ use itertools::Itertools;
 use crate::{
   asset_loader::{model_loader::AssetLocationData, Mesh},
   render::GraphicsPushConstants,
-  scene::{scene_node::ObjEnum, SceneNode},
+  scene::{frustum::Frustum, scene_node::ObjEnum, SceneNode},
 };
 
 #[derive(Debug)]
@@ -60,11 +60,16 @@ impl Niko {
     &self,
     child_nodes: &[SceneNode],
     projection_view: &Matrix4<f32>,
+    camera_frustum: &Frustum,
     solid: &mut Vec<(GraphicsPushConstants, Mesh)>,
     semi_transparent: &mut Vec<(GraphicsPushConstants, Mesh)>,
   ) {
-    self
-      .node
-      .add_draw_meshes(child_nodes, *projection_view, solid, semi_transparent);
+    self.node.add_draw_meshes(
+      child_nodes,
+      *projection_view,
+      camera_frustum,
+      solid,
+      semi_transparent,
+    );
   }
 }

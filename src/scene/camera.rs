@@ -1,6 +1,8 @@
 use std::f32::consts::PI;
 
-use cgmath::{InnerSpace, Matrix4, Point3, Vector3, Vector4};
+use cgmath::{EuclideanSpace, InnerSpace, Matrix4, Point3, Vector3, Vector4};
+
+use crate::scene::frustum::{Frustum, Plane};
 
 use super::UP;
 
@@ -46,8 +48,11 @@ impl Camera {
 /// Camera with dynamic up / down directions.
 pub struct RenderCamera {
   camera: Camera,
-  /// normalized front vector
+  /// normalized front, right and up vectors (from camera view)
   front: Vector3<f32>,
+  right: Vector3<f32>,
+  up: Vector3<f32>,
+
   fov: f32,
   inv_fov_tan: f32,
   aspect_ratio: f32,
@@ -58,19 +63,59 @@ pub struct RenderCamera {
 impl RenderCamera {
   const MAX_FOV: f32 = PI / 1.1;
   const MIN_FOV: f32 = PI / 15.0;
-  const ZOOM_SENTIVITY: f32 = 0.07;
+  const ZOOM_SENSITIVITY: f32 = 0.07;
+
+  const NEAR: f32 = 0.05;
+  const FAR: f32 = 5000.0;
 
   pub fn new(camera: Camera, fov: f32, aspect_ratio: f32) -> Self {
     let front = camera.get_front();
+    let right = front.cross(UP).normalize();
+    let up = right.cross(front);
+
     let inv_fov_tan = Self::get_inv_fov_tan(fov);
 
     Self {
       camera,
       front,
+      right,
+      up,
       fov,
       inv_fov_tan,
       aspect_ratio,
-      projection_matrix: calc_projection_matrix(inv_fov_tan, aspect_ratio),
+      projection_matrix: calc_projection_matrix(inv_fov_tan, aspect_ratio, Self::NEAR, Self::FAR),
+    }
+  }
+
+  pub fn create_frustum(&self) -> Frustum {
+    let near = Self::NEAR;
+    let far = Self::FAR;
+
+    //let half_ver_side = far * (1.0 / self.inv_fov_tan);
+    let half_ver_side = far * (self.fov * 0.5).tan();
+    let half_hor_side = half_ver_side * self.aspect_ratio;
+    let front_mult_far = far * self.front();
+
+    let near_face = Plane::new(self.camera.position + near * self.front, self.front);
+    let far_face = Plane::new(self.camera.position + front_mult_far, -self.front);
+
+    let normal_right = front_mult_far - self.right * half_hor_side;
+    let normal_left = front_mult_far + self.right * half_hor_side;
+    let right_face = Plane::new(self.camera.position, normal_right.cross(self.up));
+    let left_face = Plane::new(self.camera.position, self.up.cross(normal_left));
+
+    let normal_top = front_mult_far - self.up * half_ver_side;
+    let normal_bottom = front_mult_far + self.up * half_ver_side;
+    let top_face = Plane::new(self.camera.position, self.right.cross(normal_top));
+    let bottom_face = Plane::new(self.camera.position, normal_bottom.cross(self.right));
+
+    Frustum {
+      near_face,
+      far_face,
+      right_face,
+      left_face,
+      top_face,
+      bottom_face,
     }
   }
 
@@ -91,11 +136,24 @@ impl RenderCamera {
   }
 
   pub fn view_matrix(&self) -> Matrix4<f32> {
-    Matrix4::look_at_rh(self.camera.position, self.camera.position + self.front, UP)
+    let position = self.camera.position;
+
+    Matrix4 {
+      x: Vector4::new(self.right.x, self.up.x, -self.front.x, 0.0),
+      y: Vector4::new(self.right.y, self.up.y, -self.front.y, 0.0),
+      z: Vector4::new(self.right.z, self.up.z, -self.front.z, 0.0),
+      w: Vector4::new(
+        -position.dot(self.right),
+        -position.dot(self.up),
+        position.dot(self.front),
+        1.0,
+      ),
+    }
   }
 
   fn update_projection_matrix(&mut self) {
-    self.projection_matrix = calc_projection_matrix(self.inv_fov_tan, self.aspect_ratio);
+    self.projection_matrix =
+      calc_projection_matrix(self.inv_fov_tan, self.aspect_ratio, Self::NEAR, Self::FAR);
   }
 
   pub fn projection_matrix(&self) -> &Matrix4<f32> {
@@ -112,7 +170,7 @@ impl RenderCamera {
   }
 
   pub fn zoom_relative(&mut self, amount: f32) {
-    self.fov = (self.fov + (amount * Self::ZOOM_SENTIVITY)).clamp(Self::MIN_FOV, Self::MAX_FOV);
+    self.fov = (self.fov + (amount * Self::ZOOM_SENSITIVITY)).clamp(Self::MIN_FOV, Self::MAX_FOV);
     self.inv_fov_tan = Self::get_inv_fov_tan(self.fov);
     self.update_projection_matrix();
   }
@@ -120,7 +178,10 @@ impl RenderCamera {
   pub fn rotate(&mut self, delta_x: f32, delta_y: f32) {
     self.camera.yaw_relative(delta_x);
     self.camera.pitch_relative(delta_y);
+
     self.front = self.camera.get_front();
+    self.right = self.front.cross(UP).normalize();
+    self.up = self.right.cross(self.front);
   }
 
   pub fn move_forward(&mut self, duration: &std::time::Duration) {
@@ -143,12 +204,12 @@ impl RenderCamera {
 
   pub fn move_left(&mut self, duration: &std::time::Duration) {
     let distance = self.camera.speed * duration.as_secs_f32();
-    self.camera.position -= self.front.cross(UP).normalize() * distance;
+    self.camera.position -= self.right * distance;
   }
 
   pub fn move_right(&mut self, duration: &std::time::Duration) {
     let distance = self.camera.speed * duration.as_secs_f32();
-    self.camera.position += self.front.cross(UP).normalize() * distance;
+    self.camera.position += self.right * distance;
   }
 
   pub fn move_up(&mut self, duration: &std::time::Duration) {
@@ -162,10 +223,12 @@ impl RenderCamera {
   }
 }
 
-fn calc_projection_matrix(inv_fov_tan: f32, aspect_ratio: f32) -> Matrix4<f32> {
-  let far = 1000.0;
-  let near = 0.05;
-
+fn calc_projection_matrix(
+  inv_fov_tan: f32,
+  aspect_ratio: f32,
+  near: f32,
+  far: f32,
+) -> Matrix4<f32> {
   let y_scale = inv_fov_tan;
   let x_scale = y_scale / aspect_ratio;
 

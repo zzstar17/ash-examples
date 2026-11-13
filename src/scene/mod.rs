@@ -2,6 +2,7 @@ use cgmath::{Quaternion, Vector3};
 
 mod aabb;
 mod camera;
+mod frustum;
 mod niko;
 mod obj_3d;
 mod scene;
