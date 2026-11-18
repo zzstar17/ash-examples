@@ -1,8 +1,6 @@
-use std::{
-  ffi::{CStr, CString},
-  path::Path,
-  ptr,
-};
+#[cfg(feature = "vl")]
+use std::ffi::CString;
+use std::{ffi::CStr, path::Path, ptr};
 
 use ash::vk;
 use vkobjects::DeviceManuallyDestroyed;
@@ -61,7 +59,9 @@ impl GraphicsShader {
     } else {
       fragment_path
     });
+    #[cfg(feature = "vl")]
     let vertex_name = CString::new(format!("{} Vertex Shader", name)).unwrap();
+    #[cfg(feature = "vl")]
     let fragment_name = CString::new(format!("{} Fragment Shader", name)).unwrap();
 
     Ok(Self {
@@ -121,6 +121,7 @@ impl GraphicsShader {
       MAIN_FRAG_DEBUG_SHADER_PATH,
       #[cfg(feature = "vl")]
       marker,
+      #[cfg(feature = "vl")]
       "Main",
     )
   }
@@ -139,6 +140,7 @@ impl GraphicsShader {
       SKYBOX_FRAG_DEBUG_SHADER_PATH,
       #[cfg(feature = "vl")]
       marker,
+      #[cfg(feature = "vl")]
       "Skybox",
     )
   }
@@ -157,6 +159,7 @@ impl GraphicsShader {
       COLOR_FRAG_DEBUG_SHADER_PATH,
       #[cfg(feature = "vl")]
       marker,
+      #[cfg(feature = "vl")]
       "Color",
     )
   }
@@ -175,6 +178,7 @@ impl GraphicsShader {
       TEXT_FRAG_DEBUG_SHADER_PATH,
       #[cfg(feature = "vl")]
       marker,
+      #[cfg(feature = "vl")]
       "Text",
     )
   }

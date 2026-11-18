@@ -1,5 +1,7 @@
+#[cfg(feature = "vl")]
+use std::ffi::CString;
 use std::{
-  ffi::{c_void, CString},
+  ffi::c_void,
   marker::PhantomData,
   mem,
   ops::Deref,
@@ -565,7 +567,9 @@ impl Swapchain {
 
     let mut image_finished_presenting_sem: Vec<vk::Semaphore> =
       Vec::with_capacity(image_count as usize);
+    #[allow(unused_variables)]
     for i in 0..image_count {
+      #[cfg(feature = "vl")]
       let name = CString::new(format!(
         "Swapchain {:?}: Image {} finished presenting",
         swapchain, i
@@ -594,7 +598,9 @@ impl Swapchain {
 
     let image_finished_presenting_fence = if device.enabled_extensions.swapchain_maintenance1 {
       let mut fences: Vec<vk::Fence> = Vec::with_capacity(image_count as usize);
+      #[allow(unused_variables)]
       for i in 0..image_count {
+        #[cfg(feature = "vl")]
         let name = CString::new(format!(
           "Swapchain {:?}: Image {} finished presenting",
           swapchain, i

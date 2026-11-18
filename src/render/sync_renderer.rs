@@ -1,4 +1,6 @@
-use std::{ffi::CString, marker::PhantomData, ptr};
+#[cfg(feature = "vl")]
+use std::ffi::CString;
+use std::{marker::PhantomData, ptr};
 
 use ash::vk;
 use vkallocator::HostMemorySyncError;

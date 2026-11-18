@@ -1,4 +1,4 @@
-use cgmath::{EuclideanSpace, Matrix4, Point2, Point3, Vector2, Vector3};
+use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 
 use crate::scene::{
   frustum::{Frustum, Plane},
@@ -26,20 +26,6 @@ impl Default for BoundingBox {
       },
     }
   }
-}
-
-fn rotate_point_around_point(
-  rotation_center: Point2<f32>,
-  point_to_rotate: Point2<f32>,
-  angle_cos: f32,
-  angle_sin: f32,
-) -> Point2<f32> {
-  let shifted = point_to_rotate - rotation_center;
-  let rotated = Vector2::new(
-    shifted.x * angle_cos - shifted.y * angle_sin,
-    shifted.y * angle_cos - shifted.x * angle_sin,
-  );
-  rotation_center + rotated
 }
 
 impl BoundingBox {
