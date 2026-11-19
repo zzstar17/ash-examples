@@ -15,9 +15,8 @@ use crate::{
   scene::{
     camera::{Camera, RenderCamera},
     niko::Niko,
-    quaternion_from_angle,
-    scene_node::ObjEnum,
-    Render3dObj, SceneNode, CAMERA_KEYBOARD_SENSITIVITY, CAMERA_MOUSE_SENSITIVITY,
+    quaternion_from_angle, Render3dObj, SceneNode, CAMERA_KEYBOARD_SENSITIVITY,
+    CAMERA_MOUSE_SENSITIVITY,
   },
   RESOLUTION,
 };
@@ -30,12 +29,13 @@ pub struct Scene {
 
   pub camera: RenderCamera,
 
-  pub child_nodes: Vec<SceneNode>,
+  pub nodes: Vec<SceneNode>,
   pub niko: Niko,
-  pub kakyoin: SceneNode,
-  pub floor: SceneNode,
+  pub kakyoin: usize,
+  pub kakyoin_pos: Point3<f32>,
+  pub floor: usize,
+  pub test_cube: usize,
   pub crosshair: [(Render3dObj, [f32; 4]); 3],
-  pub test_cube: SceneNode,
 
   pub niko_text: Render3dObj,
   pub kakyoin_text: Render3dObj,
@@ -85,9 +85,8 @@ impl Scene {
       },
     )
     .model();
-    let gltf_transform_obj = ObjEnum::Matrix(gltf_transform);
 
-    let mut child_nodes = Vec::new();
+    let mut nodes = Vec::new();
     let scene = asset_locations.gltf.scenes().next().unwrap();
     let scene_collection = scene.nodes().next().unwrap();
 
@@ -95,36 +94,38 @@ impl Scene {
       &asset_locations,
       &scene_collection,
       &gltf_transform,
-      &mut child_nodes,
+      &mut nodes,
     );
 
-    let kakyoin = SceneNode::from_gltf(
+    let (kakyoin, kakyoin_m) = SceneNode::from_gltf(
       &asset_locations,
       scene_collection
         .children()
         .find(|node| node.name().unwrap() == "Kakyoin")
         .unwrap(),
       None,
-      Some(gltf_transform_obj),
-      true,
-      &mut child_nodes,
+      Some(&gltf_transform),
+      None,
+      &mut nodes,
     );
+    let kakyoin_obj = Render3dObj::from_model_matrix(kakyoin_m);
+    let kakyoin_pos = kakyoin_obj.position();
 
-    let floor = SceneNode::from_gltf(
+    let (floor, _floor_m) = SceneNode::from_gltf(
       &asset_locations,
       scene_collection
         .children()
         .find(|node| node.name().unwrap() == "Floor")
         .unwrap(),
       None,
-      Some(gltf_transform_obj),
-      true,
-      &mut child_nodes,
+      Some(&gltf_transform),
+      None,
+      &mut nodes,
     );
 
     let mut mesh = asset_locations.meshes[asset_locations.cube_mesh_index];
-    mesh.image_index = floor.unwrap_leaf().mesh.image_index;
-    let test_cube = SceneNode::from_obj(
+    mesh.image_index = nodes[floor].leaf_data.unwrap().mesh.image_index;
+    let test_cube_node = SceneNode::from_obj(
       Render3dObj::from_full(
         Point3 {
           x: 0.0,
@@ -140,6 +141,8 @@ impl Scene {
       ),
       mesh,
     );
+    let test_cube = nodes.len();
+    nodes.push(test_cube_node);
 
     let crosshair: [(Render3dObj, [f32; 4]); 3] = [
       (
@@ -168,11 +171,10 @@ impl Scene {
       ),
     ];
 
-    // let mut niko_text = niko.obj;
     let text_size = 0.2;
     let mut niko_text = Render3dObj::from_full(
-      niko.node.obj().unwrap_obj().position(),
-      niko.node.obj().unwrap_obj().rotation,
+      niko.position,
+      Quaternion::new(1.0, 0.0, 0.0, 0.0),
       Vector3 {
         x: text_size,
         y: text_size,
@@ -180,7 +182,6 @@ impl Scene {
       },
     );
     niko_text.move_y(-1.3);
-    let kakyoin_obj = kakyoin.obj().unwrap_obj();
     let mut kakyoin_text = Render3dObj::from_full(
       kakyoin_obj.position(),
       kakyoin_obj.rotation,
@@ -200,9 +201,10 @@ impl Scene {
 
       camera,
 
-      child_nodes,
+      nodes,
       niko,
       kakyoin,
+      kakyoin_pos,
       floor,
       test_cube,
       crosshair,
@@ -251,16 +253,13 @@ impl Scene {
     // rotate around y axis
     let rotation = quaternion_from_angle(angle, Vector3::new(0.0, 1.0, 0.0));
 
-    // todo: implement more efficient aabb recalculation for axis rotations
-    self.kakyoin.obj_mut().unwrap_obj_mut().rotate(rotation);
-    self
-      .kakyoin
-      .recalculate_bounding_boxes(&mut self.child_nodes);
-    self.niko.node.obj_mut().unwrap_obj_mut().rotate(rotation);
-    self
-      .niko
-      .node
-      .recalculate_bounding_boxes(&mut self.child_nodes);
+    SceneNode::rotate_and_recalculate(self.kakyoin, rotation, self.kakyoin_pos, &mut self.nodes);
+    SceneNode::rotate_and_recalculate(
+      self.niko.node,
+      rotation,
+      self.niko.position,
+      &mut self.nodes,
+    );
 
     // make text gradually rotate towards the camera
     let rotate_amount = 2.0 * time_since_last_update.as_secs_f32();
@@ -276,28 +275,31 @@ impl Scene {
     self.solid_draw_meshes.clear();
     self.semi_transparent_draw_meshes.clear();
     self.niko.add_draw_meshes(
-      &self.child_nodes,
+      &self.nodes,
       &self.last_update_projection_view,
       &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
-    self.kakyoin.add_draw_meshes(
-      &self.child_nodes,
+    SceneNode::add_draw_meshes(
+      self.kakyoin,
+      &self.nodes,
       self.last_update_projection_view,
       &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
-    self.test_cube.add_draw_meshes(
-      &self.child_nodes,
+    SceneNode::add_draw_meshes(
+      self.test_cube,
+      &self.nodes,
       self.last_update_projection_view,
       &camera_frustum,
       &mut self.solid_draw_meshes,
       &mut self.semi_transparent_draw_meshes,
     );
-    self.floor.add_draw_meshes(
-      &self.child_nodes,
+    SceneNode::add_draw_meshes(
+      self.floor,
+      &self.nodes,
       self.last_update_projection_view,
       &camera_frustum,
       &mut self.solid_draw_meshes,

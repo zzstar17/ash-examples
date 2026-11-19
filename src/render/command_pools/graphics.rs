@@ -253,75 +253,71 @@ impl GraphicsCommandBufferPool {
     device: &ash::Device,
     color_pipeline: &Pipeline,
     cube_mesh: &Mesh,
-    node: &SceneNode,
+    node_i: usize,
     nodes: &[SceneNode],
     projection_view: &Matrix4<f32>,
   ) {
     let cb = self.main;
-    match node {
-      SceneNode::Leaf(leaf) => {
-        self.draw_buffer.clear();
-        leaf
-          .world_bb
-          .generate_box_visualization(0.004 / 2.0, &mut self.draw_buffer);
-        for m in self.draw_buffer.iter() {
-          let pc = ColorPushConstants {
-            matrix: *projection_view * *m,
-            color: [0.0, 0.0, 0.0, 1.0],
-          };
-          device.cmd_push_constants(
-            cb,
-            color_pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&pc),
-          );
-          device.cmd_draw_indexed(
-            cb,
-            cube_mesh.indices_count as u32,
-            1,
-            cube_mesh.indices_offset as u32,
-            cube_mesh.vertices_offset as i32,
-            0,
-          );
-        }
-      }
-      SceneNode::Parent(par) => {
-        self.draw_buffer.clear();
-        par
-          .world_bb
-          .generate_box_visualization(0.003 / 2.0, &mut self.draw_buffer);
-        for m in self.draw_buffer.iter() {
-          let pc = ColorPushConstants {
-            matrix: *projection_view * *m,
-            color: [0.5, 0.5, 0.5, 1.0],
-          };
-          device.cmd_push_constants(
-            cb,
-            color_pipeline.layout,
-            vk::ShaderStageFlags::VERTEX,
-            0,
-            utility::any_as_u8_slice(&pc),
-          );
-          device.cmd_draw_indexed(
-            cb,
-            cube_mesh.indices_count as u32,
-            1,
-            cube_mesh.indices_offset as u32,
-            cube_mesh.vertices_offset as i32,
-            0,
-          );
-        }
 
-        for &child in par.children.iter() {
-          self.draw_scene_node_lines(
-            device,
-            color_pipeline,
-            cube_mesh,
-            &nodes[child],
-            nodes,
-            projection_view,
-          );
+    let initial_node = node_i;
+    let mut cur_i = node_i;
+    let mut cur_node = &nodes[cur_i];
+    loop {
+      self.draw_buffer.clear();
+
+      let (line_size, color) = if cur_node.leaf_data.is_some() {
+        (0.004 / 2.0, [0.0, 0.0, 0.0, 1.0])
+      } else {
+        (0.003 / 2.0, [0.5, 0.5, 0.5, 1.0])
+      };
+
+      cur_node
+        .world_bb
+        .generate_box_visualization(line_size, &mut self.draw_buffer);
+      for m in self.draw_buffer.iter() {
+        let pc = ColorPushConstants {
+          matrix: *projection_view * *m,
+          color,
+        };
+        device.cmd_push_constants(
+          cb,
+          color_pipeline.layout,
+          vk::ShaderStageFlags::VERTEX,
+          0,
+          utility::any_as_u8_slice(&pc),
+        );
+        device.cmd_draw_indexed(
+          cb,
+          cube_mesh.indices_count as u32,
+          1,
+          cube_mesh.indices_offset as u32,
+          cube_mesh.vertices_offset as i32,
+          0,
+        );
+      }
+
+      // parent
+      if cur_node.leaf_data.is_none() {
+        cur_i += 1;
+        cur_node = &nodes[cur_i];
+        continue;
+      }
+
+      loop {
+        if let Some(brother) = cur_node.next_brother {
+          cur_i = brother;
+          cur_node = &nodes[brother];
+          break;
+        } else {
+          if cur_i == initial_node {
+            return;
+          }
+          let parent = cur_node.parent.unwrap();
+          if parent == initial_node {
+            return;
+          } else {
+            cur_node = &nodes[parent];
+          }
         }
       }
     }
@@ -340,32 +336,32 @@ impl GraphicsCommandBufferPool {
       device,
       color_pipeline,
       &cube_mesh,
-      &scene.test_cube,
-      &scene.child_nodes,
+      scene.test_cube,
+      &scene.nodes,
       &scene.last_update_projection_view,
     );
     self.draw_scene_node_lines(
       device,
       color_pipeline,
       &cube_mesh,
-      &scene.kakyoin,
-      &scene.child_nodes,
+      scene.kakyoin,
+      &scene.nodes,
       &scene.last_update_projection_view,
     );
     self.draw_scene_node_lines(
       device,
       color_pipeline,
       &cube_mesh,
-      &scene.niko.node,
-      &scene.child_nodes,
+      scene.niko.node,
+      &scene.nodes,
       &scene.last_update_projection_view,
     );
     self.draw_scene_node_lines(
       device,
       color_pipeline,
       &cube_mesh,
-      &scene.floor,
-      &scene.child_nodes,
+      scene.floor,
+      &scene.nodes,
       &scene.last_update_projection_view,
     );
   }

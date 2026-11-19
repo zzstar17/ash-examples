@@ -1,146 +1,66 @@
-use cgmath::Matrix4;
+use cgmath::{EuclideanSpace, Matrix4, Point3, Quaternion, Rotation};
 
 use crate::{
   asset_loader::{model_loader::AssetLocationData, Mesh},
   render::GraphicsPushConstants,
-  scene::{frustum::Frustum, obj_3d::Render3dObj, BoundingBox},
+  scene::{frustum::Frustum, BoundingBox, Render3dObj},
 };
 
 #[derive(Debug, Clone, Copy)]
-pub enum ObjEnum {
-  Obj(Render3dObj),
-  Matrix(Matrix4<f32>),
-}
-
-impl ObjEnum {
-  pub fn unwrap_obj(&self) -> &Render3dObj {
-    match self {
-      ObjEnum::Obj(obj) => obj,
-      ObjEnum::Matrix(_) => panic!(),
-    }
-  }
-
-  pub fn unwrap_obj_mut(&mut self) -> &mut Render3dObj {
-    match self {
-      ObjEnum::Obj(obj) => obj,
-      ObjEnum::Matrix(_) => panic!(),
-    }
-  }
-
-  pub fn matrix(&self) -> &Matrix4<f32> {
-    match self {
-      ObjEnum::Obj(obj) => obj.model(),
-      ObjEnum::Matrix(m) => m,
-    }
-  }
-}
-
-#[derive(Debug, Clone)]
-pub enum SceneNode {
-  Parent(SceneNodeParent),
-  Leaf(SceneNodeLeaf),
-}
-
-#[derive(Debug, Clone)]
-pub struct SceneNodeParent {
-  pub obj: ObjEnum,
-
+pub struct SceneNode {
   pub world_bb: BoundingBox,
-  pub children: Vec<usize>,
+
+  // Always None on parent and Some on leaf
+  pub leaf_data: Option<LeafData>,
+
+  // next brother index in node list
+  pub next_brother: Option<usize>,
+  pub parent: Option<usize>,
 }
 
-#[derive(Debug, Clone)]
-pub struct SceneNodeLeaf {
-  pub obj: Option<ObjEnum>,
-
-  pub world_bb: BoundingBox,
+#[derive(Debug, Clone, Copy)]
+pub struct LeafData {
   pub mesh: Mesh,
+  pub obj: Render3dObj,
 }
 
 impl Default for SceneNode {
   fn default() -> Self {
-    Self::Leaf(SceneNodeLeaf {
-      obj: None,
+    Self {
       world_bb: BoundingBox::default(),
-      mesh: Mesh::default(),
-    })
+      leaf_data: None,
+      next_brother: None,
+      parent: None,
+    }
   }
 }
 
 impl SceneNode {
-  pub fn unwrap_leaf(&self) -> &SceneNodeLeaf {
-    match self {
-      Self::Leaf(l) => l,
-      Self::Parent(_p) => panic!(),
-    }
-  }
-
-  pub fn unwrap_parent(&self) -> &SceneNodeParent {
-    match self {
-      Self::Leaf(_l) => panic!(),
-      Self::Parent(p) => p,
-    }
-  }
-
-  pub fn obj(&self) -> &ObjEnum {
-    match self {
-      Self::Parent(p) => &p.obj,
-      Self::Leaf(l) => l
-        .obj
-        .as_ref()
-        .expect("Unwrapped obj on leaf that inherits from parent"),
-    }
-  }
-
-  pub fn obj_mut(&mut self) -> &mut ObjEnum {
-    match self {
-      Self::Parent(p) => &mut p.obj,
-      Self::Leaf(l) => l
-        .obj
-        .as_mut()
-        .expect("Unwrapped obj on leaf that inherits from parent"),
-    }
-  }
-
-  pub fn world_bb(&self) -> BoundingBox {
-    match self {
-      Self::Parent(p) => p.world_bb,
-      Self::Leaf(l) => l.world_bb,
-    }
-  }
-
   pub fn from_obj(obj: Render3dObj, mesh: Mesh) -> Self {
-    let world_bb = mesh.local_bb.apply_matrix4(&obj.model_matrix);
+    let world_bb = mesh.local_bb.apply_matrix4(obj.model());
 
-    Self::Leaf(SceneNodeLeaf {
-      obj: Some(ObjEnum::Obj(obj)),
+    Self {
       world_bb,
-      mesh,
-    })
+      leaf_data: Some(LeafData { mesh, obj }),
+      next_brother: None,
+      parent: None,
+    }
   }
 
   pub fn from_gltf(
     assets: &AssetLocationData,
     node: gltf::Node,
     world_transform: Option<&Matrix4<f32>>,
-    parent_transform: Option<ObjEnum>,
-    modifiable: bool,
-    join: &mut Vec<Self>,
-  ) -> Self {
-    let obj = if modifiable {
-      if let Some(parent_t) = parent_transform {
-        let m = Matrix4::from(node.transform().matrix());
-        ObjEnum::Obj(Render3dObj::from_model_matrix(parent_t.matrix() * m))
-      } else {
-        ObjEnum::Obj(Render3dObj::from_gltf_transform(node.transform()))
-      }
+    parent_transform: Option<&Matrix4<f32>>,
+    parent: Option<usize>,
+    node_stack: &mut Vec<Self>,
+  ) -> (usize, Matrix4<f32>) {
+    // local transform
+    let m = Matrix4::from(node.transform().matrix());
+    let local_transform = if let Some(parent_t) = parent_transform {
+      parent_t * m
     } else {
-      let m = Matrix4::from(node.transform().matrix());
-      if let Some(parent_t) = parent_transform {
-        ObjEnum::Matrix(parent_t.matrix() * m)
-      } else {
-        ObjEnum::Matrix(m)
-      }
+      m
     };
 
     // todo: 2 comes from square and cube mesh
@@ -153,205 +73,217 @@ impl SceneNode {
       let mesh = mesh_opt.expect("Scene contains leaf node without mesh");
 
       let new_world_transform = if let Some(transform) = world_transform {
-        transform * obj.matrix()
+        transform * local_transform
       } else {
-        *obj.matrix()
+        local_transform
       };
       let world_bb = mesh.local_bb.apply_matrix4(&new_world_transform);
 
-      Self::Leaf(SceneNodeLeaf {
-        obj: Some(obj),
+      let leaf = Self {
         world_bb,
-        mesh,
-      })
+        leaf_data: Some(LeafData {
+          mesh,
+          obj: Render3dObj::from_model_matrix(new_world_transform),
+        }),
+        next_brother: None,
+        parent,
+      };
+      let i = node_stack.len();
+      node_stack.push(leaf);
+      (i, new_world_transform)
     } else if mesh_opt.is_none() && children_len == 1 {
+      // pass through
       Self::from_gltf(
         assets,
         node.children().next().unwrap(),
         world_transform,
-        Some(obj),
-        false,
-        join,
+        Some(&local_transform),
+        parent,
+        node_stack,
       )
     } else {
       let new_world_transform = if let Some(transform) = world_transform {
-        transform * obj.matrix()
+        transform * local_transform
       } else {
-        *obj.matrix()
+        local_transform
       };
 
-      let mut children;
+      let parent_node = Self {
+        world_bb: BoundingBox::default(), // overwritten later
+        next_brother: None,
+        leaf_data: None,
+        parent,
+      };
+      let parent_i = node_stack.len();
+      node_stack.push(parent_node);
+
+      let mut last_child_i;
       let mut children_iter = node.children();
       let mut world_bb = if let Some(mesh) = mesh_opt {
-        children = Vec::with_capacity(children_len + 1);
-
         let world_bb = mesh.local_bb.apply_matrix4(&new_world_transform);
-        let new = Self::Leaf(SceneNodeLeaf {
-          obj: None,
-          mesh,
+        let new = Self {
           world_bb,
-        });
-        join.push(new);
-        children.push(join.len() - 1);
+          leaf_data: Some(LeafData {
+            mesh,
+            obj: Render3dObj::from_model_matrix(new_world_transform),
+          }),
+          next_brother: None,
+          parent: Some(parent_i),
+        };
+        last_child_i = node_stack.len();
+        node_stack.push(new);
 
         world_bb
       } else {
-        children = Vec::with_capacity(children_len);
-
         // add first child
-        let new = Self::from_gltf(
+        let (new, _child_transform) = Self::from_gltf(
           assets,
           children_iter.next().unwrap(),
           Some(&new_world_transform),
           None,
-          false,
-          join,
+          Some(parent_i),
+          node_stack,
         );
-        let bb = new.world_bb();
-        join.push(new);
-        children.push(join.len() - 1);
+        last_child_i = new;
 
-        bb
+        node_stack[new].world_bb
       };
+      debug_assert_eq!(parent_i + 1, last_child_i);
 
       for child in children_iter {
-        let new = Self::from_gltf(assets, child, Some(&new_world_transform), None, false, join);
-        let bb = new.world_bb();
-        join.push(new);
-        children.push(join.len() - 1);
+        let (new, _child_transform) = Self::from_gltf(
+          assets,
+          child,
+          Some(&new_world_transform),
+          None,
+          Some(parent_i),
+          node_stack,
+        );
+        node_stack[last_child_i].next_brother = Some(new);
+        last_child_i = new;
 
-        world_bb = world_bb.merge_with(&bb)
+        world_bb = world_bb.merge_with(&node_stack[new].world_bb)
       }
-      Self::Parent(SceneNodeParent {
-        obj,
-        children,
-        world_bb,
-      })
+
+      node_stack[parent_i].world_bb = world_bb;
+      (parent_i, new_world_transform)
     }
   }
 
   // general but expensive
-  fn recalculate_bounding_boxes_inner(
-    &mut self,
+  /// Rotate around point and recalculate bounding boxes
+  pub fn rotate_and_recalculate(
+    node_i: usize,
+    rotation: Quaternion<f32>,
+    rotation_point: Point3<f32>,
     nodes: &mut [SceneNode],
-    world_transform: &Matrix4<f32>,
-    parent_obj: &ObjEnum,
   ) {
-    match self {
-      Self::Leaf(leaf) => {
-        let obj = match leaf.obj.as_ref() {
-          Some(leaf_obj) => leaf_obj,
-          None => parent_obj,
-        };
-        let new_world_transform = world_transform * obj.matrix();
-        leaf.world_bb = leaf.mesh.local_bb.apply_matrix4(&new_world_transform);
-      }
-      Self::Parent(par) => {
-        let obj = &par.obj;
-        let new_world_transform = world_transform * obj.matrix();
-        let mut children = par.children.iter();
+    let initial_node = node_i;
+    let mut cur_i = node_i;
+    let mut cur_node = &mut nodes[cur_i];
 
-        let first_child_i = *children.next().unwrap();
-        // bypass rust's double mutable borrow
-        let mut first_child = std::mem::take(&mut nodes[first_child_i]);
+    loop {
+      match cur_node.leaf_data.as_mut() {
+        // leaf
+        Some(leaf) => {
+          let rotation_vec = rotation_point.to_vec();
+          let translated_point =
+            rotation.rotate_point(leaf.obj.position() - rotation_vec) + rotation_vec;
+          leaf.obj.set_position(translated_point);
+          leaf.obj.rotate(rotation);
 
-        first_child.recalculate_bounding_boxes_inner(nodes, &new_world_transform, obj);
-        let mut world_bb = first_child.world_bb();
-        nodes[first_child_i] = first_child;
-
-        for &child_i in children {
-          let mut child = std::mem::take(&mut nodes[child_i]);
-          child.recalculate_bounding_boxes_inner(nodes, &new_world_transform, obj);
-          world_bb = world_bb.merge_with(&child.world_bb());
-          nodes[child_i] = child;
+          cur_node.world_bb = leaf.mesh.local_bb.apply_matrix4(leaf.obj.model());
         }
-        par.world_bb = world_bb;
-      }
-    }
-  }
-
-  pub fn recalculate_bounding_boxes(&mut self, nodes: &mut [SceneNode]) {
-    match self {
-      Self::Leaf(leaf) => {
-        let obj = match leaf.obj.as_ref() {
-          Some(leaf_obj) => leaf_obj,
-          None => panic!(
-            "Tried to recalculate bounding boxes on leaf that inherits parameters from parent"
-          ),
-        };
-        leaf.world_bb = leaf.mesh.local_bb.apply_matrix4(obj.matrix());
-      }
-      Self::Parent(par) => {
-        let obj = &par.obj;
-        let new_world_transform = obj.matrix();
-
-        let mut children = par.children.iter();
-        let first_child_i = *children.next().unwrap();
-        // bypass rust's double mutable borrow
-        let mut first_child = std::mem::take(&mut nodes[first_child_i]);
-
-        first_child.recalculate_bounding_boxes_inner(nodes, new_world_transform, obj);
-        let mut world_bb = first_child.world_bb();
-        nodes[first_child_i] = first_child;
-
-        for &child_i in children {
-          let mut child = std::mem::take(&mut nodes[child_i]);
-          child.recalculate_bounding_boxes_inner(nodes, new_world_transform, obj);
-          world_bb = world_bb.merge_with(&child.world_bb());
-          nodes[child_i] = child;
+        // parent
+        None => {
+          cur_i += 1;
+          cur_node = &mut nodes[cur_i];
+          continue;
         }
-        par.world_bb = world_bb;
+      }
+
+      loop {
+        if let Some(brother) = cur_node.next_brother {
+          cur_node = &mut nodes[brother];
+          cur_i = brother;
+          break;
+        } else {
+          if cur_i == initial_node {
+            return;
+          }
+          let parent = cur_node.parent.unwrap();
+
+          // recalculate parent bounding box
+          let first_child = nodes[parent + 1];
+          let mut parent_bb = first_child.world_bb;
+          let mut cur_brother = first_child.next_brother;
+          while let Some(brother) = cur_brother {
+            parent_bb = parent_bb.merge_with(&nodes[brother].world_bb);
+            cur_brother = nodes[brother].next_brother;
+          }
+          nodes[parent].world_bb = parent_bb;
+
+          if parent == initial_node {
+            return;
+          } else {
+            cur_node = &mut nodes[parent];
+          }
+        }
       }
     }
   }
 
   pub fn add_draw_meshes(
-    &self,
+    node_i: usize,
     nodes: &[SceneNode],
-    parent_transform: Matrix4<f32>,
+    projection_view: Matrix4<f32>,
     camera_frustum: &Frustum,
     solid: &mut Vec<(GraphicsPushConstants, Mesh)>,
     semi_transparent: &mut Vec<(GraphicsPushConstants, Mesh)>,
   ) {
-    match self {
-      Self::Leaf(leaf) => {
-        if !leaf.world_bb.is_on_frustum(camera_frustum) {
-          return;
-        }
+    let initial_node = node_i;
+    let mut cur_i = node_i;
+    let mut cur_node = &nodes[cur_i];
+    loop {
+      if cur_node.world_bb.is_on_frustum(camera_frustum) {
+        match cur_node.leaf_data.as_ref() {
+          // leaf
+          Some(leaf) => {
+            let transformed = projection_view * leaf.obj.model();
 
-        let transformed;
-        if let Some(obj) = leaf.obj.as_ref() {
-          let model = match obj {
-            ObjEnum::Matrix(m) => *m,
-            ObjEnum::Obj(obj) => *obj.model(),
-          };
-          transformed = parent_transform * model;
-        } else {
-          transformed = parent_transform;
-        }
-
-        let pc = GraphicsPushConstants {
-          matrix: transformed,
-        };
-        if leaf.mesh.semi_transparent {
-          semi_transparent.push((pc, leaf.mesh));
-        } else {
-          solid.push((pc, leaf.mesh));
+            let pc = GraphicsPushConstants {
+              matrix: transformed,
+            };
+            if leaf.mesh.semi_transparent {
+              semi_transparent.push((pc, leaf.mesh));
+            } else {
+              solid.push((pc, leaf.mesh));
+            }
+          }
+          // parent
+          None => {
+            cur_i += 1;
+            cur_node = &nodes[cur_i];
+            continue;
+          }
         }
       }
-      Self::Parent(par) => {
-        if !par.world_bb.is_on_frustum(camera_frustum) {
-          return;
-        }
 
-        let model = match par.obj {
-          ObjEnum::Matrix(m) => m,
-          ObjEnum::Obj(obj) => *obj.model(),
-        };
-        let transformed = parent_transform * model;
-
-        for &child in par.children.iter() {
-          nodes[child].add_draw_meshes(nodes, transformed, camera_frustum, solid, semi_transparent);
+      loop {
+        if let Some(brother) = cur_node.next_brother {
+          cur_i = brother;
+          cur_node = &nodes[brother];
+          break;
+        } else {
+          if cur_i == initial_node {
+            return;
+          }
+          let parent = cur_node.parent.unwrap();
+          if parent == initial_node {
+            return;
+          } else {
+            cur_node = &nodes[parent];
+          }
         }
       }
     }
